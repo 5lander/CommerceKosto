@@ -1,0 +1,8 @@
+
+audit:forbidden  FALLO — 1 infraccion(es)
+
+  [no-any]  El tipo `any`, en cualquiera de sus formas
+     por que: `any` apaga el verificador de tipos justo donde mas hace falta. Usar `unknown` y estrechar.
+     norma:   CLAUDE.md §3 · AUDITORIA.md B1
+     apps/api/test/integracion/violacion.spec.ts:4  const x = { a: 1 } as any;
+

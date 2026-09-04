@@ -16,20 +16,27 @@ Destranca: dominio, marca, correo transaccional. Ver `docs/FASE0-CHECKLIST.md` A
 
 ---
 
-## D2 — Versiones exactas del stack 🔴
+## D2 — Versiones exactas del stack ✅
 
-**Bloquea:** el cierre de P0.
+**Resuelta en la fase PLAN de P0, el 2026-08-27.** Los seis puntos se verificaron en fuente oficial el **2026-08-26**, con verificación adversarial independiente por punto. El detalle completo, con citas textuales y enlaces, está en **`docs/decisiones/ADR-001-versiones-del-stack.md`**.
 
-Hay una propuesta de versiones en `CLAUDE.md` §1, derivada de las cadencias públicas de cada proyecto. **No son lecturas de fuente oficial.** En la fase PLAN de P0, Claude Code confirma los seis puntos de la tabla de `CLAUDE.md` §1 y escribe **ADR-001** con las fechas confirmadas.
+| Componente | Versión fijada | Fin de soporte confirmado |
+|---|---|---|
+| Node.js | **24.20.0** (Active LTS) | **2028-04-30** |
+| PostgreSQL | **18.6** (GA 2025-09-25) | **2030-11-14** |
+| NestJS | **11.2.3** | Sin política publicada |
+| Prisma | **7.10.0**, versión **exacta** | Sin política publicada |
+| Next.js (P12) | **16.3.3** | **~2027-10-21** |
 
-Propuesta de partida: Node 24 LTS · PostgreSQL 18 · NestJS 11 · Prisma 6 · Next.js 16.
+**Lo que la propuesta de partida tenía mal:**
 
-**Dos avisos con consecuencia real:**
+- Decía **«Prisma 6»**: estaba desactualizada por dos majors. La estable es 7.10.0.
+- Decía que **Next.js «no tiene LTS»**: sí publica política formal, de dos años por major. Pero durante el Maintenance LTS los cambios rompedores llegan como semver-**minor**, así que la consecuencia de cero lógica de negocio en el frontend se refuerza.
+- **Node 26 todavía no ha promovido a LTS.** Promueve el **2026-10-28**. Se arranca en 24 y se planifica el salto (ítem C7 de `docs/FASE0-CHECKLIST.md`). No adelantarlo: NestJS 11 aún no prueba Node 26 en su CI.
 
-- **Node 20 alcanzó su fin de soporte en abril de 2026.** No usarlo.
-- **Node 24 vence en abril de 2028**, poco menos de dos años. Node 26 promueve a LTS hacia octubre de 2026 con soporte hasta ~abril de 2029. Si al ejecutar P0 ya promovió, usar 26. Si no, arrancar en 24 y planificar el salto.
+**Trampa operativa confirmada:** el dist-tag `latest` de npm apunta a `prisma@8.0.0-rc.12`. Un `npm install prisma` sin versión fijada **instala un Release Candidate**. La versión va exacta, sin `^` ni `~`.
 
-No bloquea empezar a trabajar; bloquea **cerrar** P0 sin el ADR.
+**Node 20 alcanzó su fin de soporte el 2026-04-30.** No usarlo.
 
 ---
 
@@ -37,7 +44,9 @@ No bloquea empezar a trabajar; bloquea **cerrar** P0 sin el ADR.
 
 **Confirmada por el usuario: Prisma**, con las tres barreras de aislamiento de `CLAUDE.md` §4.1 implementadas completas.
 
-**El problema.** Prisma **no tiene soporte RLS nativo**. El patrón obligado es transacción interactiva + `SET LOCAL` inyectado mediante Client Extensions (`$extends`), y tiene caveats conocidos con connection pooling. Drizzle ORM, en cambio, declara políticas RLS **en el esquema** (`pgPolicy`, `pgRole`) y da control explícito de la conexión, lo que reduce la probabilidad de ejecutar un query en una conexión sin contexto de tenant.
+**Versión fijada: Prisma 7.10.0, exacta** (ver D2 y ADR-001). La propuesta original decía «Prisma 6»: estaba desactualizada por dos majors.
+
+**El problema.** Prisma 7 **no tiene soporte RLS nativo**. El patrón obligado es transacción interactiva + `SET LOCAL` inyectado mediante Client Extensions (`$extends`), y tiene caveats conocidos con connection pooling. Drizzle ORM, en cambio, declara políticas RLS **en el esquema** (`pgPolicy`, `pgRole`) y da control explícito de la conexión, lo que reduce la probabilidad de ejecutar un query en una conexión sin contexto de tenant.
 
 **Por qué Prisma igual.** Tres razones:
 
@@ -49,12 +58,21 @@ No bloquea empezar a trabajar; bloquea **cerrar** P0 sin el ADR.
 
 - Un único punto centralizado con `$extends` que fuerce transacción + `SET LOCAL`
 - Regla de `audit:forbidden` que impida usar el cliente fuera de ese envoltorio
-- Prueba explícita bajo **PgBouncer en modo transacción** con `?pgbouncer=true` antes de producción
+- Prueba explícita bajo **PgBouncer en modo transacción** antes de producción. ⚠️ Verificado en ADR-001: Prisma ya **no** recomienda `?pgbouncer=true` desde PgBouncer 1.21.0. Sigue exigiendo modo transacción, `max_prepared_statements > 0` y conexión directa separada para el CLI
 - Test de dos tenants que falla si el envoltorio se omite
 
 **La decisión está confirmada, las condiciones no son opcionales.** Confirmar Prisma no elimina el problema que Drizzle resolvía de fábrica: lo traslada a la barrera 1 y al envoltorio de `$extends`. Si esas cuatro condiciones no están completas al cerrar P1, el aislamiento depende de que nadie se equivoque nunca, y eso no es una garantía.
 
-**Sigue siendo relevante verificar en P0** si Prisma publicó soporte RLS nativo (punto 4 de la tabla de `CLAUDE.md` §1). Si lo hizo, simplifica la barrera 2 y hay que actualizar ADR-002.
+### Verificado en P0: sí existe RLS nativo, pero no cambia la decisión
+
+El punto 4 de la tabla de `CLAUDE.md` §1 resultó **positivo pero condicionado**, y se ejecutó la parada. Lo confirmado el 2026-08-26:
+
+- **Prisma 8 introduce RLS declarativo nativo**: marcador `@@rls` fail-closed, bloques `policy_select` en PSL que cubren *"every operation, not just SELECT"*, declaración equivalente desde contratos TypeScript, verificación de roles con `db verify`, e introspección de políticas existentes con `contract infer`.
+- **Prisma 8 es Release Candidate, no GA.** El changelog oficial dice *"Scope and behavior may still change"*. No tiene página de documentación de RLS (404), se anunció como Early Access, su runtime es otro paquete (`@prisma/orm-postgres`), y su documentación no cubre PgBouncer ni pooling externo.
+- **Y lo decisivo: el RLS nativo cubre la Barrera 1, no la Barrera 2.** En ninguna versión de Prisma existe una API para fijar el tenant por transacción — ni `setContext`, ni `withContext`, ni un envoltorio documentado de `SET LOCAL`. El único patrón oficial es el Client Extension con `set_config(..., TRUE)`, que lleva descargo explícito de *"not intended to be used in production"* y rompe las transacciones explícitas del usuario.
+- **Drizzle tampoco la resuelve**: su propia `/docs/rls` fija el tenant con `set local` dentro de una transacción. Además su documentación pública describe la API de la 1.0 RC (`withRLS`), que no existe en la estable 0.45.2 (ahí es `enableRLS`), y `FORCE ROW LEVEL SECURITY` no aparece documentado.
+
+**Conclusión, decidida por el usuario: se mantiene Prisma, en 7.10.0.** El supuesto de esta decisión cambia en la letra, pero no en lo que costaba: la Barrera 2 sigue siendo trabajo propio en las tres opciones. Las políticas RLS van como SQL manual dentro de las migraciones, donde tienen expresividad completa. Se reevalúa cuando Prisma 8 sea GA y publique documentación de RLS; `contract infer` ofrece entonces una ruta de migración desde el SQL escrito a mano.
 
 Debe quedar registrado en **ADR-002**, incluyendo por qué se descartó Drizzle: la garantía real la aporta PostgreSQL, la madurez de Prisma, y la integración futura con Noctis Commerce, que ya usa Prisma.
 
@@ -162,5 +180,5 @@ Los textos visibles viven en archivos de recursos desde el primer componente, au
 - Claude Code **usa estos valores sin preguntar** mientras estén en 🟡
 - Si una tarea exige decidir algo que **no está aquí ni en el SPEC** → se agrega a `ESTADO.md` como duda, se elige la opción **más conservadora y configurable**, y se deja registrado
 - El usuario cambia 🟡 → ✅ al confirmar, o corrige el valor
-- Los 🔴 sí detienen: son D2 (cierre de P0) y D4 (migración de datos)
+- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ver ADR-001); el único 🔴 vivo es **D4** (qué representa `LNK`), que bloquea la migración de datos reales pero no P0–P8
 - D12 (ORM) quedó confirmada en Prisma. Sus cuatro condiciones se verifican al cerrar P1.

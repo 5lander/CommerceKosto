@@ -1,0 +1,43 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "tools/**/*.mjs",
+        "*.config.mjs",
+        ".dependency-cruiser.cjs"
+      ],
+      "project": [
+        "tools/**/*.mjs",
+        "*.config.mjs",
+        ".dependency-cruiser.cjs"
+      ]
+    },
+    "apps/api": {
+      "entry": [
+        "src/main.ts",
+        "src/**/*.module.ts",
+        "src/**/*.spec.ts",
+        "test/**/*.ts",
+        "vitest.config.ts",
+        "src/**/*.type-contract.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.ts"
+      ]
+    }
+  },
+  "ignore": [
+    "**/dist/**",
+    "**/generated/**",
+    "**/.tmp/**",
+    "apps/*/prisma/migrations/**"
+  ],
+  "ignoreDependencies": [
+    "dependency-cruiser",
+    "@secretlint/secretlint-rule-preset-recommend"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "includeEntryExports": false
+}

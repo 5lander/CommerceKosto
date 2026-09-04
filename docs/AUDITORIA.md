@@ -13,7 +13,7 @@
 | A2 | `application/` no importa implementaciones concretas de infraestructura | Revisar imports |
 | A3 | `infrastructure/` no contiene reglas de negocio | Revisión del código |
 | A4 | Los casos de uso reciben sus puertos por constructor | Revisar constructores |
-| A5 | Ningún módulo que no sea `catalog` crea ocupaciones, habilidades o títulos | Buscar escrituras a esas tablas |
+| A5 | Ningún módulo que no sea `catalog` crea, edita ni borra ítems, artículos de compra, unidades, conversiones o grupos | Buscar escrituras a esas tablas · regla de `dependency-cruiser` |
 | A6 | **El motor de costeo (`modules/costing/domain`) se puede probar sin base de datos** | Ejecutar sus pruebas con la base apagada |
 
 ## B. Código
@@ -27,7 +27,7 @@
 | B5 | Ninguna función supera 3 niveles de indentación |
 | B6 | Ninguna función tiene más de 3 parámetros sueltos |
 | B7 | Sin números ni cadenas mágicas: todo en constantes con nombre |
-| B8 | Se usan tipos de dominio (`CandidateId`, `TenantId`, `Money`), no primitivos sueltos |
+| B8 | Se usan tipos de dominio (`CompanyId`, `LocationId`, `ItemId`, `ProductId`, `Money`, `Quantity`, `Ratio`, `UnitOfUse`), no primitivos sueltos |
 | B9 | Errores tipados de dominio, no cadenas genéricas |
 | B10 | Ningún `catch` vacío o que silencie el error |
 | B11 | Sin código comentado en el repositorio |
@@ -37,27 +37,27 @@
 
 | # | Verificación |
 |---|---|
-| C1 | `tenant_id` presente en toda tabla nueva del dominio de empresa |
-| C2 | RLS activado en esas tablas *(desde P4)* |
-| C3 | El `tenant_id` se deriva de la sesión, **nunca** del cliente |
-| C4 | Todo acceso por ID valida pertenencia al tenant (IDOR) |
+| C1 | `company_id` presente en toda tabla nueva del dominio de negocio |
+| C2 | RLS **deny-by-default** y `FORCE ROW LEVEL SECURITY` activados en esas tablas, **en la misma migración que las crea** *(desde P1)* |
+| C3 | El `company_id` se deriva de la sesión, **nunca** del cliente |
+| C4 | Todo acceso por ID valida pertenencia a la company **y** a la ubicación cuando el rol es de ubicación (IDOR) |
 | C5 | **Ningún endpoint devuelve los datos protegidos del proyecto (composición de recetas y todo dato del que se despeje)** — verificado en la respuesta cruda |
-| C6 | Los campos que NUNCA salen (para el rol BODEGA: líneas de receta, consumo teórico, stock teórico, diferencia de conteo, valorización de la diferencia, punto de reorden, costo de plato) no aparecen en ninguna ruta |
+| C6 | Los campos que NUNCA salen (para el rol BODEGA: líneas de receta, consumo teórico, stock teórico, diferencia de conteo, valorización de la diferencia, punto de reorden, costo de plato, margen y food cost) no aparecen en ninguna ruta |
 | C7 | Consultas parametrizadas; cero concatenación de SQL |
 | C8 | Contraseñas con Argon2id; jamás en logs |
-| C9 | Webhooks con validación de firma |
+| C9 | Webhooks con validación de firma — **no aplica mientras no haya webhooks entrantes** (SEGURIDAD.md §6). Se reactiva sin excepción el día que se añada uno |
 | C10 | Rate limiting en endpoints sensibles |
 | C11 | Secretos fuera del repositorio |
-| C12 | Cifrado a nivel de campo en datos sensibles |
+| C12 | Cifrado a nivel de campo (AES-256-GCM, con `key_version` por registro) en **las líneas de receta con sus cantidades y en los precios de referencia** (SEGURIDAD.md §8) |
 | C13 | Errores al exterior genéricos; detalle solo en logs internos |
-| C14 | Logs sin datos personales en claro |
+| C14 | Logs sin datos personales ni datos de negocio del cliente en claro: los IDs sí, las cantidades de receta y los precios no |
 | C15 | Sin concatenación en SQL, incluido `ORDER BY` dinámico (lista blanca de columnas) |
 | C16 | Límites anti fuerza bruta activos por cuenta **y** por IP en login, códigos y tokens (SEGURIDAD.md §2.1) |
 | C17 | Respuestas de login/recuperación idénticas y en tiempo constante (`timingSafeEqual`, hash dummy) |
 | C18 | Esquemas de entrada `.strict()` — mass assignment rechazado, no ignorado |
-| C19 | Cabeceras de seguridad completas (HSTS, CSP con nonce, X-Frame-Options, nosniff) y `Cache-Control: no-store` en respuestas con datos personales |
+| C19 | Cabeceras de seguridad completas (HSTS, CSP con nonce, X-Frame-Options, nosniff) y `Cache-Control: no-store` en toda respuesta con datos personales o de negocio del cliente |
 | C20 | Rotación de sesión al login; revocación total al cambiar contraseña/correo; detección de reuso de refresh |
-| C21 | Uploads: magic bytes + tamaño + nombre UUID + bucket privado + parser aislado en worker |
+| C21 | Uploads: magic bytes + tamaño + límite de filas + nombre UUID + bucket privado + parser de hoja de cálculo aislado en worker |
 | C22 | Sin fetch del lado servidor a URLs provistas por usuarios (SSRF) |
 | C23 | Comparaciones de firmas/secretos con `timingSafeEqual`, nunca `===` |
 | C24 | DTOs explícitos por endpoint — nunca se serializa la entidad completa |
@@ -78,7 +78,7 @@
 | D4 | `numeric` para dinero, `timestamptz` para fechas |
 | D5 | Enums en tabla de catálogo, no en tipo nativo de Postgres |
 | D6 | Índices creados según la tabla de `CLAUDE.md` §5.2 |
-| D7 | Índices compuestos empiezan por `tenant_id` donde aplica |
+| D7 | Índices compuestos empiezan por `company_id` donde aplica |
 | D8 | **`EXPLAIN ANALYZE` ejecutado y adjuntado** para toda consulta nueva del camino crítico |
 | D9 | Sin N+1: ninguna consulta dentro de un bucle |
 | D10 | Sin `SELECT *` |
@@ -114,7 +114,7 @@
 | E22 | Ningún importe ni cantidad usa punto flotante; todo pasa por el tipo `Money` y `numeric` en la base | R6/R7 | P0 |
 | E23 | El consolidado de company es exactamente la suma de sus ubicaciones | R2 | P9 |
 
-## F. Frontend *(solo en P6b, P7b)*
+## F. Frontend *(solo en P12, P13 y P14)*
 
 | # | Verificación |
 |---|---|
@@ -122,11 +122,11 @@
 | F2 | Todos los valores visuales salen de `tokens.css` |
 | F3 | Los componentes de dominio no contienen `className` con valores visuales |
 | F4 | `components/ui` podría reemplazarse entero sin tocar la lógica |
-| F5 | **El difuminado es un placeholder vacío**: la respuesta de red no trae datos bloqueados |
+| F5 | **Lo que un rol no puede ver, no llega al navegador**: abrir el inspector de red como `BODEGA` no revela ningún campo prohibido. Nada se oculta con CSS |
 | F6 | Estados de carga, error y vacío en toda vista que consuma la API |
-| F7 | Funciona en 360 px de ancho |
+| F7 | Funciona en 360 px de ancho; la carga de conteo físico y de unidades vendidas es usable de pie |
 | F8 | Validación en cliente **y** servidor |
-| F9 | Accesibilidad básica: etiquetas, foco visible, contraste, teclado |
+| F9 | Accesibilidad básica: etiquetas, foco visible, contraste, teclado. La grilla de unidades vendidas se completa **sin tocar el ratón** |
 
 ## G. Pruebas
 
@@ -135,10 +135,10 @@
 | G1 | Todas las pruebas en verde |
 | G2 | El dominio del paquete tiene cobertura de pruebas unitarias |
 | G3 | Las pruebas del dominio corren sin base de datos |
-| G4 | Test de aislamiento entre tenants en verde *(si hay multi-tenancy)* |
-| G5 | Test de datos protegidos en verde |
-| G6 | Casos conocidos del dominio ejecutados *(desde el paquete del componente central)* |
-| G7 | Ningún dato real de personas usado en pruebas |
+| G4 | Test de aislamiento entre companies **y entre ubicaciones** en verde *(desde P1 y P6)* |
+| G5 | Test de datos protegidos frente a `BODEGA` en verde, verificado sobre la respuesta cruda |
+| G6 | Casos conocidos de `docs/pruebas/casos-conocidos.md` ejecutados *(desde P0 para la aritmética, completos desde P5)* |
+| G7 | Ningún dato real de clientes usado en pruebas: ni recetas, ni precios, ni márgenes reales. Solo sintéticos o los casos conocidos del Excel de referencia |
 
 ## H. Documentación *(todos los paquetes)*
 
@@ -165,13 +165,13 @@
 |---|---|
 | I1 | `audit:deadcode` en verde — sin exports, archivos ni dependencias sin uso |
 | I2 | `audit:complexity` en verde — complejidad ≤10, profundidad ≤3, funciones ≤40 líneas |
-| I3 | `audit:duplication` en verde — duplicación < 3 % |
+| I3 | `audit:duplication` en verde — **cero clones detectados** (≥50 tokens, ≥5 líneas) |
 | I4 | Ninguna abstracción con una sola implementación fuera de los puertos |
 | I5 | Nada de CPU pesada en el proceso HTTP |
 | I6 | Concurrencia acotada en todo `Promise.all` sobre I/O |
 | I7 | Cachés nuevos cumplen las tres condiciones (lectura≫escritura, staleness tolerable, invalidación definida) |
 | I8 | Presupuestos de rendimiento medidos y en verde (p95) |
-| I9 | Presupuesto de bundle en verde *(solo P6b/P7b)* |
+| I9 | Presupuesto de bundle en verde *(solo P12/P13)* |
 | I10 | Optimizaciones no triviales documentadas con antes/después |
 
 ---
@@ -183,9 +183,9 @@ AUDITORÍA P{n}
 
 A. Arquitectura      ✅ A1-A6
 B. Código            ✅ B1-B12
-C. Seguridad         ✅ C1-C14
+C. Seguridad         ✅ C1-C30
 D. Base de datos     ✅ D1-D13  · EXPLAIN ANALYZE adjunto abajo
-E. Reglas de negocio ✅ E1-E11
+E. Reglas de negocio ✅ E1-E23
 F. Frontend          — no aplica
 G. Pruebas           ✅ G1-G7 · 47 pruebas en verde
 H. Documentación     ✅ H1-H14
@@ -196,3 +196,11 @@ EXPLAIN ANALYZE:
 ```
 
 Si algún punto no aplica al paquete, se marca **— no aplica** con la razón. **No se omite.**
+
+## Verificación automatizada — la prueba del guardián
+
+`npm run audit` corre once verificaciones. Un check verde sobre un repositorio sin código no demuestra nada: demuestra que no encontró nada, que es distinto de que funcione.
+
+**Por eso, en el paquete que introduce o modifica una verificación, hay que demostrar que falla cuando debe.** Se introduce a mano una violación deliberada, se captura la **salida de fallo literal**, se revierte, y esa salida se pega en `docs/pasos/P{n}/AUDITORIA-RESULTADO.md`.
+
+En P0, donde se crean las once, **sin las once salidas capturadas no hay commit.**

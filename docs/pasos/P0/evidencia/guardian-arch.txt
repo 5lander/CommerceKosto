@@ -1,0 +1,7 @@
+
+  error domain-no-importa-infrastructure: apps/api/src/shared/domain/scratch/violacion.ts → apps/api/src/shared/infrastructure/persistence/prisma-connection.ts
+
+x 1 dependency violations (1 errors, 0 warnings). 53 modules, 112 dependencies cruised.
+
+
+audit:arch  FALLO — hay imports que violan la regla de dependencia (CLAUDE.md §2).

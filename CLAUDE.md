@@ -47,41 +47,41 @@ Reglas del ciclo, no negociables:
 
 ## 1. Stack — no negociable
 
-| Componente | Elección propuesta | Fin de soporte estimado | Estado |
+> **Versiones confirmadas en fuente oficial el 2026-08-26** y registradas en `docs/decisiones/ADR-001-versiones-del-stack.md`, con verificación adversarial de cada punto. **D2 está cerrada.** Esta tabla ya no son propuestas: son las versiones fijadas.
+
+| Componente | Versión fijada | Fin de soporte confirmado | Nota |
 |---|---|---|---|
-| Runtime | **Node.js 24 LTS** | ~30-abr-2028 | ⚠️ Reverificar |
+| Runtime | **Node.js 24.20.0** (Active LTS) | **2028-04-30** | Node 26 promueve a LTS el **2026-10-28**; salto planificado, no ahora |
 | Lenguaje | TypeScript en modo estricto máximo | — | `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` |
-| API | **NestJS 11** (requiere Node ≥ 20) | Sin política LTS publicada | ⚠️ Reverificar |
-| Base de datos | **PostgreSQL 18** | ~nov-2030 | ⚠️ Reverificar que esté GA en el proveedor |
-| ORM | **Prisma 6** | Sin política LTS publicada | ⚠️ Reverificar · ver D12 |
-| Frontend | **Next.js 16** (App Router) | **No tiene LTS** | ⚠️ Reverificar |
-| Contenedores | Docker Compose con **versiones fijadas, nunca `latest`** | — | |
+| API | **NestJS 11.2.3** (`engines: node >= 20`) | Sin política LTS publicada | Su CI prueba Node 20.19 / 22.14 / 24.1. **NestJS 12 será ESM** |
+| Base de datos | **PostgreSQL 18.6** (GA 2025-09-25) | **2030-11-14** | Trae `uuidv7()` nativo. La 19 sigue en beta |
+| ORM | **Prisma 7.10.0**, versión **exacta** | Sin política LTS publicada | ⚠️ El `latest` de npm apunta a un RC · ver D12 y ADR-002 |
+| Frontend | **Next.js 16.3.3** (App Router) | **~2027-10-21** | Sí tiene política de soporte: 2 años desde el major |
+| Contenedores | Docker Compose con **imágenes fijadas por digest, nunca `latest`** | — | |
 | Cola de trabajos | BullMQ + Redis | — | Solo desde el paquete que la necesite |
 
-**Node 20 ya alcanzó su fin de soporte (abril 2026). No usarlo bajo ninguna circunstancia.**
+**Node 20 alcanzó su fin de soporte el 2026-04-30. No usarlo bajo ninguna circunstancia.**
 
-**Nota de planificación sobre Node:** la versión 24 vence en abril de 2028, poco menos de dos años. Node 26 promueve a LTS alrededor de octubre de 2026, con soporte hasta ~abril de 2029. Como P0 se construye ahora, **arrancar en 24 y planificar el salto a 26 cuando promueva** — probablemente justo al cerrar la fundación. Verificar el estado de Node 26 en la fase PLAN: si ya promovió, usar 26 directamente.
+**Nota de planificación sobre Node:** la versión 24 vence el 2028-04-30, poco menos de dos años. **Node 26 todavía no ha promovido a LTS** (sigue en *Current*): lo hace el **2026-10-28**, con soporte hasta 2029-04-30. Se arranca en 24 y se planifica el salto para cuando promueva — ítem C7 de `docs/FASE0-CHECKLIST.md`. No adelantarlo: NestJS 11 aún no prueba Node 26 en su CI. A partir de Node 27 el ciclo pasa a ser anual y toda versión mayor promoverá a LTS.
 
-### ⚠️ Primera tarea de P0: fijar y documentar versiones
+**Trampa de instalación de Prisma, confirmada:** el dist-tag `latest` de npm apunta a `8.0.0-rc.12`, un Release Candidate. `npm install prisma` sin versión fijada instala un RC. **La versión va exacta en `package.json`, sin `^` ni `~`.**
 
-**Las versiones de la tabla son propuestas derivadas de las cadencias públicas de cada proyecto, NO lecturas de fuente oficial.** Antes de escribir una línea del `package.json`, en la fase PLAN de P0 hay que confirmar estos seis puntos concretos:
+### ✅ D2 cerrada en P0 — los seis puntos, verificados
 
-| # | Qué confirmar | Dónde |
+Los seis puntos que exigía esta sección se confirmaron en fuente oficial el **2026-08-26**, con una pasada adversarial independiente por punto. El detalle completo, con citas y enlaces, está en **`docs/decisiones/ADR-001-versiones-del-stack.md`**. Resumen de lo que cambió respecto de lo que este archivo suponía:
+
+| # | Qué se confirmó | Resultado |
 |---|---|---|
-| 1 | Versión exacta de Node 24.x, y **si Node 26 ya promovió a LTS** | `nodejs.org/en/about/previous-releases` y `schedule.json` de `nodejs/Release` |
-| 2 | Si **PostgreSQL 18 está GA** y su fecha EOL exacta | `postgresql.org/support/versioning` |
-| 3 | Major vigente de NestJS y su campo `engines` | `github.com/nestjs/nest` |
-| 4 | Major vigente de Prisma y **si ya existe soporte RLS nativo** | `prisma.io` + changelog |
-| 5 | Que Drizzle mantiene `pgPolicy` / RLS de primera clase | `orm.drizzle.team/docs/rls` |
-| 6 | Major vigente de Next.js y cualquier declaración formal de ventana de soporte | `github.com/vercel/next.js` |
+| 1 | Node 24.x exacto y si Node 26 promovió | **24.20.0**, EOL 2028-04-30. **Node 26 NO ha promovido**: lo hace el 2026-10-28 |
+| 2 | Si PostgreSQL 18 está GA y su EOL | **GA desde 2025-09-25**, minor 18.6, EOL **2030-11-14** |
+| 3 | Major de NestJS y su `engines` | **11.2.3**, `node >= 20`. Sin política LTS. v12 en alpha, será ESM |
+| 4 | Major de Prisma y **si existe RLS nativo** | **7.10.0** estable (la tabla decía «6»). **RLS nativo existe, pero solo en Prisma 8 RC** |
+| 5 | Que Drizzle mantiene `pgPolicy` / RLS | Sí, pero su doc describe la API de la 1.0 RC, no la de la estable |
+| 6 | Major de Next.js y su ventana de soporte | **16.3.3**. **Sí publica política formal**: 2 años desde el major |
 
-Regla de elección: en cada caso, **la versión con el soporte más largo**, priorizando mantenibilidad a varios años sobre novedad.
+**Sobre el punto 4 — se ejecutó la parada y el usuario decidió.** El RLS declarativo nativo (`@@rls`, `policy_select`) existe únicamente en **Prisma 8, que es Release Candidate**, sin página de documentación de RLS y con el aviso oficial de que su comportamiento puede cambiar. Y lo decisivo: **cubre la Barrera 1, no la Barrera 2** — en ninguna versión de Prisma existe una API para fijar el tenant por transacción, y el único patrón que Prisma documenta lleva descargo explícito de no ser apto para producción. **D12 se mantiene en Prisma, ahora en 7.10.0.** Las políticas RLS van como SQL manual dentro de las migraciones, donde tienen expresividad completa (`FORCE ROW LEVEL SECURITY`, restrictivas, deny-by-default). Se reevalúa cuando Prisma 8 sea GA.
 
-Después: fijar en `Dockerfile`, `package.json` (`engines`) y `.nvmrc`; escribir **ADR-001** con las fechas de fin de soporte confirmadas; registrar en `ESTADO.md` → Convenciones.
-
-Si el punto 4 resulta positivo (Prisma con RLS nativo), **detente y avisa al usuario**: cambia la decisión D12.
-
-**Advertencia conocida sobre Next.js:** no ofrece LTS; soporta la versión actual y la anterior con ciclos cortos. Consecuencia obligatoria para este proyecto: **cero lógica de negocio en el frontend.** Todo cálculo, toda regla y toda decisión de autorización viven en el backend. El frontend debe poder reescribirse entero sin tocar el dominio.
+**Corrección sobre Next.js:** la afirmación de que «no ofrece LTS» ya no es exacta. Existe `nextjs.org/support-policy`, con fases *Active LTS* y *Maintenance LTS* y una ventana de **dos años desde el lanzamiento inicial del major**. Pero el detalle empeora el cuadro en vez de mejorarlo: durante el Maintenance LTS **los cambios rompedores llegan como releases semver-minor**. La consecuencia obligatoria para este proyecto no se relaja, se refuerza: **cero lógica de negocio en el frontend.** Todo cálculo, toda regla y toda decisión de autorización viven en el backend. El frontend debe poder reescribirse entero sin tocar el dominio, y su mantenimiento recurrente hay que presupuestarlo (ítem C6 de `docs/FASE0-CHECKLIST.md`).
 
 ### Frontend
 
@@ -164,6 +164,7 @@ Los casos de uso reciben sus puertos por constructor. **Nunca** instanciar un cl
 - **Tipos de dominio, no primitivos sueltos**: `CompanyId`, `LocationId`, `ItemId`, `Money`, `Quantity`, `UnitOfUse` — no `string` ni `number`
 - **El dinero nunca es `number` de punto flotante.** Se usa un tipo `Money` con aritmética decimal exacta, y `numeric` en la base
 - Validación por esquema (Zod o equivalente) en **todo** límite externo: endpoints, archivos importados, variables de entorno
+- **Toda validación que sea un control de seguridad va en el CAMPO, nunca en el refinamiento del objeto.** El refinamiento de objeto no se ejecuta si algún campo falló antes, así que un error de formato en otra variable desactiva la comprobación de autorización sin que nada avise. Y se prueba **acompañada de otro error**, no solo en aislamiento: el caso de un único fallo es el que siempre pasa. Ver `docs/incidencias/INC-008`
 
 ### YAGNI — no construir lo que no se pidió
 El detalle completo está en `docs/OPTIMIZACION.md` §1 y es obligatorio. Resumen: sin abstracciones especulativas, sin parámetros que nadie usa, sin código muerto, sin endpoints ni columnas "para el futuro", sin utilidades genéricas antes de la tercera repetición, sin dependencias para 10 líneas. `audit:deadcode`, `audit:complexity` y `audit:duplication` lo verifican en cada commit.
@@ -201,7 +202,7 @@ Tres barreras independientes. Si una falla, las otras dos siguen de pie.
 - Toda operación de datos pasa por un envoltorio único que abre transacción interactiva y fija el tenant **dentro de ella**
 - **Prohibido usar el cliente de base de datos crudo fuera de esa capa**, verificado por `audit:forbidden`
 - ⚠️ **Un `SET` fuera de transacción no persiste de forma fiable entre conexiones del pool.** Si el query corre en una conexión sin tenant fijado, hay fuga. Por eso el `SET LOCAL` va siempre dentro de la transacción que ejecuta la consulta, nunca antes
-- ⚠️ **Con PgBouncer en modo transacción**, Prisma requiere `?pgbouncer=true` en la cadena de conexión por los prepared statements. **Probar este escenario explícitamente antes de producción**, no asumirlo
+- ⚠️ **Con PgBouncer en modo transacción**: la recomendación cambió y está verificada en ADR-001. Prisma ya **no** recomienda `?pgbouncer=true` a partir de PgBouncer 1.21.0. Lo que sigue siendo obligatorio: PgBouncer en **modo transacción**, `max_prepared_statements > 0` (Prisma usa prepared statements), y una **conexión directa separada** para los comandos del CLI. **Probar este escenario explícitamente antes de producción**, no asumirlo — la documentación de Prisma sobre pooling externo está etiquetada como v7 y no hay equivalente para la línea 8
 
 **Barrera 3 — El origen del tenant.**
 
@@ -448,7 +449,7 @@ Desde P0 existe `npm run audit` que **falla** ante cualquiera de estos, corre en
 | `audit:arch` | Reglas de dependencia entre capas (dependency-cruiser) |
 | `audit:deadcode` | Exports, archivos o dependencias sin uso (knip) |
 | `audit:complexity` | Complejidad >10, profundidad >3, funciones >40 líneas |
-| `audit:duplication` | Duplicación ≥3 % (jscpd) |
+| `audit:duplication` | Duplicación (jscpd). **Falla ante cualquier clon** de ≥50 tokens y ≥5 líneas; el 3 % queda como techo, no como permiso |
 | `audit:tests` | Pruebas en rojo |
 | `audit:secrets` | Secretos en el diff |
 

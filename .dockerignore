@@ -1,0 +1,32 @@
+# Lo que NUNCA entra en la imagen.
+#
+# `node_modules` es el primero de la lista y no es por tamano: un `node_modules`
+# instalado en Windows lleva binarios de win32 (@swc/core, los engines de
+# Prisma) que dentro de un contenedor Linux fallan con mensajes que apuntan al
+# lugar equivocado. La imagen instala sus propias dependencias.
+# Ver docs/incidencias/INC-003.
+node_modules
+**/node_modules
+
+# Artefactos de build: se generan dentro de la imagen, no se copian de fuera.
+dist
+**/dist
+**/generated
+*.tsbuildinfo
+
+# Secretos: jamas dentro de una imagen (SEGURIDAD.md §9).
+.env
+.env.*
+!.env.example
+
+# Ruido que solo invalidaria la cache de capas.
+.git
+.githooks
+.vscode
+.idea
+coverage
+reports
+.tmp
+.arch-selftest
+docs
+*.log

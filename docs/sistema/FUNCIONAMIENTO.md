@@ -77,3 +77,66 @@ graph LR
 ```
 
 Las fórmulas exactas están en `docs/SPEC.md` §12 a §18.
+
+
+---
+
+## El proceso de la API por dentro (desde P0)
+
+Lo que atraviesa una petición, en orden. Las cuatro protecciones globales se registran en `AppModule`/`bootstrap.ts`, de modo que **las pruebas levantan exactamente la misma aplicación que se despliega**: una defensa cableada solo en `main.ts` no existe en los tests, y entonces el test de que existe no prueba nada.
+
+```mermaid
+graph TD
+    REQ[petición HTTP] --> NONCE[middleware: nonce por respuesta]
+    NONCE --> HDR[middleware: helmet + Permissions-Policy + Cache-Control]
+    HDR --> PINO["pino-http: genReqId → correlation_id<br/>entra en AsyncLocalStorage<br/>sale en x-correlation-id"]
+    PINO --> ROUTE{¿la ruta existe?}
+    ROUTE -->|no| FILT
+    ROUTE -->|sí| GUARD[ThrottlerGuard]
+    GUARD -->|excede| FILT
+    GUARD --> INT[TimeoutInterceptor]
+    INT --> CTRL[controlador]
+    CTRL --> FILT[ErrorFilter: code + message]
+    FILT --> RES[respuesta]
+```
+
+**Las cabeceras van como middleware de plataforma y no como interceptor de Nest, a propósito.** Un interceptor solo corre para peticiones que llegan a un manejador: un 404, un 429 del limitador o un cuerpo malformado saldrían **sin cabeceras**, y son justo las respuestas de las que un atacante aprende más. Hay una prueba de integración por cabecera que lo comprueba sobre un 404.
+
+### Composición interna
+
+```mermaid
+graph TB
+    subgraph domain["shared/domain — sin dependencias"]
+        DEC[decimal/ · núcleo y escalas]
+        MON["money/ · Money · Ratio · Count · Quantity"]
+        UNI[unidad/ · UnidadDeUso]
+    end
+    subgraph app["shared/application — solo interfaces"]
+        PA[AuditLogPort]
+        PM[MailerPort]
+        PS[FileStoragePort]
+    end
+    subgraph infra["shared/infrastructure"]
+        CFG[config/ · esquema Zod]
+        OBS[observability/ · correlación y logger]
+        PER[persistence/ · PrismaConnection]
+        HTTP[http/ · cabeceras, error, timeout]
+        HLT[health/ · /health y /ready]
+        FK[fakes/ · correo y almacenamiento]
+    end
+    PER -.implementa.-> PA
+    FK -.implementan.-> PM & PS
+    MON --> DEC
+    MON --> UNI
+```
+
+`decimal.js` solo lo ve `shared/domain/decimal/` (ADR-003). `dependency-cruiser` y `audit:forbidden` lo hacen cumplir.
+
+### Salud del proceso
+
+| Ruta | Qué responde | Toca la base |
+|---|---|---|
+| `/health` | *liveness* — ¿el proceso está vivo? | **No** |
+| `/ready` | *readiness* — ¿puede atender tráfico? | Sí |
+
+La distinción tiene coste concreto: si `/health` mirara la base, un corte de PostgreSQL haría que el orquestador **matara y reiniciara todas las réplicas**, que es lo peor que puede pasar durante un corte de base de datos. Con `/ready`, la réplica sale del balanceador y vuelve sola.

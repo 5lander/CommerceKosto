@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# Se ejecuta UNA sola vez, cuando el volumen de datos esta vacio.
+#
+# El entrypoint de la imagen de PostgreSQL solo ejecuta lo que esta en el primer
+# nivel de /docker-entrypoint-initdb.d, asi que los .sql viven en sql/ y se
+# aplican desde aqui, con las contrasenas pasadas como variables de psql.
+#
+# OJO CON LOS FINALES DE LINEA. Este archivo DEBE estar en LF: con CRLF, el
+# contenedor Linux falla con `$'\r': command not found` y la base arranca sin
+# roles, sin que nada lo avise hasta que la aplicacion no puede conectarse.
+# Lo garantiza .gitattributes y lo verifica la regla `sin-crlf-en-archivo-posix`
+# de audit:forbidden. Ver docs/incidencias/INC-001.
+
+set -euo pipefail
+
+: "${COSTEO_MIGRATOR_PASSWORD:?falta COSTEO_MIGRATOR_PASSWORD}"
+: "${COSTEO_APP_PASSWORD:?falta COSTEO_APP_PASSWORD}"
+
+directorio="$(dirname "$0")/sql"
+
+echo "[initdb] creando roles costeo_migrator y costeo_app"
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+     -v migrator_password="$COSTEO_MIGRATOR_PASSWORD" \
+     -v app_password="$COSTEO_APP_PASSWORD" \
+     -f "$directorio/roles.sql"
+
+# La base sombra que Prisma necesita para `migrate dev` y para generar los
+# `down.sql` con `migrate diff`. Se crea aqui porque costeo_migrator es
+# NOCREATEDB y no puede crearla al vuelo. Ver docs/incidencias/INC-004.
+echo "[initdb] creando la base sombra costeo_shadow"
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+     -c "CREATE DATABASE costeo_shadow OWNER costeo_migrator;"
+
+for base in "$POSTGRES_DB" costeo_shadow; do
+  echo "[initdb] aplicando privilegios en $base"
+  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$base" \
+       -f "$directorio/grants.sql"
+done
+
+echo "[initdb] listo"

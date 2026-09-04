@@ -1,0 +1,63 @@
+{
+  "name": "costeo-saas",
+  "version": "0.0.0",
+  "private": true,
+  "description": "SaaS multi-tenant de costeo de alimentos, inventario por sucursal y analitica de menu",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0 <25.0.0",
+    "npm": ">=11.0.0"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "prepare": "node tools/setup-hooks.mjs && npm run db:generate",
+    "doctor": "node tools/doctor.mjs",
+    "audit": "npm run audit:types && npm run audit:lint && npm run audit:forbidden && npm run audit:arch && npm run audit:deadcode && npm run audit:complexity && npm run audit:duplication && npm run audit:migrations && npm run audit:secrets && npm run audit:sec-headers && npm run audit:tests",
+    "audit:types": "tsc -p apps/api/tsconfig.json && tsc -p tools/tsconfig.json",
+    "audit:lint": "eslint . --max-warnings=0 --no-inline-config",
+    "audit:forbidden": "node tools/audit/forbidden.mjs",
+    "audit:arch": "node tools/audit/arch.mjs",
+    "audit:deadcode": "knip",
+    "audit:complexity": "eslint . --config eslint.complexity.config.mjs --max-warnings=0 --no-inline-config",
+    "audit:duplication": "jscpd apps tools scripts",
+    "audit:migrations": "node tools/audit/migrations.mjs",
+    "audit:secrets": "secretlint --secretlintignore .secretlintignore \"**/*\"",
+    "audit:tests": "node tools/audit/tests.mjs",
+    "audit:sec-headers": "npm run test:integration --workspace @costeo/api -- --testNamePattern=\"cabeceras de seguridad\"",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "npm run test:unit --workspace @costeo/api",
+    "test:integration": "npm run test:integration --workspace @costeo/api",
+    "dev": "npm run dev --workspace @costeo/api",
+    "build": "npm run build --workspace @costeo/api",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:psql": "node scripts/psql-shell.mjs",
+    "db:generate": "npm run db:generate --workspace @costeo/api",
+    "migrate:new": "node scripts/migrate-new.mjs",
+    "migrate:deploy": "npm run migrate:deploy --workspace @costeo/api",
+    "migrate:down": "node scripts/migrate-down.mjs",
+    "migrate:verify": "node scripts/migrate-verify.mjs",
+    "audit:complexity:preferencias": "eslint . --config eslint.preferencias.config.mjs --no-inline-config"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@secretlint/secretlint-rule-preset-recommend": "^11.2.4",
+    "dependency-cruiser": "^17.0.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "jscpd": "^4.0.5",
+    "knip": "^5.66.0",
+    "secretlint": "^11.2.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.10.0": true,
+    "@swc/core@1.16.1": true,
+    "esbuild@0.28.2": true,
+    "prisma@7.10.0": true
+  }
+}

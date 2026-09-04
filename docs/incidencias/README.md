@@ -36,19 +36,36 @@ Ordenado por área. **Buscá por síntoma, no por causa.**
 
 | # | Síntoma | Área | Paquete | Recurrencias |
 |---|---|---|---|---|
-| — | *(vacío: aún no hay incidencias registradas)* | — | — | — |
+| [INC-001](INC-001-hook-pre-commit-bad-interpreter.md) | `bad interpreter: /bin/sh^M` — el hook de pre-commit no se ejecuta, o el contenedor de Postgres no arranca | build · despliegue | P0 | 0 |
+| [INC-002](INC-002-psql-no-esta-en-el-path.md) | `psql: command not found` al correr los scripts de migración | base de datos | P0 | 0 |
+| [INC-003](INC-003-binarios-win32-dentro-del-contenedor.md) | `Cannot find module '@swc/core-linux-x64-gnu'` / `Failed to load native binding` dentro del contenedor | despliegue · build | P0 | 0 |
+| [INC-004](INC-004-migrate-diff-genera-down-vacio.md) | `prisma migrate diff` produce un `down.sql` vacío, o falla con `unexpected argument` | base de datos | P0 | 0 |
+| [INC-005](INC-005-postgres-18-cambia-el-directorio-de-datos.md) | El contenedor de PostgreSQL 18 queda `unhealthy`: «there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)» | despliegue · base de datos | P0 | 1 |
+| [INC-006](INC-006-spawn-en-windows-parte-los-argumentos.md) | `psql` recibe el SQL partido: «syntax error at end of input / LINE 1: DROP». O un proceso hijo falla con `stderr` vacío | build · base de datos | P0 | 1 |
+| [INC-007](INC-007-un-check-pasa-en-verde-sin-medir-nada.md) | **No hay mensaje de error**: un check de `npm run audit` imprime su línea de éxito sin haber examinado ni un archivo | build | P0 | 6 |
+| [INC-008](INC-008-superrefine-no-corre-si-otro-campo-fallo.md) | Una regla de seguridad del esquema de entorno desaparece del informe cuando otra variable también es inválida | arquitectura | P0 | 1 |
+| [INC-009](INC-009-psql-c-no-sustituye-variables.md) | `syntax error at or near ":"` en un SQL correcto, con la variable de psql sin sustituir | base de datos | P0 | 1 |
+
+Las cuatro primeras se registraron **antes de que ocurrieran**, en la fase PLAN de P0: son trampas conocidas de este entorno (Windows + Docker + Prisma 7) que iban a costar tiempo la primera vez. De la quinta en adelante ocurrieron de verdad, al levantar la base, al escribir los scripts de migración y al construir el tooling. Las nueve tienen su prevención automatizada en el mismo paquete, como exige la regla de oro.
+
+**Las dos últimas no son problemas de una herramienta concreta, sino de cómo se verifica.** INC-007 es la razón por la que la prueba del guardián es criterio de commit; INC-008 es la razón por la que una validación de seguridad va en el campo y se prueba acompañada de otro error. Merecen leerse aunque no se esté diagnosticando nada.
 
 ---
 
 ## Áreas frecuentes en este proyecto
 
-Anticipando dónde es más probable que aparezcan, según las decisiones ya tomadas:
+Dónde es más probable que aparezcan las próximas, según las decisiones ya tomadas. Las filas con ficha ya materializaron al menos una vez.
 
-| Área | Por qué es probable |
-|---|---|
-| **RLS y contexto de tenant** | El `SET LOCAL` fuera de transacción no persiste entre conexiones del pool. Síntoma típico: consultas que devuelven cero filas sin razón aparente, o peor, filas de otro tenant |
-| **PgBouncer en modo transacción** | Prepared statements de Prisma. Síntoma: errores intermitentes que no se reproducen en local |
-| **Reglas de capa** | `dependency-cruiser` rompiendo el build por un import que parecía inocente |
-| **Aritmética decimal** | Un `number` que se cuela en un cálculo de dinero y produce un centavo de diferencia en la conciliación |
-| **Cascada de subpreparaciones** | Orden topológico y memorización. Síntoma: costo que cambia entre dos corridas idénticas |
-| **Migraciones reversibles** | Un `down` que no deshace realmente lo que hizo el `up` |
+| Área | Por qué es probable | Fichas |
+|---|---|---|
+| **RLS y contexto de tenant** | El `SET LOCAL` fuera de transacción no persiste entre conexiones del pool. Síntoma típico: consultas que devuelven cero filas sin razón aparente, o peor, filas de otro tenant | *(esperada en P1)* |
+| **PgBouncer en modo transacción** | Prepared statements de Prisma. Síntoma: errores intermitentes que no se reproducen en local. ⚠️ La recomendación cambió: `?pgbouncer=true` ya **no** se recomienda desde PgBouncer 1.21.0 (ver ADR-001) | *(esperada en P1)* |
+| **Migraciones reversibles** | Un `down` que no deshace realmente lo que hizo el `up`. Agravado porque Prisma no genera migraciones de bajada | **INC-004** |
+| **Reglas de capa** | `dependency-cruiser` rompiendo el build por un import que parecía inocente | *(esperada en P2)* |
+| **Aritmética decimal** | Un `number` que se cuela en un cálculo de dinero y produce un centavo de diferencia en la conciliación. La configuración de `decimal.js` es **global y mutable**: un `Decimal.set()` en cualquier módulo mueve los resultados de todo el proceso | *(esperada en P5)* |
+| **Cascada de subpreparaciones** | Orden topológico y memorización. Síntoma: costo que cambia entre dos corridas idénticas | *(esperada en P5)* |
+| **Entorno Windows** | Finales de línea, ejecutables ausentes del PATH, binarios nativos por plataforma, argumentos que se parten al lanzar procesos | **INC-001**, **INC-002**, **INC-003**, **INC-006** |
+| **Invocación de `psql`** | La forma de pasarle el SQL cambia lo que hace con él: `-c` no sustituye variables, stdin sí. El error lo da el servidor y apunta al SQL, no a la invocación | **INC-009** |
+| **Convenciones de las imágenes de contenedor** | Cambian entre versiones mayores y los mensajes de error describen el escenario peligroso, no el real | **INC-005** |
+| **El propio tooling de auditoría** | Un glob, un `exclude` o un parser ausente dejan un check sin nada que examinar, y el síntoma es un verde. Vuelve cada vez que se amplía el alcance: workspace nuevo, carpeta nueva, regla nueva | **INC-007** |
+| **Esquemas de validación de entrada** | La regla barata de formato hace sombra a la regla cara de autorización: si un campo falla, los refinamientos de objeto no llegan a correr. Reaparecerá en los DTO de P1 y en la importación de P10 | **INC-008** |

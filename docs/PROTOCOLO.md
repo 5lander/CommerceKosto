@@ -86,19 +86,19 @@ Pendiente: {dudas abiertas, o "ninguna"}
 
 Ejemplo:
 ```
-P1: Módulo catalog
+P2: Catálogo · ítems · artículos · unidades
 
-- Dominio de ocupaciones, habilidades, áreas y títulos
-- Búsqueda en cascada de 5 niveles con pg_trgm (umbral 0.80)
-- Capa de sinónimos: género, coloquialismos, anglicismos
-- Registro de búsquedas sin resultado
-- Migraciones con índices GIN
-- Semillas del área de Tecnología de la Información
+- Dominio de ítems COMPRADO/PRODUCIDO con unidad de uso y rendimiento
+- Artículos de compra: N marcas apuntan a un ítem, con factor de conversión
+- Unidades y conversiones como catálogo, no como cadenas de texto
+- Campo confianza_precio (el tipo SUP del Excel)
+- Migración con índice GIN + pg_trgm sobre nombre normalizado
+- RLS deny-by-default y FORCE en las cuatro tablas nuevas
 
 Auditoría: OK
 Pruebas: 47 pasando
-Decisiones: umbral de similitud fijado en 0.80 según SPEC 2.7.1.1
-Pendiente: cobertura de oficios requiere validación humana antes de lanzar
+Decisiones: la conversión kg → unidades sin factor se rechaza en el dominio, no en la base
+Pendiente: el catálogo semilla de unidades depende del ítem B3 de FASE0-CHECKLIST
 ```
 
 **Nunca hacer commit con pruebas en rojo o auditoría fallida.**

@@ -1,0 +1,114 @@
+// Esquema de datos de costeo-saas.
+//
+// LO QUE NO ESTA AQUI, Y ES DELIBERADO: las politicas RLS.
+//
+// Prisma 7 no sabe declararlas (el RLS nativo existe solo en Prisma 8, que es
+// Release Candidate — ver ADR-001 y ADR-002). Van como SQL manual dentro del
+// bloque `-- MANUAL:` de cada migracion, donde ademas tienen expresividad
+// COMPLETA: `FORCE ROW LEVEL SECURITY`, politicas restrictivas y deny-by-default.
+// Nada de eso esta documentado como expresable desde la PSL de Prisma 8.
+//
+// `audit:migrations` M6 hace imposible olvidarlas: una migracion que crea una
+// tabla sin ENABLE + FORCE + al menos una POLICY rompe el build.
+
+// GENERADOR `prisma-client-js` Y NO EL NUEVO `prisma-client`, con motivo.
+//
+// El generador nuevo emite TypeScript, y ese TypeScript entra en la compilacion
+// del proyecto: `audit:types` pasa a type-checkear ~40 000 lineas de codigo
+// generado en cada commit —agota el heap por defecto de `tsc` y obliga a
+// subirlo a 4 GB— y `tsc --build` falla con TS6059 porque el codigo generado
+// cae fuera del `rootDir`. Todo eso para verificar un artefacto de build que
+// nadie escribe a mano y que ya viene con `@ts-nocheck` puesto.
+//
+// `prisma-client-js` emite JavaScript con sus `.d.ts`, que `skipLibCheck` omite:
+// la compilacion vuelve a ser instantanea y el build emite lo que tiene que
+// emitir. Esta deprecado en favor del nuevo, asi que el cambio entra en la
+// evaluacion de Prisma 8 que ADR-001 ya deja pendiente — no antes, y no como
+// efecto secundario de otra cosa.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Registro de auditoria — SEGURIDAD.md §10.
+///
+/// APPEND-ONLY EN TRES CAPAS:
+///   1. Privilegio: REVOKE UPDATE, DELETE, TRUNCATE para costeo_app
+///   2. Trigger BEFORE UPDATE OR DELETE OR TRUNCATE ... FOR EACH STATEMENT,
+///      que alcanza tambien al dueno de la tabla
+///   3. Regla `append-only-cliente-audit_log` de audit:forbidden
+///
+/// El trigger es de SENTENCIA y no de fila, y esa distincion no es cosmetica:
+/// con FORCE ROW LEVEL SECURITY activo y sin politica de DELETE, un
+/// `DELETE FROM audit_log` afecta a CERO filas, un trigger de fila nunca se
+/// dispara, y el borrado "tiene exito" en silencio.
+model AuditLog {
+  id            String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  at            DateTime @default(now()) @db.Timestamptz(6)
+
+  eventType     String   @map("event_type")
+  outcome       String
+  actorType     String   @map("actor_type")
+  actorId       String?  @map("actor_id") @db.Uuid
+
+  /// Nullable A PROPOSITO, y lo seguira siendo. El catalogo de SEGURIDAD.md §10
+  /// incluye eventos que por naturaleza no tienen tenant:
+  /// `system.migration.applied`, `system.config.changed`,
+  /// `system.ratelimit.exceeded`, `admin.login.*`.
+  /// P1 anade la clave foranea con ON DELETE RESTRICT — jamas CASCADE: borrar
+  /// una company no puede borrar su rastro de auditoria.
+  companyId     String?  @map("company_id") @db.Uuid
+
+  ip            String?  @db.Inet
+  geoCountry    String?  @map("geo_country") @db.Char(2)
+  geoCity       String?  @map("geo_city")
+  userAgent     String?  @map("user_agent")
+  deviceId      String?  @map("device_id") @db.Uuid
+  correlationId String   @map("correlation_id") @db.Uuid
+
+  /// Solo IDs y escalares. Jamas datos personales en claro ni secretos.
+  detail        Json     @default("{}")
+
+  tipoDeEvento  AuditEventType @relation(fields: [eventType], references: [code])
+  resultado     AuditOutcome   @relation(fields: [outcome], references: [code])
+  tipoDeActor   AuditActorType @relation(fields: [actorType], references: [code])
+
+  @@index([at(sort: Desc)])
+  @@index([correlationId])
+  @@map("audit_log")
+}
+
+/// Catalogo de tipos de evento. CLAUDE.md §5: "enums en tabla de catalogo, no
+/// en tipo nativo" — un enum nativo de PostgreSQL exige una migracion con
+/// bloqueo para anadir un valor, y este catalogo crece en cada paquete.
+model AuditEventType {
+  code            String  @id
+  domain          String
+  requiresCompany Boolean @default(true) @map("requires_company")
+
+  registros AuditLog[]
+
+  @@map("audit_event_type")
+}
+
+/// success · failure · blocked
+model AuditOutcome {
+  code String @id
+
+  registros AuditLog[]
+
+  @@map("audit_outcome")
+}
+
+/// USER · SYSTEM · BACKOFFICE · ANONYMOUS
+model AuditActorType {
+  code String @id
+
+  registros AuditLog[]
+
+  @@map("audit_actor_type")
+}

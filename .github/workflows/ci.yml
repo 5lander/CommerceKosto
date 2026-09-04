@@ -1,0 +1,137 @@
+# Integración continua — CLAUDE.md §13.
+#
+# CI CORRE EXACTAMENTE EL MISMO `npm run audit` QUE EL PRE-COMMIT. No hay una
+# lista de checks aquí y otra allí: una lista duplicada se desincroniza, y el
+# día que se desincroniza es el día en que CI deja de proteger la rama.
+#
+# La única diferencia es el ALCANCE, y va en el sentido correcto: el pre-commit
+# puede saltarse las pruebas de integración si el desarrollador no tiene Docker
+# levantado; aquí la base SIEMPRE está, así que se ejecutan todas sin excepción.
+#
+# Las acciones van FIJADAS POR SHA DE COMMIT y no por etiqueta. `@v7` es un
+# puntero móvil que el dueño de la acción puede reapuntar: quien controle ese
+# repositorio ejecutaría código en este pipeline, con acceso a su entorno. Es
+# el mismo criterio que aplica a las imágenes de contenedor (CLAUDE.md §1).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Mínimo privilegio: este workflow solo lee el código. No publica, no comenta,
+# no escribe en el repositorio.
+permissions:
+  contents: read
+
+# Un push nuevo cancela la corrida anterior de la misma rama: gasta menos y da
+# antes el resultado que importa, que es el del último commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auditoria:
+    name: npm run audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # Credenciales DESECHABLES de una base efímera que vive lo que dura el
+      # job. No son secretos y por eso están a la vista: un `secrets.` aquí
+      # daría la falsa impresión de que protege algo.
+      POSTGRES_DB: costeo
+      POSTGRES_PORT: '5432'
+      POSTGRES_SUPERUSER: postgres
+      POSTGRES_SUPERUSER_PASSWORD: ci-superusuario
+      COSTEO_MIGRATOR_PASSWORD: ci-migrator
+      COSTEO_APP_PASSWORD: ci-app
+
+      # La aplicación se conecta como costeo_app. El esquema de entorno rechaza
+      # el arranque si esta cadena trae otro usuario (CLAUDE.md §4.1).
+      DATABASE_URL: postgresql://costeo_app:ci-app@localhost:5432/costeo?schema=public
+      MIGRATION_DATABASE_URL: postgresql://costeo_migrator:ci-migrator@localhost:5432/costeo?schema=public
+      SHADOW_DATABASE_URL: postgresql://costeo_migrator:ci-migrator@localhost:5432/costeo_shadow?schema=public
+
+      NODE_ENV: test
+      LOG_LEVEL: warn
+      MAIL_ADAPTER: fake
+      STORAGE_ADAPTER: fake
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `audit:forbidden` comprueba que ninguna migración ya commiteada se
+          # haya editado, y para eso necesita el commit anterior en el clon.
+          fetch-depth: 2
+
+      - name: Preparar Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Se usa el MISMO docker-compose.yml que en local, y no un `services:` de
+      # GitHub, por una razón concreta: el compose fija la imagen por digest y
+      # monta `docker/postgres/initdb/`, que es donde se crean los dos roles con
+      # sus privilegios. Un `services:` sería otra base, configurada de otra
+      # manera, y las pruebas de la Barrera 1 estarían midiendo algo que no es
+      # lo que se despliega.
+      - name: Levantar PostgreSQL
+        run: docker compose up -d db
+
+      - name: Esperar a que la base esté sana
+        run: |
+          for _ in $(seq 1 60); do
+            estado=$(docker inspect -f '{{.State.Health.Status}}' costeo-db 2>/dev/null || echo starting)
+            [ "$estado" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "La base no llegó a estado healthy."
+          docker compose logs db
+          exit 1
+
+      - name: Aplicar migraciones
+        run: npm run migrate:deploy
+
+      # Los once checks. Falla el job al primero que falle.
+      - name: Auditoría completa
+        run: npm run audit
+
+      # No está dentro de `npm run audit` a propósito: crea y destruye bases
+      # enteras, así que en el pre-commit sería insoportable. Aquí es barato y
+      # es donde de verdad hace falta, porque comprueba que cada migración se
+      # puede revertir (ADR-004).
+      - name: Migraciones reversibles
+        run: npm run migrate:verify
+
+      # AUDITORIA.md C26. Va al final para que un aviso de una dependencia no
+      # tape un fallo del código propio, que es el que hay que arreglar primero.
+      - name: Vulnerabilidades conocidas en dependencias
+        run: npm audit --audit-level=high
+
+      # El criterio de aceptación de P0, ejecutado: "docker compose up levanta
+      # la aplicación sin una sola credencial real". Todos los adaptadores en
+      # `fake`, ninguna clave de ningún servicio externo.
+      - name: La aplicación levanta entera, sin credenciales reales
+        run: |
+          docker compose up -d --build api
+          for _ in $(seq 1 45); do
+            if curl -fsS http://localhost:3000/health > /dev/null; then
+              curl -fsS http://localhost:3000/ready
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "La API no respondió en /health."
+          docker compose logs api
+          exit 1
+
+      - name: Recoger los logs si algo falló
+        if: failure()
+        run: docker compose logs --no-color --tail 200

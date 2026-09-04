@@ -1,0 +1,7 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   integration  test/integracion/cabeceras-de-seguridad.spec.ts > cabeceras de seguridad > en una respuesta que SI llega a un manejador > x-frame-options = DENY
+AssertionError: expected undefined to be 'DENY' // Object.is equality
+ FAIL   integration  test/integracion/cabeceras-de-seguridad.spec.ts > cabeceras de seguridad > en una respuesta que NO llega a ningun manejador > un 404 tambien lleva x-frame-options
+AssertionError: expected undefined to be 'DENY' // Object.is equality
+ Test Files  1 failed | 3 skipped (4)
+      Tests  2 failed | 16 passed | 28 skipped (46)

@@ -1,0 +1,8 @@
+Clone found (typescript):
+ - apps\api\src\shared\infrastructure\scratch\copia-dos.ts [1:28 - 15:2] (14 lines, 192 tokens)
+   apps\api\src\shared\infrastructure\scratch\copia-uno.ts [1:28 - 15:2]
+ 1  │ 1  │ (entrada: readonly number[]): number {                      
+ 2  │ 2  │   let total = 0;                                            
+ 3  │ 3  │   for (const valor of entrada) {                            
+ 4  │ 4  │     if (valor > 0) {                                        
+ 5  │ 5  │       total += valor * 2;                                   

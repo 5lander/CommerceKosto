@@ -1,0 +1,7 @@
+
+C:\Projects\CommerceKosto\apps\api\src\shared\domain\scratch\violacion.ts
+  5:9   error  Blocks are nested too deeply (4). Maximum allowed is 3  max-depth
+  6:11  error  Blocks are nested too deeply (5). Maximum allowed is 3  max-depth
+
+✖ 2 problems (2 errors, 0 warnings)
+

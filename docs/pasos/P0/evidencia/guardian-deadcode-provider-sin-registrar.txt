@@ -1,0 +1,8 @@
+Unused files (1)
+apps/api/src/shared/infrastructure/persistence/prisma-audit-log.repository.ts
+Unused exports (1)
+currentRequestContext  function  apps/api/src/shared/infrastructure/observability/request-context.ts:38:17
+Unused exported types (1)
+AuditLogPort  interface  apps/api/src/shared/application/ports/audit-log.port.ts:49:18
+Configuration hints (8)
+**/dist/**                             knip.json  Remove from ignore              

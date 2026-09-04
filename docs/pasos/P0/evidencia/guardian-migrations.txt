@@ -1,0 +1,7 @@
+  20990101000000_violacion_guardian
+     [M1] falta down.sql (AUDITORIA.md D1 exige migracion reversible)
+audit:migrations  FALLO — 1 problema(s) en 2 migracion(es)
+  20990101000000_violacion_guardian
+     [M6] "producto_falso" se crea sin RLS deny-by-default completo (ENABLE + FORCE + al menos una POLICY) en la misma migracion. CLAUDE.md §4.1: la politica se define ANTES de insertar la primera fila
+     [M9] down.sql no borra su fila de _prisma_migrations ('20990101000000_violacion_guardian'). No se usa "migrate resolve --rolled-back": solo acepta migraciones FALLIDAS, no exitosas (ADR-004)
+audit:migrations  FALLO — 2 problema(s) en 2 migracion(es)

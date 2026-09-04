@@ -1,0 +1,11 @@
+Unused exports (1)
+noUsada  apps/api/src/shared/infrastructure/observability/request-context.ts:43:14
+Configuration hints (8)
+**/dist/**                             knip.json  Remove from ignore              
+**/generated/**                        knip.json  Remove from ignore              
+**/.tmp/**                             knip.json  Remove from ignore              
+apps/*/prisma/migrations/**            knip.json  Remove from ignore              
+.dependency-cruiser.cjs                knip.json  Remove redundant entry pattern  
+src/main.ts                  apps/api  knip.json  Remove redundant entry pattern  
+vitest.config.ts             apps/api  knip.json  Remove redundant entry pattern  
+.dependency-cruiser.cjs                knip.json  Remove redundant project pattern

@@ -1,0 +1,98 @@
+# Entorno local de costeo-saas.
+#
+# DOS MODOS, a proposito separados:
+#
+#   npm run db:up      ->  docker compose up -d db
+#       Solo PostgreSQL. Es el modo de trabajo diario: `npm run dev` corre en el
+#       host, contra esta base. Recarga en caliente sin pelearse con el contenedor.
+#
+#   docker compose up  ->  db + api
+#       La aplicacion construida como correra en produccion, SIN montajes de
+#       codigo. Es lo que satisface el criterio de aceptacion de P0:
+#       "docker compose up levanta la aplicacion sin una sola credencial real".
+#
+# NO SE MONTA EL CODIGO FUENTE en el contenedor de la API. Un bind mount del
+# repositorio mete un node_modules de win32 dentro de un contenedor Linux y
+# rompe @swc/core y los engines de Prisma con mensajes que apuntan al lugar
+# equivocado. Lo verifica la regla `sin-bind-mount-de-codigo` de
+# audit:forbidden. Ver docs/incidencias/INC-003.
+#
+# Sin clave `version:`: es obsoleta en Compose v2+ y solo produce un aviso.
+
+name: costeo-saas
+
+services:
+  db:
+    # Imagen FIJADA POR DIGEST, nunca `latest` (CLAUDE.md §1, SEGURIDAD.md §9).
+    # PostgreSQL 18.6 — GA desde 2025-09-25, soporte hasta 2030-11-14 (ADR-001).
+    image: postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af
+    container_name: costeo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-costeo}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?falta POSTGRES_SUPERUSER_PASSWORD}
+      COSTEO_MIGRATOR_PASSWORD: ${COSTEO_MIGRATOR_PASSWORD:?falta COSTEO_MIGRATOR_PASSWORD}
+      COSTEO_APP_PASSWORD: ${COSTEO_APP_PASSWORD:?falta COSTEO_APP_PASSWORD}
+      # Detecta corrupcion silenciosa en disco. En una base que guarda el libro
+      # de inventario, un bit cambiado sin aviso es peor que una caida.
+      POSTGRES_INITDB_ARGS: --data-checksums
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      # Toda consulta de mas de 200 ms queda registrada: es el insumo del
+      # presupuesto de rendimiento de CLAUDE.md §5.
+      - -c
+      - log_min_duration_statement=200
+      - -c
+      - pg_stat_statements.track=all
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      # Solo lectura: el contenedor no debe poder alterar sus propios scripts.
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      # PostgreSQL 18+ cambio la convencion: el montaje va en /var/lib/postgresql,
+      # NO en /var/lib/postgresql/data. Ver docs/incidencias/INC-005.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_SUPERUSER:-postgres} -d ${POSTGRES_DB:-costeo}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: costeo-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # La API se conecta como costeo_app: NO superusuario, NO duena de las
+      # tablas, sujeta a RLS. El esquema de entorno rechaza el arranque si la
+      # cadena trae otro usuario.
+      DATABASE_URL: postgresql://costeo_app:${COSTEO_APP_PASSWORD}@db:5432/${POSTGRES_DB:-costeo}?schema=public&connection_limit=10&pool_timeout=10
+      # MIGRATION_DATABASE_URL NO se pasa a este contenedor a proposito: el
+      # proceso de la aplicacion no debe poder migrar. El esquema de entorno
+      # falla si la encuentra en produccion.
+      MAIL_ADAPTER: fake
+      STORAGE_ADAPTER: fake
+      LOG_LEVEL: info
+    ports:
+      - '${API_PORT:-3000}:3000'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  pgdata:
+    name: costeo-pgdata

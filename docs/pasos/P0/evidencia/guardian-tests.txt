@@ -1,0 +1,14 @@
+--- 1. una prueba unitaria en rojo ---
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   unit  src/shared/domain/money/violacion.spec.ts > violacion deliberada del guardian > una asercion falsa
+AssertionError: expected 1 to be 2 // Object.is equality
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+
+--- 2. una unitaria que abre conexion a PostgreSQL: la para el guardian ---
+Una prueba del proyecto "unit" intento conectar al puerto 5432 (PostgreSQL).
+CLAUDE.md §2: el dominio y los casos de uso se prueban con la base APAGADA.
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   unit  src/shared/domain/money/violacion-base.spec.ts > violacion deliberada del guardian sin base > una prueba unitaria que abre una conexion a PostgreSQL
+Una prueba del proyecto "unit" intento conectar al puerto 5432 (PostgreSQL).
+CLAUDE.md §2: el dominio y los casos de uso se prueban con la base APAGADA.

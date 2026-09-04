@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Bloquea el commit si la auditoria no pasa.
+#
+# CLAUDE.md §13: `npm run audit` corre en CI y en pre-commit. El protocolo es de
+# un commit por paquete, asi que la lentitud no es un problema: se paga una vez
+# por paquete, no una vez por cambio.
+#
+# Las pruebas de integracion necesitan PostgreSQL. Si no esta levantado, el
+# hook sigue con las unitarias y avisa; CI las corre siempre sin excepcion.
+
+set -e
+
+echo "[pre-commit] auditoria completa — CLAUDE.md §13"
+
+npm run audit:types
+npm run audit:lint
+npm run audit:forbidden
+npm run audit:arch
+npm run audit:deadcode
+npm run audit:complexity
+npm run audit:duplication
+npm run audit:migrations
+npm run audit:secrets
+node tools/audit/tests.mjs --solo-unitarias
+
+echo "[pre-commit] auditoria en verde"

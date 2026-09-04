@@ -21,7 +21,7 @@
 - Cabeceras de respuesta jamás construidas con entrada de usuario sin validar (CRLF injection)
 
 ### 1.3 Path traversal
-- Archivos (archivos de usuarios) se guardan con **nombre generado por el sistema (UUID)**, nunca con el nombre original del archivo
+- Los archivos subidos (importaciones Excel/CSV) se guardan con **nombre generado por el sistema (UUID)**, nunca con el nombre original del archivo
 - El nombre original se guarda como metadato en base de datos, escapado
 - Ninguna ruta de filesystem se construye con entrada del usuario; acceso a archivos solo por ID → lookup en base → URL firmada
 
@@ -32,11 +32,11 @@
 ### 2.1 Anti fuerza bruta (login, códigos, tokens)
 | Superficie | Límite | Acción al exceder |
 |---|---|---|
-| Login de empresa | 5 intentos / 15 min por cuenta **y** por IP | Bloqueo incremental: 1 min → 5 → 15 → 60; aviso por correo al titular |
+| Login de la app cliente | 5 intentos / 15 min por cuenta **y** por IP | Bloqueo incremental: 1 min → 5 → 15 → 60; aviso por correo al titular |
 | Código de verificación (correo) | 5 intentos por código | El código se **invalida**; hay que pedir otro |
 | Solicitud de códigos | 3 por hora por usuario | Rechazo con espera |
 | Token de invitación de usuario y de restablecimiento de contraseña | Es de 256 bits — infuerzabrutable — pero: | 10 tokens inválidos desde una IP / hora → bloqueo de IP en esa ruta |
-| Recuperación de cuenta | 3 intentos / 24 h por perfil | Escala a revisión manual (SPEC 2.4) |
+| Recuperación de cuenta | 3 intentos / 24 h por cuenta | Escala a revisión manual por el back office, con motivo registrado |
 | Back office | 3 intentos → bloqueo + alerta al equipo | 2FA obligatorio siempre |
 
 - Contador de intentos en **Redis con TTL**, por cuenta y por IP simultáneamente (evita que una botnet distribuya intentos)
@@ -61,8 +61,8 @@
 ## 3. Autorización
 
 - **Deny by default**: toda ruta exige autenticación salvo lista blanca explícita (login, registro, webhooks firmados, healthcheck)
-- **IDOR** (CLAUDE.md §4.2): pertenencia al tenant verificada en la consulta misma (`WHERE id = $1 AND tenant_id = $2`) — no en un `if` posterior, y con RLS como red de seguridad
-- **Sin mass assignment**: los esquemas de entrada (Zod) declaran **exactamente** los campos aceptados con `.strict()` — un `role: "admin"` o un `tenant_id` inyectado en el body se rechaza, no se ignora
+- **IDOR** (CLAUDE.md §4.4): pertenencia verificada en la consulta misma (`WHERE id = $1 AND company_id = $2`, más `AND location_id = $3` cuando el rol es de ubicación) — no en un `if` posterior, y con RLS como red de seguridad
+- **Sin mass assignment**: los esquemas de entrada (Zod) declaran **exactamente** los campos aceptados con `.strict()` — un `role: "OWNER"` o un `company_id` inyectado en el body se rechaza, no se ignora
 - Escalada horizontal y vertical probadas por test: BODEGA no accede a recursos de GERENTE_LOCAL ni a ningún campo de receta o costo; GERENTE_LOCAL no accede a otra ubicación ni propaga recetas; ADMIN no elimina al OWNER; ningún rol accede a otra company; un tenant/cuenta no ve nada de otro
 - Los permisos se evalúan **en el servidor por operación**, nunca inferidos de lo que el frontend muestra u oculta
 
@@ -101,15 +101,18 @@ CORS: lista blanca exacta de orígenes propios; jamás `*`; `credentials` solo c
 
 ---
 
-## 5. Carga de archivos (archivos de usuarios) — superficie de ataque directa
+## 5. Carga de archivos de importación — superficie de ataque directa
 
-1. **Tamaño máximo** (ej. 5 MB) rechazado antes de bufferizar
-2. **Tipo real verificado por magic bytes**, no por extensión ni `Content-Type` del cliente — solo `.xlsx`, `.csv` y `.tsv` para importación; imágenes solo si un paquete futuro las requiere
+La única carga de archivos del alcance es la **importación Excel/CSV** de P10: ítems, artículos, productos, recetas y movimientos.
+
+1. **Tamaño máximo** (ej. 5 MB) y **límite de filas** rechazados antes de bufferizar
+2. **Tipo real verificado por magic bytes**, no por extensión ni `Content-Type` del cliente — solo `.xlsx`, `.csv` y `.tsv`; imágenes solo si un paquete futuro las requiere
 3. Nombre original descartado; almacenamiento con UUID en **bucket privado**, nunca en el filesystem del servidor web ni bajo una ruta pública
-4. **El parser de PDF corre aislado**: proceso separado con timeout y límite de memoria (los PDFs maliciosos que explotan parsers son un vector conocido) — idealmente en el worker de cola, jamás en el proceso del webhook
-5. PDFs se sirven solo por **URL firmada de vigencia corta**, con `Content-Disposition: attachment` (nunca render inline desde nuestro dominio)
+4. **El parser de hoja de cálculo corre aislado**: proceso separado con timeout y límite de memoria. Un `.xlsx` es un ZIP de XML y los vectores son conocidos —zip bomb, expansión de entidades XML, fórmulas y macros—, así que el parseo va **siempre en el worker de cola**, jamás en el proceso HTTP
+5. Los archivos se sirven solo por **URL firmada de vigencia corta**, con `Content-Disposition: attachment` (nunca render inline desde nuestro dominio)
 6. Sin ejecución posible: el bucket no sirve nada como HTML/JS
 7. Escaneo antivirus (ClamAV o servicio) como capa adicional antes de parsear
+8. **Previsualización antes de escribir** y escritura en una sola transacción reversible (CLAUDE.md §4.6): un archivo con una fila inválida en la posición 150 no escribe ninguna de las 149 anteriores
 
 ---
 
@@ -125,14 +128,14 @@ CORS: lista blanca exacta de orígenes propios; jamás `*`; `credentials` solo c
 
 ## 7. Denegación de servicio y abuso
 
-- **Rate limiting por capas**: global por IP → por cuenta → por endpoint sensible (login, búsqueda, vista previa, contador de vacante)
+- **Rate limiting por capas**: global por IP → por cuenta → por endpoint sensible (login, búsqueda difusa de ítems, previsualización de importación, propagación de recetas, vistas analíticas)
 - **Límite de tamaño de body** en todas las rutas (JSON: 100 KB; upload: su límite propio)
 - Timeouts en todo: peticiones entrantes, llamadas salientes, consultas SQL (`statement_timeout`), trabajos de cola
 - Validación por esquema **antes** de cualquier trabajo costoso — un payload gigante o malformado se rechaza en el borde
 - Protección de regex: sin regex con backtracking catastrófico sobre entrada de usuario (ReDoS); validar patrones con herramientas o usar RE2
 - La cola (BullMQ) con reintentos acotados y dead-letter — un mensaje venenoso no tumba el worker en bucle
 - Paginación con límite máximo servidor (`limit ≤ 100` aunque pidan 10.000)
-- Anti-scraping del negocio: ver SPEC 5.8 (patrones anómalos, identificadores por sesión)
+- **Anti-extracción del recetario**: un usuario legítimo con acceso a recetas podría recorrerlas todas para llevárselas. Detección de patrones anómalos (volumen de consultas de receta muy por encima del uso normal, recorrido secuencial de IDs, exportaciones masivas) con alerta interna y registro en el log de auditoría. La receta es el secreto competitivo del cliente
 
 ---
 
@@ -167,7 +170,7 @@ CORS: lista blanca exacta de orígenes propios; jamás `*`; `credentials` solo c
 | Campo | Contenido |
 |---|---|
 | `event_type` | Del catálogo de eventos (abajo) |
-| `actor` | Usuario/usuario/sistema + su tenant si aplica |
+| `actor` | Usuario / sistema / operador de back office, con su `company_id` cuando aplica |
 | `ip` | Dirección de origen |
 | `geo` | País/ciudad aproximados por IP (para detectar anomalías) |
 | `user_agent` | Navegador/dispositivo |
@@ -178,32 +181,42 @@ CORS: lista blanca exacta de orígenes propios; jamás `*`; `credentials` solo c
 | `at` | timestamptz |
 
 ### Catálogo de eventos auditables (obligatorio, ampliable)
-| Dominio | Eventos |
-|---|---|
-| **Autenticación** | `auth.login.success` · `auth.login.failure` · `auth.login.blocked` (rate limit) · `auth.logout` · `auth.session.revoked` · `auth.2fa.success/failure` · `auth.password.changed` · `auth.password.reset_requested` |
-| **Cuenta** | `account.email.changed` · `account.phone.changed` · `account.recovery.started/completed/denied` |
-| **Usuario** | `candidate.created` · `candidate.updated` (qué campos) · `candidate.paused` · `candidate.deleted` (derecho al olvido) · `candidate.viewed_by_company` · **`candidate.unlocked`** (por quién, con qué crédito) · `candidate.exported` |
-| **Vacante** | `vacancy.created/edited/paused/closed` · `vacancy.results.viewed` |
-| **Pagos** | `billing.package.purchased` · `billing.credit.consumed` · `billing.credit.refunded` · `billing.webhook.received/rejected` |
-| **Back office** | **TODA acción**: `admin.company.approved/rejected/suspended` · `admin.candidate.searched` (con justificación obligatoria) · `admin.catalog.created/edited` · `admin.credit.adjusted` · `admin.login.*` |
-| **Sistema** | `webhook.signature.invalid` · `ratelimit.exceeded` · `config.changed` · `migration.applied` |
+
+Los eventos de negocio se introducen **en el paquete que crea la funcionalidad** (check C28 de la auditoría). La columna «Desde» dice cuál.
+
+| Dominio | Eventos | Desde |
+|---|---|---|
+| **Autenticación** | `auth.login.success` · `auth.login.failure` · `auth.login.blocked` (rate limit) · `auth.logout` · `auth.session.revoked` · `auth.2fa.success/failure` · `auth.password.changed` · `auth.password.reset_requested` | P1 |
+| **Cuenta** | `account.email.changed` · `account.recovery.started/completed/denied` | P1 |
+| **Company y ubicaciones** | `company.settings.changed` (qué parámetro, valor anterior y nuevo) · `location.created/edited/deactivated` | P1 |
+| **Usuarios de la company** | `user.invited` · `user.accepted_invitation` · `user.role.changed` (rol anterior y nuevo) · `user.deactivated` | P1 |
+| **Catálogo** | `catalog.item.created/edited/deactivated` · `catalog.article.created/edited` · `catalog.unit.created` · `catalog.conversion.created/edited` | P2 |
+| **Precios** | `pricing.reference_price.suggested` (con origen) · **`pricing.reference_price.confirmed`** (quién confirmó y desde qué valor — R5) | P3 |
+| **Recetas y productos** | `product.created/edited` · `product_location.activated/deactivated` · `product_location.price.changed` · `recipe.created` · `recipe.version.created` · **`recipe.propagated`** (a qué ubicaciones, cuáles estaban personalizadas — R11) · `recipe.propagation.reverted` | P4 |
+| **Inventario** | `inventory.movement.recorded` (tipo, ubicación, ítem) · `inventory.transfer.completed` · `inventory.production.recorded` (con la varianza contra el costo estándar) · `inventory.correction.recorded` (el movimiento de signo contrario, nunca una edición) | P6 |
+| **Períodos y conteo** | `period.closed` · **`period.reopened`** (solo `OWNER`, con motivo) · `count.started/submitted` (con el porcentaje del valor contado) | P7 |
+| **Importación** | `import.uploaded` · `import.previewed` (filas válidas y rechazadas) · `import.committed/rolled_back` | P10 |
+| **Back office** | **TODA acción**: `admin.login.*` · `admin.tenant.accessed` (**con motivo obligatorio**) · `admin.company.created/suspended` · `admin.plan.changed` · `admin.data.loaded` (carga dentro de un tenant) | P11 |
+| **Sistema** | `system.migration.applied` · `system.config.changed` · `system.ratelimit.exceeded` · **`system.audit_log.read`** (consultar el log también se audita — C30) | **P0** |
+
+Nota sobre `webhook.signature.invalid`: se reactiva el día que exista un webhook entrante. Hoy no hay ninguno en el alcance (§6).
 
 ### Auditoría de login reforzada
 - **Cada login registra IP, geo aproximada, user agent y device_id** — éxitos Y fallos
-- **Login desde dispositivo o ubicación nueva → correo de aviso al titular** ("Nuevo inicio de sesión en costeo-saas desde {ciudad} · {dispositivo}. ¿No fuiste tú? Asegura tu cuenta aquí")
-- El usuario de empresa puede ver sus **sesiones activas** (dispositivo, ubicación, última actividad) y **cerrar cualquiera** desde su perfil
-- Panel de actividad de la cuenta: historial de logins visible al admin de la empresa
-- Anomalías que generan alerta interna: login exitoso tras ráfaga de fallos · misma cuenta desde dos países en ventana corta · admin de back office fuera de horario habitual
+- **Login desde dispositivo o ubicación nueva → correo de aviso al titular** ("Nuevo inicio de sesión en {nombre del producto} desde {ciudad} · {dispositivo}. ¿No fuiste tú? Asegura tu cuenta aquí"). El nombre sale de `config/branding.ts` (D1), nunca literal en el código
+- El usuario puede ver sus **sesiones activas** (dispositivo, ubicación, última actividad) y **cerrar cualquiera** desde su perfil
+- Panel de actividad de la cuenta: historial de logins visible al `OWNER` y a los `ADMIN` de la company
+- Anomalías que generan alerta interna: login exitoso tras ráfaga de fallos · misma cuenta desde dos países en ventana corta · operador de back office fuera de horario habitual · recorrido masivo de recetas
 
 ### Retención y acceso
-- Retención mínima: **12 meses** en caliente, luego archivo cifrado (ajustar con asesoría legal LOPDP)
-- El acceso al log de auditoría es de solo lectura, restringido al back office, **y consultar el log también se audita**
+- Retención mínima: **12 meses** en caliente, luego archivo cifrado (ajustar con asesoría legal LOPDP — ítem A4 de `docs/FASE0-CHECKLIST.md`)
+- El acceso al log de auditoría es de solo lectura, restringido al back office, **y consultar el log también se audita** (`system.audit_log.read`), con guarda anti-recursión: leer el log no genera a su vez otro evento de lectura
 - Exportable para responder a un reclamo de un usuario (LOPDP) o a una investigación
 
 ## 10b. Detección y respuesta
 
-- **Alertas automáticas** ante: ráfagas de login fallido, ráfagas de 403 (alguien probando IDOR), tokens de registro inválidos en serie, picos de 429, firma de webhook inválida repetida, consultas que tocan volúmenes anómalos
-- Log de auditoría **inmutable y append-only** (tabla sin UPDATE/DELETE para el rol de la app)
+- **Alertas automáticas** ante: ráfagas de login fallido, ráfagas de 403 (alguien probando IDOR), tokens de invitación inválidos en serie, picos de 429, recorrido masivo de recetas o de precios, consultas que tocan volúmenes anómalos
+- Log de auditoría **inmutable y append-only**: sin `UPDATE`/`DELETE`/`TRUNCATE` para el rol de la app **por privilegio**, y con trigger `BEFORE UPDATE OR DELETE OR TRUNCATE ... FOR EACH STATEMENT` que alcanza también al dueño de la tabla. El trigger es de **sentencia**, no de fila: con `FORCE ROW LEVEL SECURITY` activo, un `DELETE` sin política afecta a cero filas y un trigger de fila nunca se dispararía — el borrado «tendría éxito» en silencio
 - Reloj sincronizado (NTP) — sin esto los logs no sirven como evidencia
 - Runbook de incidentes con el procedimiento de **brecha de datos**: contención, evaluación, notificación a la autoridad LOPDP en plazo, notificación a afectados
 - Revisión de accesos del back office: quién vio qué perfil, exportable
@@ -214,19 +227,24 @@ CORS: lista blanca exacta de orígenes propios; jamás `*`; `credentials` solo c
 
 | Cuándo | Qué |
 |---|---|
-| Cada commit | `npm run audit` completo (incluye `audit:sec-headers`, `audit:forbidden`, `audit:secrets`, deps) |
+| Cada commit | `npm run audit` completo (incluye `audit:sec-headers`, `audit:forbidden`, `audit:secrets`, `audit:migrations`, deps) |
 | Cada paquete | Sección C de la auditoría con evidencia + tests de authz del paquete |
-| P10 | **Pentest interno guiado**: recorrer OWASP Top 10 contra el sistema completo con los fakes; suite de pruebas de abuso (fuerza bruta simulada, IDOR masivo, payloads malformados, uploads maliciosos) |
+| P15 | **Pentest interno guiado**: recorrer OWASP Top 10 contra el sistema completo con los fakes; suite de pruebas de abuso (fuerza bruta simulada, IDOR masivo, payloads malformados, uploads maliciosos) |
 | Pre-producción | Escaneo externo (ZAP baseline o similar) + revisión de configuración TLS |
 | Continuo | Dependabot/renovate para parches de dependencias |
 
 ### Tests de seguridad obligatorios en el repositorio
-- `security/idor.test` — cada endpoint con ID probado cruzando tenants
-- `security/blocked-fields.test` — respuesta cruda de toda ruta sin campos bloqueados
-- `security/bruteforce.test` — los límites de §2.1 se aplican de verdad
-- `security/webhook-signature.test` — payload sin firma o con firma inválida se rechaza sin efectos
-- `security/mass-assignment.test` — campos extra en el body se rechazan
-- `security/rls.test` — con RLS activo, una consulta sin tenant no devuelve filas
+- `security/db-roles.test` — el rol de la aplicación **no** es superusuario, no es dueño de ninguna tabla y no puede crear ni destruir objetos *(desde P0)*
+- `security/append-only.test` — `audit_log` (P0) e `inventory_movement` (P6) rechazan `UPDATE`, `DELETE` y `TRUNCATE`, tanto para el rol de la app como para el dueño *(desde P0)*
+- `security/sec-headers.test` — las cabeceras de §4.4 están presentes en toda respuesta *(desde P0)*
+- `security/rls.test` — con RLS activo, una consulta sin company efectiva devuelve **cero filas**, no las de otro tenant *(desde P1)*
+- `security/idor.test` — cada endpoint con ID probado cruzando companies **y ubicaciones** *(desde P1)*
+- `security/blocked-fields.test` — respuesta cruda de toda ruta, autenticado como `BODEGA`, sin ninguno de los campos de CLAUDE.md §4.3 *(desde P1)*
+- `security/bruteforce.test` — los límites de §2.1 se aplican de verdad, por cuenta **y** por IP *(desde P1)*
+- `security/mass-assignment.test` — campos extra en el body se rechazan, no se ignoran *(desde P1)*
+- `security/backoffice-isolation.test` — ningún módulo de la app cliente importa la conexión privilegiada *(desde P11)*
+
+`security/webhook-signature.test` se añade el día que exista un webhook entrante. Hoy no hay ninguno en el alcance (§6).
 
 ---
 
@@ -241,14 +259,15 @@ CORS: lista blanca exacta de orígenes propios; jamás `*`; `credentials` solo c
 | XSS | Escapado por defecto + CSP con nonce + HttpOnly |
 | CSRF | SameSite=Strict + token CSRF + verificación de Origin |
 | SSRF | Sin fetch de URLs de usuario + lista blanca de destinos |
-| IDOR / escalada | Tenant en la consulta + RLS + tests por endpoint |
+| IDOR / escalada | `company_id` (y `location_id`) en la consulta + RLS + tests por endpoint |
 | Mass assignment | Esquemas `.strict()` con campos explícitos |
 | Path traversal | Nombres UUID + acceso solo por ID + bucket privado |
-| Upload malicioso | Magic bytes + tamaño + parser aislado + AV + URLs firmadas |
-| Replay de webhooks | Firma timing-safe + idempotencia + ventana temporal |
+| Upload malicioso | Magic bytes + tamaño + límite de filas + parser aislado en worker + AV + URLs firmadas |
+| Replay de webhooks | *No aplica hoy*: no hay webhooks entrantes. Si se añade uno: firma timing-safe + idempotencia + ventana temporal |
 | DoS / ReDoS | Rate limiting en capas + timeouts + límites de body + regex seguras |
 | Fuga por errores/logs | Errores genéricos + minimización + DTOs explícitos |
 | Supply chain | Audit en CI + lockfile + revisión de dependencias + digest fijado |
 | Robo de secretos | Gestor de secretos + escáner + rotación documentada |
 | Timing attacks | `timingSafeEqual` en toda comparación de secretos |
-| Scraping del negocio | Rate limiting + patrones anómalos + datos bloqueados nunca enviados |
+| **Extracción del recetario** | Rate limiting + detección de recorrido masivo + **los campos de CLAUDE.md §4.3 nunca salen del backend para `BODEGA`** + cifrado en campo de las líneas de receta |
+| **Alteración de la evidencia** | Log de auditoría append-only por privilegio **y** por trigger de sentencia + libro de inventario sin `UPDATE`/`DELETE` + reloj sincronizado |

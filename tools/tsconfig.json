@@ -1,0 +1,20 @@
+{
+  "_comentario": [
+    "El tooling de auditoria tambien se verifica. Esta escrito en .mjs con tipos",
+    "JSDoc: sin compilacion, sin ts-node, y aun asi comprobado por tsc.",
+    "erasableSyntaxOnly garantiza que Node 24 pueda ejecutar cualquier .ts que se",
+    "anada aqui sin transpilar."
+  ],
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowJs": true,
+    "checkJs": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true
+  },
+  "include": ["**/*.mjs", "**/*.ts", "../scripts/**/*.mjs"],
+  "exclude": ["node_modules"]
+}

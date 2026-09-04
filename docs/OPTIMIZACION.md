@@ -22,7 +22,7 @@
 |---|---|---|
 | `audit:deadcode` | `knip` (o ts-prune) | Hay exports, archivos o dependencias sin uso |
 | `audit:complexity` | ESLint `complexity: 10`, `max-depth: 3`, `max-lines-per-function: 40` | Se excede sin `eslint-disable` (que está prohibido → refactorizar) |
-| `audit:duplication` | `jscpd` umbral 3 % | Bloques duplicados — extraer al tercer uso |
+| `audit:duplication` | `jscpd`, **cero clones** de ≥50 tokens y ≥5 líneas | Bloques duplicados — extraer al tercer uso |
 | `audit:deps-weight` | Revisión en PR | Dependencia nueva sin justificación de peso/mantenimiento |
 
 ---
@@ -47,9 +47,9 @@ Reglas generales:
 
 ## 3. Node.js — no bloquear, no filtrar memoria
 
-- **El event loop es sagrado**: nada de CPU pesada (parseo de PDF, transcripción, scoring masivo, generación de sintéticos) en el proceso HTTP — todo a workers de BullMQ
+- **El event loop es sagrado**: nada de CPU pesada (parseo de Excel/CSV, deduplicación por similitud, costeo masivo del catálogo, generación de datos sintéticos) en el proceso HTTP — todo a workers de BullMQ
 - Sin APIs síncronas de I/O (`readFileSync`, `execSync`) fuera del arranque
-- **Streams para archivos**: los CVs se procesan por stream, jamás bufferizados completos si supera lo necesario
+- **Streams para archivos**: los archivos de importación se procesan por stream, jamás bufferizados completos
 - Concurrencia controlada: `Promise.all` con lotes acotados (p-limit) — nunca disparar 10.000 promesas a la vez contra la base o un servicio externo
 - Sin fugas: listeners removidos, timers limpiados, conexiones devueltas al pool; los workers de cola procesan con concurrencia fija
 - Backpressure respetado en colas y streams
@@ -61,26 +61,26 @@ Reglas generales:
 | Dato | Caché | TTL / invalidación |
 |---|---|---|
 | Unidades y factores de conversión · grupos de ítems · definición de planes | ✅ Redis + memoria local | Invalidación por evento al editar |
-| Configuración (`scoring`, `pricing`, `lifecycle`) | ✅ Memoria con recarga | Al cambiar versión |
+| Configuración versionada (`branding`, `periods`, `plans`, `locale`) | ✅ Memoria con recarga | Al cambiar versión |
 | Resultados del cálculo central | Si se **persisten**, eso ES su caché | Recálculo controlado |
 | Métricas de paneles | ✅ Vista materializada | Refresco programado |
 | Saldos de inventario · precios de referencia vigentes · versiones de receta · resultados de costeo | ❌ **Nunca** | Consistencia manda: leer siempre de la base |
 | Sesiones y rate limits | Redis (es su lugar natural) | TTL propio |
 
-Regla dura: **cachear jamás datos bloqueados/desbloqueados por tenant en capas compartidas** — un caché mal segmentado es una fuga de datos entre empresas.
+Regla dura: **jamás cachear datos de una company en una capa compartida** — un caché mal segmentado es una fuga entre companies, y aquí lo que se fugaría son recetas, costos y márgenes. Toda clave de caché que toque datos de negocio lleva el `company_id` (y el `location_id` cuando aplique) **dentro de la clave**, no como filtro posterior.
 
 ## 5. Frontend — presupuestos, no opiniones
 
-- **Presupuesto de bundle** medido en CI: la web de registro (móvil, red lenta) < 200 KB de JS inicial; el panel < 350 KB. Se excede → el build avisa y se justifica o se corta
+- **Presupuesto de bundle** medido en CI: las pantallas de uso en piso —conteo físico y carga de unidades vendidas, móvil y red mala— < 200 KB de JS inicial; el resto de la app cliente < 350 KB. Se excede → el build avisa y se justifica o se corta
 - Server Components por defecto; `"use client"` solo donde hay interactividad real
 - Cascadas de catálogo: carga diferida por nivel (no bajar el catálogo entero al abrir la página); búsqueda con debounce (300 ms) y cancelación de peticiones obsoletas (AbortController)
 - Sin re-renders evitables: estado local donde se usa, `memo` solo con causa medida en profiler — no por costumbre
 - Imágenes y assets optimizados por el framework; sin librerías de UI pesadas (ya normado en §10 de CLAUDE.md)
-- Guardado progresivo del registro: peticiones pequeñas por paso, no un submit gigante
+- **Guardado incremental en la grilla de unidades vendidas**: peticiones pequeñas por celda o por lote corto, no un submit gigante de 48 productos. Es el punto de abandono del producto (SPEC §10)
 
 ## 6. La medición es parte del trabajo
 
-- **Presupuestos de rendimiento en CI** (ya definidos): bot < 500 ms · panel < 300 ms · contador < 300 ms · p95, no promedio
+- **Presupuestos de rendimiento en CI**, los de `CLAUDE.md` §5, siempre **p95, no promedio**: costeo de 200 productos con 1.500 líneas < 400 ms · inventario de una ubicación con 500 ítems < 300 ms · consolidado de 10 ubicaciones < 800 ms · guardar una receta (con validación de ciclos) < 150 ms
 - `EXPLAIN ANALYZE` obligatorio en camino crítico (auditoría D8) — con datos de volumen realista, no con 20 filas
 - Perfil antes de optimizar fuera del camino crítico: `clinic.js` / `--prof` cuando algo se sienta lento; el resultado se adjunta a la decisión
 - Toda optimización no trivial se documenta: qué medía antes, qué mide después, qué costó en legibilidad (si empeoró la legibilidad sin mejora medible → se revierte)
@@ -113,5 +113,5 @@ Regla dura: **cachear jamás datos bloqueados/desbloqueados por tenant en capas 
 | I6 | Concurrencia acotada en todo `Promise.all` sobre I/O |
 | I7 | Cachés nuevos cumplen las tres condiciones de §4 y tienen invalidación definida |
 | I8 | Presupuestos de rendimiento del paquete medidos y en verde (p95) |
-| I9 | Presupuesto de bundle en verde *(solo P6b/P7b)* |
+| I9 | Presupuesto de bundle en verde *(solo P12/P13)* |
 | I10 | Optimizaciones no triviales documentadas con antes/después en CONSTRUCCION.md |

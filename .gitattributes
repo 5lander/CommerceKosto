@@ -1,0 +1,48 @@
+# Normalización de finales de línea.
+# Sin esto, core.autocrlf=true (activo en Windows) escribe los hooks y los .sh de
+# inicialización de PostgreSQL con CRLF, y fallan con `bad interpreter: /bin/sh^M`.
+# Ver docs/incidencias/INC-001-hook-pre-commit-bad-interpreter.md
+
+* text=auto eol=lf
+
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.mts       text eol=lf
+*.cts       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.md        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.sql       text eol=lf
+*.prisma    text eol=lf
+*.sh        text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+Dockerfile  text eol=lf
+.env.example text eol=lf
+.githooks/**       text eol=lf
+docker/**/*.sh     text eol=lf
+docker/**/*.sql    text eol=lf
+
+# Scripts nativos de Windows: CRLF obligatorio
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binarios
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.xlsx binary
+*.xls  binary
+*.woff  binary
+*.woff2 binary
+
+package-lock.json -diff linguist-generated
