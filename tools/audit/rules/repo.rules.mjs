@@ -203,26 +203,27 @@ export const repoRules = [
     id: 'sin-migracion-commiteada-modificada',
     descripcion: 'Modificar una migracion que ya esta en el historial',
     /**
-     * ENMIENDAS AUTORIZADAS, UNA A UNA Y CON FECHA DE RETIRADA.
+     * LA LISTA DE ENMIENDAS AUTORIZADAS ESTA VACIA, Y ES LO CORRECTO.
      *
-     * La regla no tiene modo permisivo: cada entrada de aqui autoriza UNA
-     * carpeta concreta y hay que escribirla a mano, de modo que aparece en el
-     * diff y alguien tiene que aprobarla. No existe un interruptor general.
+     * P0 abrio una: su `REVOKE ALL ON TABLE "_prisma_migrations"` impedia
+     * reproducir el historial sobre una base vacia —lo que Prisma hace en la
+     * base sombra para crear CUALQUIER migracion nueva— y P1 no se podia
+     * empezar. El usuario autorizo editar aquella migracion el 2026-08-27, con
+     * el argumento de que el proyecto no tenia ningun despliegue y las dos
+     * unicas bases con ella aplicada eran desechables.
+     *
+     * **Se retiro en P2**, tal como se habia escrito. La enmienda ya viajo en
+     * el commit de P1, asi que el archivo coincide con HEAD y la excepcion ya
+     * no protege nada: dejarla puesta seria una puerta abierta sin nadie
+     * detras. Esa es la vida entera que debe tener una excepcion de este tipo.
+     *
+     * Si vuelve a hacer falta, se anade una entrada `{carpeta, motivo,
+     * seRetiraEn}` a mano —aparece en el diff, alguien la aprueba— y se retira
+     * en el paquete que diga. No existe un interruptor general.
      *
      * @type {ReadonlyArray<{carpeta: string, motivo: string, seRetiraEn: string}>}
      */
-    enmiendasAutorizadas: [
-      {
-        carpeta: '20260827081537_p0_audit_log',
-        motivo:
-          'Su `REVOKE ALL ON TABLE "_prisma_migrations"` impedia reproducir el historial ' +
-          'sobre una base vacia, que es lo que Prisma hace en la base sombra para crear ' +
-          'CUALQUIER migracion nueva: fallaba con 42P01 y P1 no se podia empezar. Pasa a ser ' +
-          'condicional. Autorizado por el usuario el 2026-08-27: el proyecto no tiene ningun ' +
-          'despliegue y las dos unicas bases con la migracion aplicada son desechables.',
-        seRetiraEn: 'P2',
-      },
-    ],
+    enmiendasAutorizadas: [],
     porQue:
       'Rompe el checksum de `_prisma_migrations` en toda base donde ya se aplico. Un error en una migracion se corrige con una migracion nueva, jamas editando la anterior.',
     referencia: 'CLAUDE.md §5 · AUDITORIA.md D1',

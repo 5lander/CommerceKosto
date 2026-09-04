@@ -1,0 +1,12 @@
+$ # se restaura en el down de P1 el borrado que causo INC-011:
+$ #   DELETE FROM "audit_event_type" ...   <- audit_log lo referencia y es append-only
+$ npm run audit:migrations
+
+
+  20260904023411_p1_iam
+     [M10] down.sql borra filas de "audit_event_type", que NO elimina, y "audit_log" las referencia sin vaciarse en el mismo archivo. El down falla en cuanto haya datos, y no se vera en `migrate:verify`, que corre sobre bases limpias. Ver docs/incidencias/INC-011
+
+audit:migrations  FALLO — 1 problema(s) en 3 migracion(es)
+
+
+exit=1

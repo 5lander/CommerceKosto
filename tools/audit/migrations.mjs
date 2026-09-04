@@ -226,6 +226,64 @@ function comprobarBorradoDelHistorial({ nombre, down }) {
 }
 
 /**
+ * Quien apunta a quien, leido de TODAS las migraciones del repositorio.
+ *
+ * Se lee del SQL y no del `schema.prisma` a proposito: lo que decide si un
+ * `DELETE` revienta es la clave foranea que EXISTE en la base, y esa la
+ * escriben las migraciones. Un modelo de Prisma sin migrar no rompe nada.
+ *
+ * @type {Map<string, Set<string>> | null}
+ */
+let referencias = null;
+
+/**
+ * `[^;]` impide que la coincidencia cruce de una sentencia a la siguiente, que
+ * es como se emparejaria una tabla con la clave foranea de otra.
+ */
+const CLAVE_FORANEA =
+  /ALTER\s+TABLE\s+(?:"?public"?\.)?"?(\w+)"?[^;]*?REFERENCES\s+(?:"?public"?\.)?"?(\w+)"?/gis;
+
+/**
+ * @param {Map<string, Set<string>>} acumulado
+ * @param {string} nombre
+ */
+function anotarReferenciasDe(acumulado, nombre) {
+  const ruta = join(MIGRACIONES, nombre, 'migration.sql');
+  if (!existsSync(ruta)) return;
+
+  const sql = sinComentarios(readFileSync(ruta, 'utf8'));
+
+  for (const coincidencia of sql.matchAll(CLAVE_FORANEA)) {
+    const origen = (coincidencia[1] ?? '').toLowerCase();
+    const destino = (coincidencia[2] ?? '').toLowerCase();
+    if (origen === '' || destino === '' || origen === destino) continue;
+
+    acumulado.set(destino, (acumulado.get(destino) ?? new Set()).add(origen));
+  }
+}
+
+/** @returns {Map<string, Set<string>>} destino -> tablas que lo referencian */
+function mapaDeReferencias() {
+  if (referencias !== null) return referencias;
+
+  const acumulado = new Map();
+  for (const nombre of listarMigraciones()) {
+    anotarReferenciasDe(acumulado, nombre);
+  }
+
+  referencias = acumulado;
+  return referencias;
+}
+
+/**
+ * @param {string} tabla
+ * @returns {string[]} tablas con una clave foranea hacia `tabla`
+ */
+function referenciasA(tabla) {
+  return [...(mapaDeReferencias().get(tabla) ?? [])].sort();
+}
+
+/**
  * M10 — un `down` no borra filas de una tabla que sobrevive.
  *
  * NACE DE UN FALLO REAL (INC-011). El down de P1 borraba los tipos de evento
@@ -240,23 +298,56 @@ function comprobarBorradoDelHistorial({ nombre, down }) {
  * pueden estar referenciadas por datos que el down no controla. Un catalogo que
  * sostiene evidencia es tan append-only como la evidencia.
  *
+ * MIRA LAS CLAVES FORANEAS, no solo el DELETE. La primera version marcaba TODO
+ * borrado sobre una tabla que sobrevive, y en P2 salto sobre uno legitimo: el
+ * down retira las capacidades `catalog.*` de `permission`, a las que solo
+ * apunta `role_permission`, que se vacia en la sentencia de al lado. Marcarlo
+ * habria empujado a abrir una lista de excepciones por migracion — el patron
+ * que INC-011 y `no-sql-interpolado` ya ensenaron que envejece mal. En vez de
+ * eso, la regla lee las claves foraneas de TODAS las migraciones y solo marca
+ * cuando alguien que apunta a esa tabla NO se vacia ni se suelta en el mismo
+ * archivo.
+ *
+ * LIMITE CONOCIDO, dicho aqui para que nadie lo confunda con una garantia: que
+ * el referenciante se vacie en el mismo archivo se toma como afirmacion del
+ * autor. Si los dos `DELETE` llevan `WHERE` que no casan —se borran permisos
+ * que otras filas de `role_permission` todavia usan— esto no lo ve. Lo que si
+ * cierra es el caso de INC-011, donde el referenciante era `audit_log`, que es
+ * append-only y por tanto NUNCA puede vaciarse.
+ *
  * `_prisma_migrations` es la unica excepcion: borrar su propia fila es
  * justamente lo que M9 EXIGE.
  * @param {Migracion} m
  * @returns {Fallo[]}
  */
 function comprobarBorradoDeFilas({ downSql, tablasSoltadas }) {
-  const borradas = capturarTodo(downSql, /\bDELETE\s+FROM\s+"?([\w]+)"?/gi).map((t) => t.toLowerCase());
+  const borradas = new Set(
+    capturarTodo(downSql, /\bDELETE\s+FROM\s+"?([\w]+)"?/gi).map((t) => t.toLowerCase()),
+  );
 
-  return borradas
-    .filter((tabla) => tabla !== '_prisma_migrations' && !tablasSoltadas.has(tabla))
-    .map((tabla) => ({
+  /**
+   * Una tabla queda cubierta si el down la suelta o vacia sus filas.
+   * @param {string} tabla
+   */
+  const cubierta = (tabla) => tablasSoltadas.has(tabla) || borradas.has(tabla);
+
+  const fallos = [];
+  for (const tabla of borradas) {
+    if (tabla === '_prisma_migrations' || tablasSoltadas.has(tabla)) continue;
+
+    const huerfanas = referenciasA(tabla).filter((origen) => !cubierta(origen));
+    if (huerfanas.length === 0) continue;
+
+    fallos.push({
       check: 'M10',
       mensaje:
-        `down.sql borra filas de "${tabla}", que NO elimina. Si otra tabla las referencia, el down ` +
-        'falla en cuanto haya datos — y no se vera en `migrate:verify`, que corre sobre bases limpias. ' +
-        'Ver docs/incidencias/INC-011',
-    }));
+        `down.sql borra filas de "${tabla}", que NO elimina, y "${huerfanas.join('", "')}" las ` +
+        'referencia sin vaciarse en el mismo archivo. El down falla en cuanto haya datos, y no se ' +
+        'vera en `migrate:verify`, que corre sobre bases limpias. Ver docs/incidencias/INC-011',
+    });
+  }
+
+  return fallos;
 }
 
 const COMPROBACIONES = [

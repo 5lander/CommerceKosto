@@ -1,0 +1,13 @@
+$ # SABOTAJE: se anade una linea a la migracion de P0, que ya esta en el historial
+$ npm run audit:forbidden
+
+
+audit:forbidden  FALLO — 1 infraccion(es)
+
+  [sin-migracion-commiteada-modificada]  Modificar una migracion que ya esta en el historial
+     por que: Rompe el checksum de `_prisma_migrations` en toda base donde ya se aplico. Un error en una migracion se corrige con una migracion nueva, jamas editando la anterior.
+     norma:   CLAUDE.md §5 · AUDITORIA.md D1
+     apps/api/prisma/migrations/20260827081537_p0_audit_log/migration.sql  ya existia en HEAD y cambio
+
+
+exit=1

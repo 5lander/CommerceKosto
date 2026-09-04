@@ -8,56 +8,56 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P1 cerrado**. El siguiente es P2 (catálogo)
-**Fase del protocolo:** CIERRE de P1
-**Último commit:** `8f7b823` — `P1: IAM · tenants · ubicaciones · roles`
+**Paquete en curso:** ninguno — **P2 cerrado**. El siguiente es P3 (precios de referencia)
+**Fase del protocolo:** CIERRE de P2
+**Último commit:** `P2: Catálogo · ítems · artículos · unidades` (P1 fue `3555c9c`)
 **Fecha de última actualización:** 2026-09-04
 
 ### Dónde se retoma exactamente
 
-**P0 y P1 están cerrados y commiteados.** El aislamiento multi-tenant funciona y está probado contra PostgreSQL real y contra PgBouncer real. Lo siguiente es **P2 — catálogo**: ítems, artículos de compra, unidades y conversiones.
+**P0, P1 y P2 están cerrados y commiteados.** El aislamiento funciona y está probado contra PostgreSQL y contra PgBouncer reales; el catálogo existe y es la fuente única de verdad, hecha cumplir por dos checks distintos. Lo siguiente es **P3 — precios de referencia con vigencia**.
 
-**Lo que P2 hereda y no tiene que volver a construir**
+**Lo que P3 hereda y no tiene que volver a construir**
 
-- La capa de transacción-con-tenant. **Todo acceso a datos va por `TenantTransaction.run(company, …)`**; usar `rawClient` fuera rompe el build.
-- `SesionActiva` con `companyId`, `permisos` y `alcance`. Un caso de uso de P2 lo recibe y no necesita saber de dónde salió.
-- `@Requiere('catalog.item.create')` sobre el endpoint, y la fila correspondiente en `role_permission` sembrada por la migración de P2. **No se escriben roles en los endpoints.**
-- El patrón de esquema `.strict()` en todos los DTO.
-- Los errores de dominio: añadir un código a `CodigoDeDominio` obliga a mapearlo en el filtro, o no compila.
+- `TenantTransaction.run(company, …)`. Todo acceso a datos va por ahí; usar `rawClient` fuera rompe el build.
+- `SesionActiva` con `companyId`, `permisos` y `alcance`.
+- El catálogo: `CatalogModule` **exporta `ListarItems` y `ListarArticulos`**, que es lo que P3 necesita. No exporta el repositorio, y dos reglas impiden escribir en sus tablas desde fuera.
+- `Money`, `Ratio`, `Count`, `Quantity` y la aritmética decimal exacta.
+- El patrón de esquema `.strict()` y el `Record` exhaustivo de códigos de dominio: añadir uno sin mapearlo no compila.
+- El factor de conversión ya calculado y guardado en `purchase_article`: el motor de costeo no tendrá que leer el catálogo de unidades.
 
-**Lo que P2 tiene que acordarse de hacer**
+**Lo que P3 tiene que acordarse de hacer**
 
 | # | Qué | Por qué |
 |---|---|---|
-| 1 | **Volver a forzar el fallo de los checks afectados** al añadir rutas o reglas nuevas | INC-007, siete recurrencias. La última fue en P1 |
-| 2 | **`createMany` y no `create`** en tablas con política de `SELECT` restrictiva | INC-010 |
-| 3 | **El `down.sql` no borra filas de tablas que no elimina** | INC-011; M10 lo hace cumplir |
-| 4 | **Retirar la excepción `enmiendasAutorizadas`** de `sin-migracion-commiteada-modificada` | Se prometió para P2 |
-| 5 | Regla de `dependency-cruiser` que impida a otro módulo escribir en las tablas de `catalog` | CLAUDE.md §2: catálogo es fuente única de verdad |
+| 1 | **Volver a forzar el fallo de los checks afectados** al añadir tablas o reglas | INC-007, siete recurrencias |
+| 2 | **R5: ningún precio se mueve solo.** Versionado por vigencia, confirmación explícita, jamás sobrescritura | CLAUDE.md §6 |
+| 3 | **Índice `(company_id, item_id, valid_from DESC)`** — con su consulta delante | CLAUDE.md §5 |
+| 4 | **La cadena de costo del ítem (SPEC §12) va en `domain` puro**, con los guardas de división por cero del SPEC | Es la antesala de P5 |
+| 5 | `company_settings` sembrado con los parámetros de D3 | R13: el IVA recuperable es configuración de la company |
+| 6 | **`createMany` y no `create`** en tablas con política de `SELECT` restrictiva | INC-010 |
+| 7 | **El `down.sql` no borra filas referenciadas** por tablas que no se vacían | INC-011; M10 lo hace cumplir |
 
-**Hecho en P1 — completo**
+**Hecho en P2 — completo**
 
 | # | Entregable | Estado |
 |---|---|---|
-| 1 | **Migración `p1_iam`**: 14 tablas, 29 políticas, `ENABLE` + `FORCE` en todas. Reversible y verificada | ✅ |
-| 2 | **`current_company()`**: sin tenant devuelve NULL → cero filas, nunca las de otro | ✅ |
-| 3 | **Tres funciones `SECURITY DEFINER`** —`auth_lookup`, `session_lookup`, `invitation_lookup`—, las únicas lecturas sin tenant del sistema | ✅ |
-| 4 | **Barrera 2** — `TenantTransaction` con `run()` y `runWithoutTenant(motivo, …)` | ✅ |
-| 5 | **Barrera 3** — `SesionGuard` global, deny by default; cuatro rutas públicas y ninguna más | ✅ |
-| 6 | **Cuatro reglas nuevas de `audit:forbidden`** (26 en total), y `no-sql-interpolado` afinada: **cero exenciones por archivo** | ✅ |
-| 7 | **Login completo**: política + Argon2id + `auth_lookup`, con los cuatro rechazos indistinguibles | ✅ |
-| 8 | **Sesiones**: token opaco de 256 bits, hash en base, 12 h absolutas / 4 h de inactividad, revocación real | ✅ |
-| 9 | **Roles como capacidades**: `@Requiere`, escalada vertical y horizontal probadas | ✅ |
-| 10 | **Ubicaciones, invitación y roles**, con el límite del plan bajo candado de fila | ✅ |
-| 11 | **PgBouncer en modo transacción, probado** — cuarta condición de D12 | ✅ |
-| 12 | **`audit:deps`** (12.º check) y **`audit:migrations` M10** | ✅ |
-| 13 | **ADR-006**, INC-010, INC-011, documentación de sistema y de API | ✅ |
-| 14 | **329 pruebas**: 227 unitarias con la base apagada + 102 de integración | ✅ |
+| 1 | **Migración `p2_catalogo`**: 8 tablas, RLS `ENABLE` + `FORCE` en todas, reversible y verificada | ✅ |
+| 2 | **Catálogo global de unidades**, de solo lectura para la aplicación y con `factor_to_base` como constante física | ✅ |
+| 3 | **`item`** con tipo, unidad de uso, rendimiento acotado a [0,1], grupo, estado y confianza de precio | ✅ |
+| 4 | **`purchase_article`** con presentación y factor de conversión **derivado por el dominio** | ✅ |
+| 5 | **El criterio de aceptación**: kg → unidades sin factor se rechaza en el dominio, con la base apagada | ✅ |
+| 6 | **Fuente única de verdad por dos vías**: `audit:arch` y `audit:forbidden`, las dos con guardián | ✅ |
+| 7 | **Índice GIN + `pg_trgm`** sobre `lower(name)` para la deduplicación de P10 | ✅ |
+| 8 | **M10 afinada** para leer claves foráneas, sin abrir lista de excepciones | ✅ |
+| 9 | **Deuda pagada**: `enmiendasAutorizadas` retirada, lista vacía, regla verificada | ✅ |
+| 10 | **371 pruebas**: 253 unitarias con la base apagada + 118 de integración | ✅ |
 
-### Dos cosas que conviene que el usuario mire
+### Lo que conviene que el usuario mire
 
-1. **Umbral de bloqueo por IP en 25 en vez de 5.** Es un apartamiento razonado de la lectura literal de SEGURIDAD.md §2.1: con 5, cinco errores de cinco empleados detrás del mismo NAT bloquean el restaurante entero una hora. Reversible: dos constantes en `politica-de-intentos.ts`.
-2. **Refresh rotativo con detección de reuso, aplazado a P12.** Riesgo residual escrito en ADR-006: un token robado sirve hasta 4 h de inactividad o 12 h absolutas, salvo revocación.
+1. **No existe la tabla `unit_conversion`** que los entregables de P2 listaban. Entre unidades de la misma dimensión sus filas serían derivables; entre dimensiones distintas la conversión es **del ítem**, no universal, y vive en `purchase_article`. Si prefiere la tabla, es una migración y un puerto.
+2. **Umbral de bloqueo por IP en 25 en vez de 5** (de P1). Reversible: dos constantes.
+3. **Refresh rotativo aplazado a P12** (de P1), con el riesgo residual escrito en ADR-006.
 
 **Hecho y verificado**
 

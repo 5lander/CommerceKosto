@@ -20,6 +20,7 @@ export type CodigoDeDominio =
   | 'PERMISO_DENEGADO'
   | 'RECURSO_NO_ENCONTRADO'
   | 'LIMITE_DEL_PLAN'
+  | 'CONFLICTO'
   | 'ENTRADA_INVALIDA';
 
 /**

@@ -1,0 +1,13 @@
+$ # SABOTAJE: `iam` importa la infraestructura de `catalog`
+$ #   import { PrismaCatalogoRepositorio } from '../../../catalog/infrastructure/...';
+$ npm run audit:arch
+
+
+  error catalogo-solo-lo-escribe-catalog: apps/api/src/modules/iam/infrastructure/http/usuarios.controller.ts → apps/api/src/modules/catalog/infrastructure/prisma-catalogo.repositorio.ts
+
+x 1 dependency violations (1 errors, 0 warnings). 117 modules, 386 dependencies cruised.
+
+
+audit:arch  FALLO — hay imports que violan la regla de dependencia (CLAUDE.md §2).
+
+exit=1

@@ -78,6 +78,7 @@ const ESTADO_POR_CODIGO: Readonly<Record<CodigoDeDominio, number>> = {
   PERMISO_DENEGADO: HttpStatus.FORBIDDEN,
   RECURSO_NO_ENCONTRADO: HttpStatus.NOT_FOUND,
   LIMITE_DEL_PLAN: HttpStatus.CONFLICT,
+  CONFLICTO: HttpStatus.CONFLICT,
   ENTRADA_INVALIDA: HttpStatus.BAD_REQUEST,
 };
 

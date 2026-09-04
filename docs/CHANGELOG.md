@@ -4,6 +4,42 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P2 — Catálogo: ítems, artículos de compra, unidades · 2026-09-04
+
+**Objetivo:** la fuente única de verdad del proyecto.
+
+### Entregado
+
+- **Ocho tablas**: `unit` (global, de solo lectura para la aplicación), sus catálogos, `item_group`, `item` y `purchase_article`, todas con RLS `ENABLE` + `FORCE`
+- **El factor de conversión se CALCULA, no se captura** — se deriva cuando la presentación y la unidad de uso comparten dimensión, se exige cuando no, y se **rechaza** cuando es derivable
+- **La fuente única de verdad, hecha cumplir por dos vías**: `audit:arch` impide importar la infraestructura de `catalog`, y `audit:forbidden` impide tocar sus tablas desde cualquier otro sitio
+- **Índice GIN + `pg_trgm`** sobre `lower(name)` para la deduplicación de P10, como índice de expresión y no como columna generada
+- **371 pruebas**: 253 unitarias con la base apagada, 118 de integración
+
+### Deuda pagada
+
+**La excepción `enmiendasAutorizadas`** de `sin-migracion-commiteada-modificada` está retirada, tal como se había escrito en P1. La lista está vacía y la regla sigue midiendo — con su prueba del guardián.
+
+### Lo que se descubrió por el camino
+
+**M10 marcaba un borrado legítimo.** El `down` de P2 retira las capacidades `catalog.*` de `permission`, a las que solo apunta `role_permission`, que se vacía en la sentencia de al lado. La primera versión marcaba **todo** borrado sobre una tabla que sobrevive, y eso habría empujado a abrir una lista de excepciones por migración — el patrón que INC-011 y `no-sql-interpolado` ya enseñaron que envejece mal. Ahora M10 **lee las claves foráneas** y solo marca cuando alguien que apunta a esa tabla no se vacía ni se suelta en el mismo archivo. Sigue cazando el caso original.
+
+**El código de dominio `CONFLICTO` volvió**, retirado en P1 por no tener consumidor. El `Record` exhaustivo del filtro obligó a mapearlo antes de compilar, que es exactamente para lo que está.
+
+### Desviación del plan, consciente
+
+**No existe la tabla `unit_conversion`** que los entregables listaban. Entre unidades de la misma dimensión sus filas serían derivables del cociente de `factor_to_base`; entre dimensiones distintas —«un huevo pesa 50 g»— la conversión no es universal sino **del ítem**, y por eso vive en `purchase_article.conversion_factor`. Una tabla global entre `unid` y `g` afirmaría que todos los huevos pesan lo mismo.
+
+### Pendiente
+
+| Qué | Cuándo |
+|---|---|
+| Plegado de acentos en la deduplicación | P10, en la consulta |
+| Unidades propias por company | Sin paquete; hoy se modelan como presentación del artículo |
+| Lista blanca de knip para `shared/domain/**` | P5, y P5 no cierra con ella puesta |
+
+---
+
 ## P1 — IAM · tenants · ubicaciones · roles · 2026-09-04
 
 **Objetivo:** que el aislamiento funcione antes de que exista un dato de negocio.

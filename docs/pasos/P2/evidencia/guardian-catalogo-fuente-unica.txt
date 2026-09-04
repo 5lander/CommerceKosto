@@ -1,0 +1,14 @@
+$ # SABOTAJE: el repositorio de `iam` escribe en la tabla `item` del catalogo
+$ #   await tx.item.deleteMany({ where: {} });
+$ npm run audit:forbidden
+
+
+audit:forbidden  FALLO — 1 infraccion(es)
+
+  [tablas-de-catalogo-solo-en-catalog]  Escribir en `item`, `purchase_article`, `item_group` o `unit` fuera de `catalog`
+     por que: CLAUDE.md §2: el catalogo es la fuente unica de verdad. Un item creado desde `recipes` o desde `imports` es un item que no paso por las reglas del catalogo —rendimiento, unidad, tipo— y que nadie sabe de donde salio. Los demas modulos referencian por ID y leen por los puertos.
+     norma:   CLAUDE.md §2 · SPEC §5
+     apps/api/src/modules/iam/infrastructure/prisma-organizacion.repositorio.ts:99  await tx.item.deleteMany({ where: {} });
+
+
+exit=1

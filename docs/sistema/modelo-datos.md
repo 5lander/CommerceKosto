@@ -1,7 +1,7 @@
 # Modelo de datos
 
 > Se completa en cada paquete que cree tablas, **en el mismo commit**, con el diagrama de entidades actualizado.
-> Estado: **P1**. Existen la auditoría de P0 y las catorce tablas de identidad, organización y roles.
+> Estado: **P2**. Auditoría (P0), identidad y organización (P1) y catálogo (P2).
 
 ## Reglas transversales
 
@@ -165,13 +165,74 @@ Una tabla cuya política de `SELECT` sea más estrecha que la de `INSERT` **no s
 
 **Un `down.sql` no borra filas de una tabla que no elimina.** Si otra tabla las referencia, el `down` falla en cuanto haya datos, y `migrate:verify` no lo ve porque corre sobre bases limpias. Lo hace cumplir la comprobación **M10** de `audit:migrations`.
 
+## Lo que añade P2 — el catálogo
+
+```mermaid
+erDiagram
+    unit_dimension  ||--o{ unit : "clasifica"
+    unit            ||--o{ item : "unidad de uso"
+    unit            ||--o{ purchase_article : "unidad de presentacion"
+    company         ||--o{ item_group : "agrupa"
+    company         ||--o{ item : "tiene"
+    item_group      ||--o{ item : "agrupa"
+    item            ||--o{ purchase_article : "1 item, N articulos"
+    item_type       ||--o{ item : "tipifica"
+    price_confidence||--o{ item : "confianza del precio"
+
+    unit {
+        text    code PK "g, kg, ml, lt, unid, doc..."
+        text    dimension FK "MASA, VOLUMEN, CONTEO"
+        numeric factor_to_base "CONSTANTE FISICA. Sin company_id"
+    }
+    item {
+        uuid    id PK
+        uuid    company_id FK
+        text    name "UNIQUE por company"
+        text    type FK "COMPRADO o PRODUCIDO"
+        text    unit_of_use FK
+        numeric yield "CHECK entre 0 y 1"
+        uuid    group_id FK "nullable"
+        text    status FK
+        text    price_confidence FK "el tipo SUP del Excel"
+        boolean keeps_stock "CHECK: solo si PRODUCIDO"
+    }
+    purchase_article {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    item_id FK "N articulos -> 1 item"
+        text    name "UNIQUE por company"
+        text    brand
+        text    supplier
+        numeric presentation_amount "CHECK > 0"
+        text    presentation_unit FK
+        numeric conversion_factor "CHECK > 0. DERIVADO por el dominio"
+        text    status FK
+    }
+```
+
+### El catálogo de unidades no tiene tenant
+
+`factor_to_base` es una constante física, no una preferencia. Un catálogo por company significaría que cada una puede declarar que su kilo tiene 900 gramos, y ese error saldría como un **costo plausible y equivocado**. La aplicación no tiene ni `INSERT` sobre `unit`, y hay una prueba de integración que intenta el `UPDATE` y falla.
+
+La contrapartida: no se pueden crear unidades propias («atado», «bandeja»). Se modelan como presentación del artículo —«atado de 6 unid»—, que es donde de verdad viven.
+
+### No hay tabla de conversiones, y es deliberado
+
+Entre unidades de la **misma dimensión** el factor es el cociente de sus `factor_to_base`: una tabla guardaría filas derivables, que es la clase de dato que se desincroniza. Entre **dimensiones distintas** —«un huevo pesa 50 g»— la conversión no es universal sino **del ítem**, y por eso vive en `purchase_article.conversion_factor`, calculada por el dominio al dar de alta el artículo.
+
+### El índice de deduplicación es de expresión
+
+`CREATE INDEX item_name_similitud ON item USING gin (lower(name) gin_trgm_ops)`. No una columna generada —Prisma no la sabe declarar y produciría deriva— ni una columna mantenida por la aplicación, que se desincroniza el día que alguien escriba por otra vía. `lower` es `IMMUTABLE`, que es todo lo que PostgreSQL exige.
+
+Es **el único índice del proyecto sin consulta que lo use hoy**. Su consumidor es P10.
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
 |---|---|---|
 | **P0** | `audit_log`, `audit_event_type`, `audit_outcome`, `audit_actor_type` | ✅ |
 | **P1** | `company`, `company_settings`, `location`, `app_user`, `role`, `permission`, `role_permission`, `user_role`, `session`, `login_attempt` + 4 catálogos | ✅ |
-| P2 | `item`, `purchase_article`, `unit`, `unit_conversion`, `item_group` | ⬜ |
+| **P2** | `item`, `purchase_article`, `item_group` + `unit`, `unit_dimension`, `item_type`, `item_status`, `price_confidence` | ✅ |
 | P3 | `reference_price` | ⬜ |
 | P4 | `product`, `product_location`, `recipe`, `recipe_line`, `combo_component`, `recipe_propagation_log` | ⬜ |
 | P6 | `inventory_movement`, `inventory_balance` (proyección), `production_batch` | ⬜ |
@@ -199,3 +260,8 @@ Los de P1, todos con su consulta delante:
 | `location(company_id, status)` | Listado de ubicaciones activas |
 | `user_role(company_id, user_id)` | Capacidades efectivas dentro de `session_lookup` |
 | `login_attempt(email, at DESC)` · `(ip, at DESC)` | Los dos ejes de la política anti fuerza bruta |
+| `item(company_id, name)` único · `(company_id, status)` · `(company_id, type)` | Listado de ítems, filtrado por estado y por tipo |
+| `purchase_article(company_id, item_id)` | Los artículos de un ítem — la consulta de «N artículos → 1 ítem» |
+| `purchase_article(company_id, name)` único | Nombre de artículo único por company |
+| `item_group(company_id, name)` único | Nombre de grupo único por company |
+| `item_name_similitud` (GIN, trigrama) | **Sin consulta hoy.** Deduplicación de P10 |

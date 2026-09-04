@@ -29,6 +29,7 @@ import { TerminusModule } from '@nestjs/terminus';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
+import { CatalogModule } from './modules/catalog/catalog.module';
 import { IamModule } from './modules/iam/iam.module';
 import type { Configuration } from './shared/infrastructure/config/environment';
 import { DatabaseHealthIndicator } from './shared/infrastructure/health/database.health';
@@ -54,6 +55,7 @@ export class AppModule {
         TerminusModule,
         SharedModule.forRoot(config),
         IamModule,
+        CatalogModule,
       ],
       controllers: [HealthController],
       providers: [

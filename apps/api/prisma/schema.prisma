@@ -47,13 +47,13 @@ datasource db {
 /// `DELETE FROM audit_log` afecta a CERO filas, un trigger de fila nunca se
 /// dispara, y el borrado "tiene exito" en silencio.
 model AuditLog {
-  id            String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  at            DateTime @default(now()) @db.Timestamptz(6)
+  id String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  at DateTime @default(now()) @db.Timestamptz(6)
 
-  eventType     String   @map("event_type")
-  outcome       String
-  actorType     String   @map("actor_type")
-  actorId       String?  @map("actor_id") @db.Uuid
+  eventType String  @map("event_type")
+  outcome   String
+  actorType String  @map("actor_type")
+  actorId   String? @map("actor_id") @db.Uuid
 
   /// Nullable A PROPOSITO, y lo seguira siendo. El catalogo de SEGURIDAD.md §10
   /// incluye eventos que por naturaleza no tienen tenant:
@@ -61,21 +61,21 @@ model AuditLog {
   /// `system.ratelimit.exceeded`, `admin.login.*`.
   /// P1 anade la clave foranea con ON DELETE RESTRICT — jamas CASCADE: borrar
   /// una company no puede borrar su rastro de auditoria.
-  companyId     String?  @map("company_id") @db.Uuid
+  companyId String? @map("company_id") @db.Uuid
 
-  ip            String?  @db.Inet
-  geoCountry    String?  @map("geo_country") @db.Char(2)
-  geoCity       String?  @map("geo_city")
-  userAgent     String?  @map("user_agent")
-  deviceId      String?  @map("device_id") @db.Uuid
-  correlationId String   @map("correlation_id") @db.Uuid
+  ip            String? @db.Inet
+  geoCountry    String? @map("geo_country") @db.Char(2)
+  geoCity       String? @map("geo_city")
+  userAgent     String? @map("user_agent")
+  deviceId      String? @map("device_id") @db.Uuid
+  correlationId String  @map("correlation_id") @db.Uuid
 
   /// Solo IDs y escalares. Jamas datos personales en claro ni secretos.
-  detail        Json     @default("{}")
+  detail Json @default("{}")
 
-  tipoDeEvento  AuditEventType @relation(fields: [eventType], references: [code])
-  resultado     AuditOutcome   @relation(fields: [outcome], references: [code])
-  tipoDeActor   AuditActorType @relation(fields: [actorType], references: [code])
+  tipoDeEvento AuditEventType @relation(fields: [eventType], references: [code])
+  resultado    AuditOutcome   @relation(fields: [outcome], references: [code])
+  tipoDeActor  AuditActorType @relation(fields: [actorType], references: [code])
 
   @@index([at(sort: Desc)])
   @@index([correlationId])
@@ -138,12 +138,15 @@ model Company {
   /// primer paquete que lo toca, que es este.
   maxLocations Int @default(10) @map("max_locations")
 
-  estado    CompanyStatus    @relation(fields: [status], references: [code])
+  estado    CompanyStatus     @relation(fields: [status], references: [code])
   settings  CompanySettings?
   locations Location[]
   usuarios  AppUser[]
   roles     UserRole[]
   sesiones  Session[]
+  grupos    ItemGroup[]
+  items     Item[]
+  articulos PurchaseArticle[]
 
   @@map("company")
 }
@@ -166,14 +169,14 @@ model CompanyStatus {
 model CompanySettings {
   companyId String @id @map("company_id") @db.Uuid
 
-  ivaVenta             Decimal @map("iva_venta")              @db.Decimal(24, 12)
+  ivaVenta             Decimal @map("iva_venta") @db.Decimal(24, 12)
   ivaCompraRecuperable Boolean @map("iva_compra_recuperable")
-  provisionMerma       Decimal @map("provision_merma")        @db.Decimal(24, 12)
-  foodCostObjetivo     Decimal @map("food_cost_objetivo")     @db.Decimal(24, 12)
-  foodCostMaximo       Decimal @map("food_cost_maximo")       @db.Decimal(24, 12)
+  provisionMerma       Decimal @map("provision_merma") @db.Decimal(24, 12)
+  foodCostObjetivo     Decimal @map("food_cost_objetivo") @db.Decimal(24, 12)
+  foodCostMaximo       Decimal @map("food_cost_maximo") @db.Decimal(24, 12)
   foodCostUmbralVerde  Decimal @map("food_cost_umbral_verde") @db.Decimal(24, 12)
-  primeCostMaximo      Decimal @map("prime_cost_maximo")      @db.Decimal(24, 12)
-  reglaPopularidad     Decimal @map("regla_popularidad")      @db.Decimal(24, 12)
+  primeCostMaximo      Decimal @map("prime_cost_maximo") @db.Decimal(24, 12)
+  reglaPopularidad     Decimal @map("regla_popularidad") @db.Decimal(24, 12)
   diasOperativosMes    Int     @map("dias_operativos_mes")
   diasCobertura        Int     @map("dias_cobertura")
 
@@ -227,15 +230,15 @@ model LocationStatus {
 /// PostgreSQL: una consulta sobre `user` devuelve el nombre del rol de sesion,
 /// no la tabla, y el error que produce no dice nada de eso.
 model AppUser {
-  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
   /// Siempre en minusculas. La unicidad es GLOBAL, no por company: el login
   /// ocurre ANTES de saber a que tenant pertenece quien entra.
-  email     String   @unique
+  email        String   @unique
   /// Argon2id. NULL mientras la invitacion este pendiente.
-  passwordHash String? @map("password_hash")
-  status    String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  passwordHash String?  @map("password_hash")
+  status       String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   /// Invitacion pendiente. El token vive HASHEADO, igual que el de sesion: un
   /// volcado de la base no permite activar la cuenta de nadie.
@@ -372,4 +375,180 @@ model LoginAttempt {
   @@index([email, at(sort: Desc)])
   @@index([ip, at(sort: Desc)])
   @@map("login_attempt")
+}
+
+// ---------------------------------------------------------------------------
+// P2 — Catalogo: la FUENTE UNICA DE VERDAD del proyecto (CLAUDE.md §2).
+//
+// Ningun otro modulo crea, edita ni borra items, articulos ni unidades. Los
+// demas referencian por ID y leen a traves de los puertos de `catalog`. Lo hace
+// cumplir una regla de `dependency-cruiser`, no la buena voluntad.
+// ---------------------------------------------------------------------------
+
+/// Catalogo GLOBAL de unidades, sin tenant.
+///
+/// POR QUE GLOBAL Y NO POR COMPANY. Un kilogramo pesa lo mismo en todas las
+/// companies: `factor_a_base` es una constante fisica, no una preferencia. Un
+/// catalogo por tenant significaria que cada company puede declarar que su
+/// kilo tiene 900 gramos, y ese error saldria como un costo plausible y
+/// equivocado. La aplicacion NO tiene INSERT sobre esta tabla.
+///
+/// La contrapartida, dicha en voz alta: no se pueden crear unidades propias
+/// ("atado", "bandeja"). Se modelan como presentacion del articulo de compra
+/// —"atado de 6 unid"—, que es donde de verdad viven. Si algun dia hiciera
+/// falta de otra forma, seria una columna `company_id` nullable aqui, con
+/// politica `company_id IS NULL OR company_id = current_company()`.
+model Unit {
+  code      String @id
+  name      String
+  dimension String
+
+  /// Cuantas unidades BASE de su dimension hay en una de estas. La base es la
+  /// que tiene factor 1: gramo, mililitro, unidad. `numeric(24,12)` como todo
+  /// lo que participa en un calculo (ADR-003).
+  factorToBase Decimal @map("factor_to_base") @db.Decimal(24, 12)
+
+  magnitud           UnitDimension     @relation(fields: [dimension], references: [code])
+  itemsQueLaUsan     Item[]
+  articulosQueLaUsan PurchaseArticle[]
+
+  @@index([dimension])
+  @@map("unit")
+}
+
+/// MASA · VOLUMEN · CONTEO. Dos unidades solo se convierten entre si sin factor
+/// explicito cuando comparten dimension.
+model UnitDimension {
+  code String @id
+
+  unidades Unit[]
+
+  @@map("unit_dimension")
+}
+
+/// COMPRADO · PRODUCIDO (SPEC §5).
+model ItemType {
+  code String @id
+
+  items Item[]
+
+  @@map("item_type")
+}
+
+/// ACTIVE · INACTIVE. Sin borrado fisico (CLAUDE.md §5).
+model ItemStatus {
+  code String @id
+
+  items     Item[]
+  articulos PurchaseArticle[]
+
+  @@map("item_status")
+}
+
+/// FACTURA · ESTIMADO.
+///
+/// Es el tipo `SUP` del Excel, que NO era un tipo de item sino un nivel de
+/// confianza del precio: los ocho insumos estimados sin factura de respaldo
+/// (SPEC §5). Modelarlo como tipo de item habria sido copiar un error de la
+/// hoja de calculo al esquema.
+model PriceConfidence {
+  code String @id
+
+  items Item[]
+
+  @@map("price_confidence")
+}
+
+/// Agrupacion de items para reportes. Por company: cada comercio agrupa como
+/// quiere.
+model ItemGroup {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  items   Item[]
+
+  @@unique([companyId, name])
+  @@map("item_group")
+}
+
+/// El ITEM es lo unico que ve quien arma una receta (SPEC §5).
+///
+/// Las lineas de receta apuntan a items sin distinguir tipo, lo que habilita la
+/// recursion de las subpreparaciones. La validacion de ciclos llega en P4 y se
+/// hace AL GUARDAR, no al calcular (R9).
+model Item {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  name      String
+
+  type            String
+  unitOfUse       String  @map("unit_of_use")
+  /// Rendimiento: fraccion aprovechable tras la limpieza. 1 = no se pierde
+  /// nada. Dividir por el rendimiento ENCARECE el item (SPEC §12).
+  yield           Decimal @db.Decimal(24, 12)
+  groupId         String? @map("group_id") @db.Uuid
+  status          String
+  priceConfidence String  @map("price_confidence")
+
+  /// Solo para PRODUCIDO: si la preparacion se produce en lote y aparece en
+  /// inventario, o si al vender se explota su receta (SPEC §5). NULL para
+  /// COMPRADO, y un CHECK lo hace cumplir.
+  keepsStock Boolean? @map("keeps_stock")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  tipo      ItemType          @relation(fields: [type], references: [code])
+  unidad    Unit              @relation(fields: [unitOfUse], references: [code])
+  grupo     ItemGroup?        @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  estado    ItemStatus        @relation(fields: [status], references: [code])
+  confianza PriceConfidence   @relation(fields: [priceConfidence], references: [code])
+  articulos PurchaseArticle[]
+
+  @@unique([companyId, name])
+  @@index([companyId, status])
+  @@index([companyId, type])
+  @@map("item")
+}
+
+/// El ARTICULO DE COMPRA es lo unico que ve quien registra una compra.
+///
+/// N articulos -> 1 item. Tres marcas distintas de harina son tres articulos y
+/// un solo item, y en las recetas aparece solo el item (SPEC §5).
+model PurchaseArticle {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  itemId    String @map("item_id") @db.Uuid
+
+  name     String
+  brand    String?
+  supplier String?
+
+  /// La presentacion, con su unidad: "2 kg", "900 ml", "6 unid".
+  presentationAmount Decimal @map("presentation_amount") @db.Decimal(24, 12)
+  presentationUnit   String  @map("presentation_unit")
+
+  /// Cuantas unidades de USO salen de UN articulo. Es el divisor de
+  /// `costo_bruto_uso = precio_neto / factor_conversion` (SPEC §12).
+  ///
+  /// Se DERIVA en el dominio cuando la presentacion y la unidad de uso
+  /// comparten dimension, y se exige explicito cuando no. Se guarda calculado
+  /// para que el costeo no dependa de leer el catalogo de unidades en cada
+  /// consulta.
+  conversionFactor Decimal @map("conversion_factor") @db.Decimal(24, 12)
+
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  item    Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  unidad  Unit       @relation(fields: [presentationUnit], references: [code])
+  estado  ItemStatus @relation(fields: [status], references: [code])
+
+  @@unique([companyId, name])
+  @@index([companyId, itemId])
+  @@map("purchase_article")
 }

@@ -99,6 +99,17 @@ module.exports = {
       to: { path: 'node_modules/(@nestjs|@prisma|express|pino|helmet)' },
     },
     {
+      name: 'catalogo-solo-lo-escribe-catalog',
+      severity: 'error',
+      comment:
+        'CLAUDE.md §2: `catalog` es la FUENTE UNICA DE VERDAD. Ningun otro modulo crea, edita ni ' +
+        'borra items, articulos ni unidades. Los demas referencian por ID y leen a traves de los ' +
+        'puertos de `catalog`, que es lo que el modulo exporta. Importar su infraestructura seria ' +
+        'saltarse esa puerta: ahi vive el repositorio, y el repositorio escribe.',
+      from: { path: '(^|/)modules/(?!catalog/)[^/]+/', pathNot: PRUEBAS },
+      to: { path: '(^|/)modules/catalog/infrastructure/' },
+    },
+    {
       name: 'sin-dependencias-circulares',
       severity: 'error',
       comment: 'Un ciclo entre modulos hace imposible razonar sobre el orden de inicializacion.',
