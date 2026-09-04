@@ -15,14 +15,22 @@
  * Ninguna de las dos pasa por el limitador: las sondea el orquestador cada
  * pocos segundos y agotarian la cuota, dejando fuera de servicio justo la
  * senal que dice si hay servicio.
+ *
+ * TAMPOCO PASAN POR EL GUARD DE SESION, y por eso llevan `@Publico()`. Un
+ * orquestador no tiene credenciales: una sonda de salud que exigiera sesion
+ * devolveria 401, el orquestador leeria "no esta sana" y reiniciaria replicas
+ * perfectamente sanas en bucle. Lo que devuelven —vivo o no, base accesible o
+ * no— no es informacion que valga la pena proteger.
  */
 
 import { Controller, Get } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { HealthCheck, HealthCheckService, type HealthCheckResult } from '@nestjs/terminus';
 
+import { Publico } from '../http/autorizacion';
 import { DatabaseHealthIndicator } from './database.health';
 
+@Publico()
 @SkipThrottle()
 @Controller()
 export class HealthController {

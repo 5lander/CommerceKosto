@@ -18,21 +18,39 @@
 import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 
-import { PrismaClient } from '../../../../generated/prisma';
+import { type Prisma, PrismaClient } from '../../../../generated/prisma';
 import { CONFIGURATION, type Configuration } from '../config/environment';
+
+/**
+ * El cliente atado a una transaccion, que es lo unico que `TenantTransaction`
+ * entrega al resto del sistema. No expone `$transaction` ni `$connect`: solo
+ * los modelos.
+ */
+export type ClienteDeTransaccion = Prisma.TransactionClient;
 
 @Injectable()
 export class PrismaConnection implements OnModuleDestroy {
-  public readonly client: PrismaClient;
+  /**
+   * Se llama `rawClient` y no `client` A PROPOSITO: la regla
+   * `cliente-crudo-solo-en-la-capa-de-tenant` de `audit:forbidden` busca
+   * exactamente esa palabra y falla si aparece fuera de esta carpeta. Un nombre
+   * generico como `client` produciria falsos positivos por todo el repositorio
+   * y la regla acabaria relajada.
+   *
+   * Usarlo directamente SALTA LA BARRERA 2: la consulta correria sin tenant
+   * fijado y devolveria cero filas. Todo acceso a datos va por
+   * `TenantTransaction`.
+   */
+  public readonly rawClient: PrismaClient;
 
   public constructor(@Inject(CONFIGURATION) config: Configuration) {
-    this.client = new PrismaClient({
+    this.rawClient = new PrismaClient({
       adapter: new PrismaPg({ connectionString: config.databaseUrl }),
     });
   }
 
   public async onModuleDestroy(): Promise<void> {
-    await this.client.$disconnect();
+    await this.rawClient.$disconnect();
   }
 
   /**
@@ -44,6 +62,6 @@ export class PrismaConnection implements OnModuleDestroy {
    * Kubernetes es cada pocos segundos y para siempre.
    */
   public async ping(): Promise<void> {
-    await this.client.$queryRaw`SELECT 1`;
+    await this.rawClient.$queryRaw`SELECT 1`;
   }
 }

@@ -1,0 +1,36 @@
+$ # se cambia el TRUE de set_config por FALSE en tenant-transaction.ts:
+$ #   SELECT set_config(app.company_id, $1, FALSE)   <- tenant de SESION, no de transaccion
+$ npx vitest run --project integration test/integracion/pgbouncer.spec.ts
+
+   ✓ PgBouncer en modo transaccion > la aplicacion funciona a traves del pooler 145ms
+   ✓ PgBouncer en modo transaccion > las sentencias preparadas de Prisma no rompen en modo transaccion 51ms
+   × PgBouncer en modo transaccion > el tenant NO sobrevive a la transaccion > otro cliente, sobre la conexion reutilizada, no hereda el tenant 50ms
+     → expected [ Array(1) ] to deeply equal []
+   ✓ PgBouncer en modo transaccion > el tenant NO sobrevive a la transaccion > un cliente con tenant B no ve nada de A aunque compartan conexion 21ms
+   ✓ PgBouncer en modo transaccion > el tenant NO sobrevive a la transaccion > alternar A y B repetidamente nunca cruza datos 162ms
+   ✓ PgBouncer en modo transaccion > el tenant NO sobrevive a la transaccion > en paralelo tampoco, que es cuando el pooler mas reparte 105ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL   integration  test/integracion/pgbouncer.spec.ts > PgBouncer en modo transaccion > el tenant NO sobrevive a la transaccion > otro cliente, sobre la conexion reutilizada, no hereda el tenant
+AssertionError: expected [ Array(1) ] to deeply equal []
+- Expected
++ Received
+- []
++ [
++   {
++     "name": "Local de pool-A-2eaec70c",
++   },
++ ]
+ ❯ test/integracion/pgbouncer.spec.ts:150:25
+    148|       );
+    149| 
+    150|       expect(sinTenant).toEqual([]);
+       |                         ^
+    151|     });
+    152| 
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  10:58:56
+   Duration  2.29s (transform 206ms, setup 75ms, collect 918ms, tests 619ms, environment 0ms, prepare 196ms)
+
+exit=1

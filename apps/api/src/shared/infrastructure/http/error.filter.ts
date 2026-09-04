@@ -24,6 +24,11 @@
 import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { ServerResponse } from 'node:http';
 
+import {
+  ErrorDeDominio,
+  type CodigoDeDominio,
+} from '../../domain/errors/error-de-dominio';
+
 const MENSAJE_GENERICO = 'Error interno. Cita el identificador de la cabecera x-correlation-id si necesitas soporte.';
 const CODIGO_GENERICO = 'INTERNAL_ERROR';
 const PRIMER_CODIGO_DE_SERVIDOR = 500;
@@ -53,6 +58,28 @@ const CODIGOS: Readonly<Record<number, string>> = {
 function codigoDe(status: number): string {
   return CODIGOS[status] ?? CODIGO_GENERICO;
 }
+
+/**
+ * La traduccion de una regla de negocio rota a una respuesta HTTP.
+ *
+ * ES UN `Record` EXHAUSTIVO SOBRE LA UNION, Y ESA ES LA GRACIA. Un codigo de
+ * dominio nuevo sin fila aqui NO COMPILA. Con un `default` de respaldo, el
+ * olvido se convertiria en un 500 en produccion —un fallo de negocio disfrazado
+ * de fallo del servidor— y nadie lo veria hasta que un cliente lo reportara.
+ *
+ * `ACCESO_BLOQUEADO` sale como 429 y no como 401 a proposito: es informacion
+ * util y honesta para un cliente legitimo —"espera y reintenta"—, y para el
+ * atacante no anade nada que no supiera ya.
+ */
+const ESTADO_POR_CODIGO: Readonly<Record<CodigoDeDominio, number>> = {
+  CREDENCIALES_INVALIDAS: HttpStatus.UNAUTHORIZED,
+  ACCESO_BLOQUEADO: HttpStatus.TOO_MANY_REQUESTS,
+  SESION_INVALIDA: HttpStatus.UNAUTHORIZED,
+  PERMISO_DENEGADO: HttpStatus.FORBIDDEN,
+  RECURSO_NO_ENCONTRADO: HttpStatus.NOT_FOUND,
+  LIMITE_DEL_PLAN: HttpStatus.CONFLICT,
+  ENTRADA_INVALIDA: HttpStatus.BAD_REQUEST,
+};
 
 /** Extrae el texto de una `HttpException` sin tocar `any`. */
 function mensajeDe(exception: HttpException): string {
@@ -92,6 +119,15 @@ export interface ErrorResponse {
  * prueba con valores de verdad y sin un solo doble.
  */
 export function errorResponseFor(exception: unknown): ErrorResponse {
+  // Un error de dominio es una regla de negocio rota, no un fallo: su codigo y
+  // su mensaje son parte del contrato de la API y salen tal cual.
+  if (exception instanceof ErrorDeDominio) {
+    return {
+      status: ESTADO_POR_CODIGO[exception.codigo],
+      body: { code: exception.codigo, message: exception.message },
+    };
+  }
+
   const status =
     exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 

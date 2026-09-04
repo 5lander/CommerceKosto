@@ -1,0 +1,12 @@
+$ # se anade al final de down.sql de P1 un borrado de filas de una tabla que el down NO elimina:
+$ #   DELETE FROM "audit_event_type" WHERE "code" = 'auth.logout';
+$ npm run audit:migrations
+
+
+  20260904023411_p1_iam
+     [M10] down.sql borra filas de "audit_event_type", que NO elimina. Si otra tabla las referencia, el down falla en cuanto haya datos — y no se vera en `migrate:verify`, que corre sobre bases limpias. Ver docs/incidencias/INC-011
+
+audit:migrations  FALLO — 1 problema(s) en 2 migracion(es)
+
+
+exit=1

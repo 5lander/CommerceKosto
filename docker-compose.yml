@@ -62,6 +62,55 @@ services:
       retries: 20
       start_period: 10s
 
+  # PgBouncer — la CUARTA condicion de D12, y la unica que no se puede dar por
+  # supuesta: "PgBouncer en modo transaccion, probado empiricamente".
+  #
+  # POR QUE IMPORTA TANTO. En modo transaccion, una conexion al servidor se
+  # REUTILIZA entre clientes distintos en cuanto termina cada transaccion. Si el
+  # tenant se fijara con un `SET` de sesion, se quedaria pegado a esa conexion y
+  # el siguiente cliente lo heredaria — una fuga entre companies sin una sola
+  # linea de codigo equivocada. La Barrera 2 usa `set_config(..., TRUE)`, que es
+  # local a la transaccion; esto es lo que lo DEMUESTRA contra un pooler real.
+  #
+  # `DEFAULT_POOL_SIZE: 1` no es una limitacion: es el instrumento. Con una sola
+  # conexion al servidor, TODOS los clientes comparten la misma, que es el
+  # escenario donde la fuga ocurriria. Con un pool grande la prueba pasaria por
+  # casualidad.
+  #
+  # `MAX_PREPARED_STATEMENTS` mayor que cero es obligatorio: Prisma usa
+  # sentencias preparadas, y en modo transaccion sin esto fallan (ADR-001).
+  # Prisma ya NO recomienda `?pgbouncer=true` desde PgBouncer 1.21.0.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest@sha256:4c1ca296ef525f108f5d3552cc337c0c09587cf8dae7f0067fd93349e47dc1cd
+    container_name: costeo-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_NAME: ${POSTGRES_DB:-costeo}
+      # Solo pasa por el pooler el rol de la APLICACION. El de migraciones usa
+      # conexion directa siempre: el CLI de Prisma emite sentencias que el modo
+      # transaccion no soporta (ADR-001).
+      DB_USER: costeo_app
+      DB_PASSWORD: ${COSTEO_APP_PASSWORD:?falta COSTEO_APP_PASSWORD}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_PREPARED_STATEMENTS: '100'
+      DEFAULT_POOL_SIZE: '1'
+      MAX_CLIENT_CONN: '50'
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options,search_path
+    ports:
+      - '${PGBOUNCER_PORT:-6432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'nc -z 127.0.0.1 5432']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
   api:
     build:
       context: .

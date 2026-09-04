@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build · base de datos |
 | **Tiempo perdido** | ~35 min |
-| **Recurrencias** | 1 |
+| **Recurrencias** | 2 |
 
 ## Síntoma
 
@@ -86,6 +86,19 @@ Dos detalles que hicieron falta:
 - [x] ¿Se puede convertir en una prueba automatizada? **Indirectamente, y ya está:** `migrate:verify` y `audit:tests` ejercitan los dos caminos (`docker` y CLI de npm) en cada corrida. Si alguien reintroduce el shell, el SQL con espacios vuelve a partirse y la escalera falla.
 - [ ] ¿Es una regla que debería estar en `CLAUDE.md`? No: es un detalle de plataforma, no de diseño.
 - [ ] ¿Es una decisión que merece un ADR? Queda documentada en el encabezado de `scripts/lib/proceso.mjs`, que es donde alguien la va a leer.
+
+## Recurrencia 2 — 2026-09-04, P1
+
+`tools/audit/dependencies.mjs` llamaba a `correr('npm', ['audit', '--json'])` y la salida llegaba **vacia**, con el mensaje generico «`npm audit` no devolvio nada. ¿Hay red?». Misma causa: `npm` es `npm.cmd`.
+
+La solucion de la ficha —resolver el JavaScript y lanzarlo con `node`— no aplicaba tal cual, porque `npm` no es un paquete de `node_modules` y `binarioDe` no lo encuentra. La via para npm es **`process.env.npm_execpath`**, que el propio npm rellena al ejecutar un script y apunta a su `npm-cli.js`:
+
+```js
+const NPM = process.env['npm_execpath'];
+correr(process.execPath, [NPM, 'audit', '--json'], { ... });
+```
+
+**Que enseña la recurrencia:** la regla `no-shell-en-spawn` cubria el error de la primera vez (`shell: true`) pero no este, porque aqui no habia shell — habia un `.cmd` invocado por nombre. La prevencion completa seria una regla que prohiba lanzar `npm`, `npx`, `prisma` o cualquier envoltorio por nombre; queda anotado y entra si aparece una tercera.
 
 ## Referencias
 

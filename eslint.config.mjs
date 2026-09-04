@@ -105,14 +105,15 @@ export default tseslint.config(
 
   // --- Modulos de NestJS ----------------------------------------------------
   {
-    // Un modulo dinamico de NestJS ES, por contrato del framework, una clase
-    // con un unico metodo estatico `forRoot`. `no-extraneous-class` existe para
-    // atrapar el antipatron de la clase usada como espacio de nombres, que no
-    // es este caso: la clase es el TOKEN con el que Nest identifica el modulo,
-    // asi que no puede ser una funcion suelta.
+    // Un modulo de NestJS ES, por contrato del framework, una clase vacia (toda
+    // su configuracion vive en el decorador) o una clase con un unico metodo
+    // estatico `forRoot`. `no-extraneous-class` existe para atrapar el
+    // antipatron de la clase usada como espacio de nombres, que no es este
+    // caso: la clase es el TOKEN con el que Nest identifica el modulo, asi que
+    // no puede ser una funcion suelta.
     files: ['apps/*/src/**/*.module.ts'],
     rules: {
-      '@typescript-eslint/no-extraneous-class': ['error', { allowStaticOnly: true }],
+      '@typescript-eslint/no-extraneous-class': ['error', { allowStaticOnly: true, allowEmpty: true }],
     },
   },
 

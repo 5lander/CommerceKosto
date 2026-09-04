@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en seis apariciones |
-| **Recurrencias** | 6 |
+| **Recurrencias** | 7 |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -43,6 +43,7 @@ Fase de construcción del tooling de P0, y después cada vez que se amplió su a
 4. Al compilar por primera vez con `npm run build`, que crea `apps/api/dist/` (paso 16).
 5. Al forzar el fallo de `audit:duplication` en la prueba del guardián.
 6. Al forzar el fallo de `audit:tests` en la prueba del guardián.
+7. **P1** — al añadir la comprobación M10 a `audit:migrations` (ver INC-011).
 
 ## Causa raíz
 
@@ -56,6 +57,8 @@ Cuatro causas distintas, un mismo efecto: **el conjunto de archivos que el check
 | 4 | `audit:secrets` | Los patrones de `.secretlintignore` estaban anclados a la raíz: `dist/**` no casa con `apps/api/dist/` | Escaneaba el compilado y reportaba dos veces cada hallazgo del fuente; el ruido enseña a ignorar la salida |
 | 5 | `audit:duplication` | La clave `path` de `.jscpd.json` **jscpd la ignora**: las rutas solo se toman como argumentos posicionales del CLI | Cero archivos analizados |
 | 6 | `audit:tests`, guardián «sin base» | Interceptaba `Socket.prototype.connect`, pero solo entendía las formas `(puerto, host)` y `({ port })`. `net.connect()` normaliza sus argumentos a un **array** y lo pasa tal cual | La forma más común de abrir una conexión —y la que usa `pg`— pasaba sin ser vista |
+
+**El caso 7 es el primero de P1, y confirma que esto no se cura con disciplina.** La comprobación M10 de `audit:migrations` —la que impide que un `down.sql` borre filas de una tabla que no elimina— se escribió con un carácter de retroceso (`0x08`) donde debía ir la secuencia `` del patrón. El regex compilaba, el check imprimía su línea de éxito y no reconocía ni un solo `DELETE FROM`. Se detectó en el mismo minuto, porque la prueba del guardián ya es un paso obligatorio: se introdujo el borrado prohibido, el check siguió en verde, y ahí se vio. **Sin ese paso, M10 habría entrado al repositorio como una regla decorativa** — y peor que no tenerla, porque la ficha INC-011 diría que el problema está prevenido.
 
 Los casos 1, 2 y 5 producían **cero cobertura** y son los peores. Los casos 3, 4 y 6 producían **cobertura parcial**, que cuesta más de ver porque el check sí encuentra cosas de vez en cuando y parece vivo.
 

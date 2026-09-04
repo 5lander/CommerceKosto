@@ -23,6 +23,7 @@ import { FakeFileStorage } from './fakes/fake-file-storage';
 import { FakeMailer } from './fakes/fake-mailer';
 import { PrismaAuditLogRepository } from './persistence/prisma-audit-log.repository';
 import { PrismaConnection } from './persistence/prisma-connection';
+import { TenantTransaction } from './persistence/tenant-transaction';
 
 class AdapterNotImplementedError extends Error {
   public constructor(variable: string, paquete: string) {
@@ -60,11 +61,12 @@ export class SharedModule {
       providers: [
         configuration,
         PrismaConnection,
+        TenantTransaction,
         auditLog,
         mailerProvider(config),
         fileStorageProvider(config),
       ],
-      exports: [CONFIGURATION, PrismaConnection, AUDIT_LOG_PORT, MAILER_PORT, FILE_STORAGE_PORT],
+      exports: [CONFIGURATION, PrismaConnection, TenantTransaction, AUDIT_LOG_PORT, MAILER_PORT, FILE_STORAGE_PORT],
     };
   }
 }

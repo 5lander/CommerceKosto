@@ -41,12 +41,14 @@ Ordenado por área. **Buscá por síntoma, no por causa.**
 | [INC-003](INC-003-binarios-win32-dentro-del-contenedor.md) | `Cannot find module '@swc/core-linux-x64-gnu'` / `Failed to load native binding` dentro del contenedor | despliegue · build | P0 | 0 |
 | [INC-004](INC-004-migrate-diff-genera-down-vacio.md) | `prisma migrate diff` produce un `down.sql` vacío, o falla con `unexpected argument` | base de datos | P0 | 0 |
 | [INC-005](INC-005-postgres-18-cambia-el-directorio-de-datos.md) | El contenedor de PostgreSQL 18 queda `unhealthy`: «there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)» | despliegue · base de datos | P0 | 1 |
-| [INC-006](INC-006-spawn-en-windows-parte-los-argumentos.md) | `psql` recibe el SQL partido: «syntax error at end of input / LINE 1: DROP». O un proceso hijo falla con `stderr` vacío | build · base de datos | P0 | 1 |
-| [INC-007](INC-007-un-check-pasa-en-verde-sin-medir-nada.md) | **No hay mensaje de error**: un check de `npm run audit` imprime su línea de éxito sin haber examinado ni un archivo | build | P0 | 6 |
+| [INC-006](INC-006-spawn-en-windows-parte-los-argumentos.md) | `psql` recibe el SQL partido: «syntax error at end of input / LINE 1: DROP». O un proceso hijo falla con `stderr` vacío, o devuelve una salida vacía | build · base de datos | P0 | **2** |
+| [INC-007](INC-007-un-check-pasa-en-verde-sin-medir-nada.md) | **No hay mensaje de error**: un check de `npm run audit` imprime su línea de éxito sin haber examinado ni un archivo | build | P0 | **7** |
 | [INC-008](INC-008-superrefine-no-corre-si-otro-campo-fallo.md) | Una regla de seguridad del esquema de entorno desaparece del informe cuando otra variable también es inválida | arquitectura | P0 | 1 |
 | [INC-009](INC-009-psql-c-no-sustituye-variables.md) | `syntax error at or near ":"` en un SQL correcto, con la variable de psql sin sustituir | base de datos | P0 | 1 |
+| [INC-010](INC-010-returning-bajo-rls-exige-politica-de-select.md) | `new row violates row-level security policy` en un INSERT que la politica SI permite | base de datos | P1 | 1 |
+| [INC-011](INC-011-el-down-solo-se-probaba-en-base-vacia.md) | `violates RESTRICT setting of foreign key constraint` al revertir una migración que `migrate:verify` daba por buena | base de datos | P1 | 1 |
 
-Las cuatro primeras se registraron **antes de que ocurrieran**, en la fase PLAN de P0: son trampas conocidas de este entorno (Windows + Docker + Prisma 7) que iban a costar tiempo la primera vez. De la quinta en adelante ocurrieron de verdad, al levantar la base, al escribir los scripts de migración y al construir el tooling. Las nueve tienen su prevención automatizada en el mismo paquete, como exige la regla de oro.
+Las cuatro primeras se registraron **antes de que ocurrieran**, en la fase PLAN de P0: son trampas conocidas de este entorno (Windows + Docker + Prisma 7) que iban a costar tiempo la primera vez. De la quinta en adelante ocurrieron de verdad, al levantar la base, al escribir los scripts de migración y al construir el tooling. Las diez tienen su prevención automatizada en el mismo paquete, como exige la regla de oro.
 
 **Las dos últimas no son problemas de una herramienta concreta, sino de cómo se verifica.** INC-007 es la razón por la que la prueba del guardián es criterio de commit; INC-008 es la razón por la que una validación de seguridad va en el campo y se prueba acompañada de otro error. Merecen leerse aunque no se esté diagnosticando nada.
 
@@ -58,8 +60,9 @@ Dónde es más probable que aparezcan las próximas, según las decisiones ya to
 
 | Área | Por qué es probable | Fichas |
 |---|---|---|
-| **RLS y contexto de tenant** | El `SET LOCAL` fuera de transacción no persiste entre conexiones del pool. Síntoma típico: consultas que devuelven cero filas sin razón aparente, o peor, filas de otro tenant | *(esperada en P1)* |
-| **PgBouncer en modo transacción** | Prepared statements de Prisma. Síntoma: errores intermitentes que no se reproducen en local. ⚠️ La recomendación cambió: `?pgbouncer=true` ya **no** se recomienda desde PgBouncer 1.21.0 (ver ADR-001) | *(esperada en P1)* |
+| **RLS y contexto de tenant** | El `SET LOCAL` fuera de transacción no persiste entre conexiones del pool. Y el reverso: una política de `SELECT` restrictiva rompe el `RETURNING` de un `INSERT` que sí estaba permitido | **INC-010** |
+| **PgBouncer en modo transacción** | Prepared statements de Prisma, y sobre todo estado de sesión que sobrevive a la transacción. ⚠️ `?pgbouncer=true` ya **no** se recomienda desde PgBouncer 1.21.0 (ver ADR-001) | *(sin ficha: P1 lo cubrió con `pgbouncer.spec.ts` antes de que ocurriera)* |
+| **`down.sql` sobre una base con datos** | `migrate:verify` corre sobre bases **limpias**, donde ninguna fila referencia nada. Todo lo que dependa de datos existentes —claves foráneas `RESTRICT`, guardas `NOT EXISTS`— pasa ahí y falla en la base real | **INC-011** |
 | **Migraciones reversibles** | Un `down` que no deshace realmente lo que hizo el `up`. Agravado porque Prisma no genera migraciones de bajada | **INC-004** |
 | **Reglas de capa** | `dependency-cruiser` rompiendo el build por un import que parecía inocente | *(esperada en P2)* |
 | **Aritmética decimal** | Un `number` que se cuela en un cálculo de dinero y produce un centavo de diferencia en la conciliación. La configuración de `decimal.js` es **global y mutable**: un `Decimal.set()` en cualquier módulo mueve los resultados de todo el proceso | *(esperada en P5)* |

@@ -8,16 +8,56 @@
 
 ## Estado actual
 
-**Paquete en curso:** P0 — Fundación del repositorio
-**Fase del protocolo:** COMMIT — todo lo demás cerrado
-**Último commit:** `929634b` (first commit, solo documentación)
-**Fecha de última actualización:** 2026-08-27
+**Paquete en curso:** ninguno — **P1 cerrado**. El siguiente es P2 (catálogo)
+**Fase del protocolo:** CIERRE de P1
+**Último commit:** `8f7b823` — `P1: IAM · tenants · ubicaciones · roles`
+**Fecha de última actualización:** 2026-09-04
 
 ### Dónde se retoma exactamente
 
-P0 está **terminado y auditado**. Solo queda el commit único.
+**P0 y P1 están cerrados y commiteados.** El aislamiento multi-tenant funciona y está probado contra PostgreSQL real y contra PgBouncer real. Lo siguiente es **P2 — catálogo**: ítems, artículos de compra, unidades y conversiones.
 
-Si retomas aquí: lee `docs/pasos/P0/AUDITORIA-RESULTADO.md`, que tiene las once salidas del guardián y el estado punto por punto de la checklist. Después, `git add -A` y el commit `P0: Fundación del repositorio`.
+**Lo que P2 hereda y no tiene que volver a construir**
+
+- La capa de transacción-con-tenant. **Todo acceso a datos va por `TenantTransaction.run(company, …)`**; usar `rawClient` fuera rompe el build.
+- `SesionActiva` con `companyId`, `permisos` y `alcance`. Un caso de uso de P2 lo recibe y no necesita saber de dónde salió.
+- `@Requiere('catalog.item.create')` sobre el endpoint, y la fila correspondiente en `role_permission` sembrada por la migración de P2. **No se escriben roles en los endpoints.**
+- El patrón de esquema `.strict()` en todos los DTO.
+- Los errores de dominio: añadir un código a `CodigoDeDominio` obliga a mapearlo en el filtro, o no compila.
+
+**Lo que P2 tiene que acordarse de hacer**
+
+| # | Qué | Por qué |
+|---|---|---|
+| 1 | **Volver a forzar el fallo de los checks afectados** al añadir rutas o reglas nuevas | INC-007, siete recurrencias. La última fue en P1 |
+| 2 | **`createMany` y no `create`** en tablas con política de `SELECT` restrictiva | INC-010 |
+| 3 | **El `down.sql` no borra filas de tablas que no elimina** | INC-011; M10 lo hace cumplir |
+| 4 | **Retirar la excepción `enmiendasAutorizadas`** de `sin-migracion-commiteada-modificada` | Se prometió para P2 |
+| 5 | Regla de `dependency-cruiser` que impida a otro módulo escribir en las tablas de `catalog` | CLAUDE.md §2: catálogo es fuente única de verdad |
+
+**Hecho en P1 — completo**
+
+| # | Entregable | Estado |
+|---|---|---|
+| 1 | **Migración `p1_iam`**: 14 tablas, 29 políticas, `ENABLE` + `FORCE` en todas. Reversible y verificada | ✅ |
+| 2 | **`current_company()`**: sin tenant devuelve NULL → cero filas, nunca las de otro | ✅ |
+| 3 | **Tres funciones `SECURITY DEFINER`** —`auth_lookup`, `session_lookup`, `invitation_lookup`—, las únicas lecturas sin tenant del sistema | ✅ |
+| 4 | **Barrera 2** — `TenantTransaction` con `run()` y `runWithoutTenant(motivo, …)` | ✅ |
+| 5 | **Barrera 3** — `SesionGuard` global, deny by default; cuatro rutas públicas y ninguna más | ✅ |
+| 6 | **Cuatro reglas nuevas de `audit:forbidden`** (26 en total), y `no-sql-interpolado` afinada: **cero exenciones por archivo** | ✅ |
+| 7 | **Login completo**: política + Argon2id + `auth_lookup`, con los cuatro rechazos indistinguibles | ✅ |
+| 8 | **Sesiones**: token opaco de 256 bits, hash en base, 12 h absolutas / 4 h de inactividad, revocación real | ✅ |
+| 9 | **Roles como capacidades**: `@Requiere`, escalada vertical y horizontal probadas | ✅ |
+| 10 | **Ubicaciones, invitación y roles**, con el límite del plan bajo candado de fila | ✅ |
+| 11 | **PgBouncer en modo transacción, probado** — cuarta condición de D12 | ✅ |
+| 12 | **`audit:deps`** (12.º check) y **`audit:migrations` M10** | ✅ |
+| 13 | **ADR-006**, INC-010, INC-011, documentación de sistema y de API | ✅ |
+| 14 | **329 pruebas**: 227 unitarias con la base apagada + 102 de integración | ✅ |
+
+### Dos cosas que conviene que el usuario mire
+
+1. **Umbral de bloqueo por IP en 25 en vez de 5.** Es un apartamiento razonado de la lectura literal de SEGURIDAD.md §2.1: con 5, cinco errores de cinco empleados detrás del mismo NAT bloquean el restaurante entero una hora. Reversible: dos constantes en `politica-de-intentos.ts`.
+2. **Refresh rotativo con detección de reuso, aplazado a P12.** Riesgo residual escrito en ADR-006: un token robado sirve hasta 4 h de inactividad o 12 h absolutas, salvo revocación.
 
 **Hecho y verificado**
 
@@ -73,8 +113,8 @@ Si retomas aquí: lee `docs/pasos/P0/AUDITORIA-RESULTADO.md`, que tiene las once
 
 | Paquete | Estado | Commit | Fecha |
 |---|---|---|---|
-| P0 — Fundación del repositorio | 🟡 En curso | — | — |
-| P1 — IAM · tenants · ubicaciones · roles | ⬜ Pendiente | — | — |
+| P0 — Fundación del repositorio | ✅ Completado | `0f2d606` | 2026-08-27 |
+| P1 — IAM · tenants · ubicaciones · roles | 🟡 En curso | — | — |
 | P2 — Catálogo · ítems · artículos · unidades | ⬜ Pendiente | — | — |
 | P3 — Precios de referencia con vigencia | ⬜ Pendiente | — | — |
 | P4 — Recetas · productos · combos | ⬜ Pendiente | — | — |
@@ -161,7 +201,7 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 ## Notas de contexto
 
 - El SPEC completo está en `docs/SPEC.md`; las reglas obligatorias en `CLAUDE.md`; el protocolo en `docs/PROTOCOLO.md`; la checklist en `docs/AUDITORIA.md`
-- **`docs/incidencias/README.md` ya tiene nueve fichas.** Se lee al inicio de cada paquete y antes de diagnosticar cualquier error. Cuatro son del entorno Windows; las dos últimas (INC-007, INC-008) no son de una herramienta concreta sino de **cómo se verifica**, y merecen leerse aunque no se esté diagnosticando nada
+- **`docs/incidencias/README.md` ya tiene diez fichas**, y INC-006 va por su segunda recurrencia. Se lee al inicio de cada paquete y antes de diagnosticar cualquier error. Cuatro son del entorno Windows; las dos últimas (INC-007, INC-008) no son de una herramienta concreta sino de **cómo se verifica**, y merecen leerse aunque no se esté diagnosticando nada
 - El Excel de referencia está en `C:\Users\Lander\Downloads\Modelo_Costeo_Auditado_SNACKLAB.xlsx`. **No está versionado y no debe estarlo**: es dato de cliente
 - **La verificación de versiones de ADR-001 se hizo el 2026-08-26.** Si pasan meses, reverificar antes de fiarse de las fechas de EOL
 - **Node 26 promueve a LTS el 2026-10-28**, dentro de dos meses. El salto es el ítem C7 de FASE0-CHECKLIST y merece su propio paquete, no colarlo en medio de una corrida

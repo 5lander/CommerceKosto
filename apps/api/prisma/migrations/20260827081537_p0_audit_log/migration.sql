@@ -109,7 +109,20 @@ INSERT INTO "audit_event_type" ("code", "domain", "requires_company") VALUES
 REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE "audit_log" FROM costeo_app;
 
 -- El historial de migraciones no es asunto de la aplicacion.
-REVOKE ALL ON TABLE "_prisma_migrations" FROM costeo_app;
+--
+-- ENMENDADO EN P1, con autorizacion explicita del usuario. Escrito sin la
+-- condicion, este REVOKE hacia IMPOSIBLE crear cualquier migracion nueva:
+-- Prisma reproduce el historial sobre una base sombra donde `_prisma_migrations`
+-- todavia no existe, y la sentencia moria con 42P01. `migrate deploy` no lo
+-- notaba porque crea la tabla de historial antes de aplicar nada, y por eso
+-- `migrate:verify` de P0 estaba en verde. Ver INC-010.
+DO $revoke$
+BEGIN
+  IF to_regclass('public._prisma_migrations') IS NOT NULL THEN
+    REVOKE ALL ON TABLE "_prisma_migrations" FROM costeo_app;
+  END IF;
+END
+$revoke$;
 
 -- Los catalogos son datos de referencia: la aplicacion los lee, no los escribe.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE "audit_event_type" FROM costeo_app;

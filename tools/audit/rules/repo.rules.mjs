@@ -202,6 +202,27 @@ export const repoRules = [
   {
     id: 'sin-migracion-commiteada-modificada',
     descripcion: 'Modificar una migracion que ya esta en el historial',
+    /**
+     * ENMIENDAS AUTORIZADAS, UNA A UNA Y CON FECHA DE RETIRADA.
+     *
+     * La regla no tiene modo permisivo: cada entrada de aqui autoriza UNA
+     * carpeta concreta y hay que escribirla a mano, de modo que aparece en el
+     * diff y alguien tiene que aprobarla. No existe un interruptor general.
+     *
+     * @type {ReadonlyArray<{carpeta: string, motivo: string, seRetiraEn: string}>}
+     */
+    enmiendasAutorizadas: [
+      {
+        carpeta: '20260827081537_p0_audit_log',
+        motivo:
+          'Su `REVOKE ALL ON TABLE "_prisma_migrations"` impedia reproducir el historial ' +
+          'sobre una base vacia, que es lo que Prisma hace en la base sombra para crear ' +
+          'CUALQUIER migracion nueva: fallaba con 42P01 y P1 no se podia empezar. Pasa a ser ' +
+          'condicional. Autorizado por el usuario el 2026-08-27: el proyecto no tiene ningun ' +
+          'despliegue y las dos unicas bases con la migracion aplicada son desechables.',
+        seRetiraEn: 'P2',
+      },
+    ],
     porQue:
       'Rompe el checksum de `_prisma_migrations` en toda base donde ya se aplico. Un error en una migracion se corrige con una migracion nueva, jamas editando la anterior.',
     referencia: 'CLAUDE.md §5 · AUDITORIA.md D1',
@@ -232,11 +253,15 @@ export const repoRules = [
         }
       };
 
+      const autorizada = (/** @type {string} */ ruta) =>
+        this.enmiendasAutorizadas?.some((e) => ruta.includes(`/${e.carpeta}/`)) === true;
+
       return salida
         .split('\n')
         .map((linea) => normalizePath(linea.trim()))
         .filter(Boolean)
         .filter(existiaEnHead)
+        .filter((ruta) => !autorizada(ruta))
         .map((ruta) => ({ ruta, linea: 0, extracto: 'ya existia en HEAD y cambio' }));
     },
   },

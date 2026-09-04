@@ -13,6 +13,8 @@
  * cumplir aunque alguien anada el metodo.
  */
 
+import type { CompanyId, UserId } from '../../domain/identity/identificadores';
+
 /** Token de inyeccion. Ver `shared/infrastructure/persistence` para el binding. */
 export const AUDIT_LOG_PORT = 'AUDIT_LOG_PORT';
 
@@ -38,8 +40,15 @@ export interface AuditEvent {
   readonly eventType: string;
   readonly outcome: AuditOutcome;
   readonly actorType: AuditActorType;
-  readonly actorId: string | null;
-  readonly companyId: string | null;
+  readonly actorId: UserId | null;
+  /**
+   * `null` para los eventos de sistema, que por definicion no tienen tenant
+   * (`system.*`, `auth.login.*` cuando el correo no existe).
+   *
+   * NO es un `string`: pasar aqui el identificador equivocado es exactamente
+   * como se escribe una fuga entre tenants sin que el compilador diga nada.
+   */
+  readonly companyId: CompanyId | null;
   readonly ip: string | null;
   readonly userAgent: string | null;
   /** Solo IDs y escalares. Jamas datos personales en claro ni secretos. */

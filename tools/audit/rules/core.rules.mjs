@@ -140,13 +140,46 @@ export const coreRules = [
   },
   {
     id: 'no-sql-interpolado',
-    descripcion: 'Interpolacion `${...}` dentro de un template literal que contiene SQL',
+    descripcion: 'Interpolacion `${...}` en un template literal con SQL que NO sea plantilla etiquetada',
     porQue:
-      'Es inyeccion SQL directa. El valor va SIEMPRE como parametro. Prisma ofrece `$queryRaw` con parametros; `$queryRawUnsafe` no se usa.',
-    patron: /`[^`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|DROP|ALTER|CREATE)\b[^`]*\$\{/gis,
+      'Es inyeccion SQL directa. El valor va SIEMPRE como parametro. La plantilla ETIQUETADA de Prisma ' +
+      '(`$queryRaw` seguido del backtick) parametriza por construccion: convierte cada interpolacion en ' +
+      '`$1`, `$2`... y manda los valores aparte. Una plantilla SIN etiquetar construye la cadena antes de ' +
+      'llegar a la base, y ahi ya no queda nada que separar del SQL.',
+    // LA REGLA DISTINGUE LA PLANTILLA ETIQUETADA, Y ESO LA HACE MAS ESTRICTA.
+    //
+    // La version de P0 marcaba cualquier interpolacion dentro de un template con
+    // SQL, incluida la forma SEGURA. Para poder escribir la capa de tenant hubo
+    // que abrirle una exencion por archivo, y las exenciones por archivo
+    // envejecen mal: la lista crece con cada caso legitimo hasta que la lista ES
+    // la regla. En P1 aparecio el segundo caso legitimo —la llamada a
+    // `auth_lookup`— y en vez de anadir un archivo mas se afino el patron.
+    //
+    // El resultado tiene MENOS agujeros que antes:
+    //   - la exencion de `tenant-transaction.ts` DESAPARECE. El repositorio ya
+    //     no tiene ninguna exencion a esta regla.
+    //   - lo inseguro se sigue cazando por tres vias distintas: la plantilla sin
+    //     etiquetar (esta regla), `$queryRawUnsafe` y `$executeRawUnsafe`
+    //     (`no-sql-concatenado`) y `Prisma.raw`, que es la unica forma de meter
+    //     texto crudo DENTRO de una plantilla etiquetada (`no-prisma-raw`).
+    patron:
+      /(?<!\$queryRaw|\$executeRaw|Prisma\.sql|sql)`[^`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|DROP|ALTER|CREATE)\b[^`]*\$\{/gis,
     incluye: CODIGO,
     excluye: META,
     desde: 'P0',
+    referencia: 'SEGURIDAD.md §1.1 · AUDITORIA.md C7 · ADR-006',
+  },
+  {
+    id: 'no-prisma-raw',
+    descripcion: '`Prisma.raw(...)` y `Prisma.join(...)` — texto crudo dentro de una plantilla etiquetada',
+    porQue:
+      'Es el unico agujero que deja la plantilla etiquetada: `Prisma.raw` inserta su argumento en el SQL SIN ' +
+      'parametrizar, que es exactamente lo que la plantilla evita. Existe para nombres de tabla y de columna, ' +
+      'que no se pueden parametrizar; este proyecto no los necesita dinamicos.',
+    patron: /\bPrisma\.raw\s*\(|\bPrisma\.join\s*\(/g,
+    incluye: CODIGO,
+    excluye: META,
+    desde: 'P1',
     referencia: 'SEGURIDAD.md §1.1 · AUDITORIA.md C7',
   },
   {

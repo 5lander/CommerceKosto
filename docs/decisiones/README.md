@@ -13,12 +13,12 @@ Plantilla en `docs/plantillas/ADR.md`.
 | [ADR-003](ADR-003-aritmetica-decimal-con-decimal-js.md) | Aritmética decimal con `decimal.js` y su excepción a la regla de capa | ✅ aceptado | P0 |
 | [ADR-004](ADR-004-migraciones-reversibles.md) | Migraciones reversibles con `down.sql` verificado en bases reales | ✅ aceptado | P0 |
 | [ADR-005](ADR-005-hooks-con-core-hookspath.md) | Hooks de git con `core.hooksPath` en vez de husky | ✅ aceptado | P0 |
+| [ADR-006](ADR-006-las-tres-barreras-del-aislamiento.md) | Las tres barreras del aislamiento multi-tenant, las cuatro condiciones de D12 y las decisiones de sesión | ✅ aceptado | P1 |
 
 ## ADRs esperados por el plan
 
 > La numeración es por **orden de creación**, no por tema. P0 consumió del 001 al 005 —dos de ellos, el del ORM y el de la aritmética, eran decisiones que había que tomar para escribir la primera línea de código—, así que lo que sigue se renumeró respecto de la previsión inicial.
 
-- **ADR-006** — Estrategia de aislamiento: las tres barreras, roles de base de datos y comportamiento bajo PgBouncer (P1). ADR-002 ya deja escrito **por qué** hace falta una capa propia de transacción-con-tenant; este documentará **cómo** quedó
 - **ADR-007** — Propagación de recetas por copia frente a herencia (P4)
 - **ADR-008** — Libro de inventario append-only frente a saldo mutable (P6)
 - **ADR-009** — Costo estándar frente a costo de último lote para preparaciones (P6)

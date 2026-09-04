@@ -225,6 +225,40 @@ function comprobarBorradoDelHistorial({ nombre, down }) {
   ];
 }
 
+/**
+ * M10 — un `down` no borra filas de una tabla que sobrevive.
+ *
+ * NACE DE UN FALLO REAL (INC-011). El down de P1 borraba los tipos de evento
+ * que P1 habia sembrado en `audit_event_type`, una tabla de P0 que sobrevive al
+ * down. Reventaba en cuanto la base tenia un solo evento registrado, por la
+ * clave foranea `ON DELETE RESTRICT` de `audit_log` — y no se habia visto nunca
+ * porque `migrate:verify` trabaja sobre bases LIMPIAS, donde no hay ninguna
+ * fila que referencie nada.
+ *
+ * La regla generaliza la leccion: si el down suelta la tabla, sus filas se van
+ * con ella y no hay nada que borrar; si NO la suelta, las filas que hubiera
+ * pueden estar referenciadas por datos que el down no controla. Un catalogo que
+ * sostiene evidencia es tan append-only como la evidencia.
+ *
+ * `_prisma_migrations` es la unica excepcion: borrar su propia fila es
+ * justamente lo que M9 EXIGE.
+ * @param {Migracion} m
+ * @returns {Fallo[]}
+ */
+function comprobarBorradoDeFilas({ downSql, tablasSoltadas }) {
+  const borradas = capturarTodo(downSql, /\bDELETE\s+FROM\s+"?([\w]+)"?/gi).map((t) => t.toLowerCase());
+
+  return borradas
+    .filter((tabla) => tabla !== '_prisma_migrations' && !tablasSoltadas.has(tabla))
+    .map((tabla) => ({
+      check: 'M10',
+      mensaje:
+        `down.sql borra filas de "${tabla}", que NO elimina. Si otra tabla las referencia, el down ` +
+        'falla en cuanto haya datos — y no se vera en `migrate:verify`, que corre sobre bases limpias. ' +
+        'Ver docs/incidencias/INC-011',
+    }));
+}
+
 const COMPROBACIONES = [
   comprobarBloquesManuales,
   comprobarPoliticas,
@@ -233,6 +267,7 @@ const COMPROBACIONES = [
   comprobarSinPublic,
   comprobarEscalaDecimal,
   comprobarBorradoDelHistorial,
+  comprobarBorradoDeFilas,
 ];
 
 // --- Recorrido -----------------------------------------------------------

@@ -1,0 +1,14 @@
+$ # dos sabotajes a la vez, cada uno contra una defensa distinta:
+$ #   1) se quita el .strict() del esquema de login  -> la clave de mas dejaria de rechazarse
+$ #   2) ListarUbicaciones ignora sesion.alcance     -> un GERENTE_LOCAL veria toda la company
+$ npx vitest run --project integration test/integracion/autenticacion-y-autorizacion.spec.ts
+
+   × autenticacion y autorizacion > login > un cuerpo con una clave de mas se RECHAZA, no se limpia en silencio 242ms
+     → expected 200 to be 400 // Object.is equality
+   × autenticacion y autorizacion > escalada horizontal > GERENTE_LOCAL solo ve SU ubicacion, no las de su company 258ms
+     → expected [ …(3) ] to deeply equal [ Array(1) ]
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  2 failed | 23 passed (25)
+
+exit=1

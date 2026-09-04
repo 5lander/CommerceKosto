@@ -29,6 +29,7 @@ import { TerminusModule } from '@nestjs/terminus';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
+import { IamModule } from './modules/iam/iam.module';
 import type { Configuration } from './shared/infrastructure/config/environment';
 import { DatabaseHealthIndicator } from './shared/infrastructure/health/database.health';
 import { HealthController } from './shared/infrastructure/health/health.controller';
@@ -52,6 +53,7 @@ export class AppModule {
         ThrottlerModule.forRoot([{ ttl: config.rateLimit.windowMs, limit: config.rateLimit.max }]),
         TerminusModule,
         SharedModule.forRoot(config),
+        IamModule,
       ],
       controllers: [HealthController],
       providers: [

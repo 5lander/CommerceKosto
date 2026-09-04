@@ -100,6 +100,7 @@ model AuditOutcome {
   code String @id
 
   registros AuditLog[]
+  intentos  LoginAttempt[]
 
   @@map("audit_outcome")
 }
@@ -111,4 +112,264 @@ model AuditActorType {
   registros AuditLog[]
 
   @@map("audit_actor_type")
+}
+
+// ===========================================================================
+// P1 — IAM, multi-tenancy, ubicaciones y roles
+// ===========================================================================
+//
+// TODA TABLA DE NEGOCIO LLEVA `company_id`, sin excepcion (CLAUDE.md §4.1), y
+// su politica RLS se crea en la MISMA migracion que la tabla. `audit:migrations`
+// M6 lo hace imposible de olvidar.
+//
+// `company` es el unico caso especial: su llave de aislamiento es su propio
+// `id`, no una columna aparte.
+
+/// Un tenant. Tenant = company: un comercio, un tenant, sin nivel intermedio
+/// (SPEC §1).
+model Company {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name      String
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// Limite de plan (D5). El plan como entidad llega en P11; hasta entonces el
+  /// limite vive aqui con un valor generoso. Se verifica en el backend desde el
+  /// primer paquete que lo toca, que es este.
+  maxLocations Int @default(10) @map("max_locations")
+
+  estado    CompanyStatus    @relation(fields: [status], references: [code])
+  settings  CompanySettings?
+  locations Location[]
+  usuarios  AppUser[]
+  roles     UserRole[]
+  sesiones  Session[]
+
+  @@map("company")
+}
+
+/// ACTIVE - SUSPENDED - CLOSED
+model CompanyStatus {
+  code String @id
+
+  companies Company[]
+
+  @@map("company_status")
+}
+
+/// Los parametros de costeo de D3. NO son constantes del codigo: el motor los
+/// recibe como parametro.
+///
+/// `numeric(24,12)` en todos los ratios: es el contrato de la escala
+/// ALMACENAMIENTO de shared/domain/decimal/escalas.ts. Un flotante aqui
+/// romperia R7 desde el origen de los datos.
+model CompanySettings {
+  companyId String @id @map("company_id") @db.Uuid
+
+  ivaVenta             Decimal @map("iva_venta")              @db.Decimal(24, 12)
+  ivaCompraRecuperable Boolean @map("iva_compra_recuperable")
+  provisionMerma       Decimal @map("provision_merma")        @db.Decimal(24, 12)
+  foodCostObjetivo     Decimal @map("food_cost_objetivo")     @db.Decimal(24, 12)
+  foodCostMaximo       Decimal @map("food_cost_maximo")       @db.Decimal(24, 12)
+  foodCostUmbralVerde  Decimal @map("food_cost_umbral_verde") @db.Decimal(24, 12)
+  primeCostMaximo      Decimal @map("prime_cost_maximo")      @db.Decimal(24, 12)
+  reglaPopularidad     Decimal @map("regla_popularidad")      @db.Decimal(24, 12)
+  diasOperativosMes    Int     @map("dias_operativos_mes")
+  diasCobertura        Int     @map("dias_cobertura")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@map("company_settings")
+}
+
+/// No existe "sucursal" a secas (SPEC §2): existe ubicacion CON TIPO. Una
+/// bodega modelada como local aparece con ventas en cero y contamina todo
+/// reporte comparativo.
+model Location {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String
+  type      String
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  tipo    LocationType   @relation(fields: [type], references: [code])
+  estado  LocationStatus @relation(fields: [status], references: [code])
+  roles   UserRole[]
+
+  @@unique([companyId, name])
+  @@index([companyId, status])
+  @@map("location")
+}
+
+/// BODEGA - LOCAL - AMBOS
+model LocationType {
+  code     String  @id
+  vende    Boolean
+  almacena Boolean
+
+  locations Location[]
+
+  @@map("location_type")
+}
+
+/// ACTIVE - INACTIVE
+model LocationStatus {
+  code String @id
+
+  locations Location[]
+
+  @@map("location_status")
+}
+
+/// Se llama `app_user` y no `user` porque `user` es palabra reservada en
+/// PostgreSQL: una consulta sobre `user` devuelve el nombre del rol de sesion,
+/// no la tabla, y el error que produce no dice nada de eso.
+model AppUser {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  /// Siempre en minusculas. La unicidad es GLOBAL, no por company: el login
+  /// ocurre ANTES de saber a que tenant pertenece quien entra.
+  email     String   @unique
+  /// Argon2id. NULL mientras la invitacion este pendiente.
+  passwordHash String? @map("password_hash")
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// Invitacion pendiente. El token vive HASHEADO, igual que el de sesion: un
+  /// volcado de la base no permite activar la cuenta de nadie.
+  ///
+  /// Van en `app_user` y no en una tabla aparte porque el dominio es
+  /// exactamente uno a uno: un usuario tiene como mucho UNA invitacion viva.
+  /// Reinvitar sobrescribe el token, que ademas es el comportamiento correcto
+  /// —el enlace anterior deja de servir— y sale gratis.
+  invitationTokenHash String?   @unique @map("invitation_token_hash")
+  invitationExpiresAt DateTime? @map("invitation_expires_at") @db.Timestamptz(6)
+
+  company  Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  estado   UserStatus @relation(fields: [status], references: [code])
+  roles    UserRole[]
+  sesiones Session[]
+
+  @@index([companyId, status])
+  @@map("app_user")
+}
+
+/// INVITED - ACTIVE - SUSPENDED
+model UserStatus {
+  code String @id
+
+  usuarios AppUser[]
+
+  @@map("user_status")
+}
+
+/// Catalogo de roles (SPEC §4).
+///
+/// `requiresLocation` no es documentacion: participa en una clave foranea
+/// compuesta desde `user_role`, de modo que asignar GERENTE_LOCAL sin ubicacion
+/// —o ADMIN con una— es imposible en la base, no solo desaconsejado.
+model Role {
+  code             String  @id
+  requiresLocation Boolean @map("requires_location")
+
+  permisos     RolePermission[]
+  asignaciones UserRole[]
+
+  @@unique([code, requiresLocation])
+  @@map("role")
+}
+
+/// Capacidades, no roles rigidos (SPEC §4). Cada paquete siembra las suyas.
+model Permission {
+  code   String @id
+  domain String
+
+  roles RolePermission[]
+
+  @@map("permission")
+}
+
+model RolePermission {
+  roleCode       String @map("role_code")
+  permissionCode String @map("permission_code")
+
+  rol     Role       @relation(fields: [roleCode], references: [code], onDelete: Cascade)
+  permiso Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([roleCode, permissionCode])
+  @@map("role_permission")
+}
+
+/// Asignacion de un rol a un usuario, opcionalmente acotada a una ubicacion.
+model UserRole {
+  id         String  @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId  String  @map("company_id") @db.Uuid
+  userId     String  @map("user_id") @db.Uuid
+  roleCode   String  @map("role_code")
+  locationId String? @map("location_id") @db.Uuid
+
+  /// Existe para sostener la clave foranea COMPUESTA contra
+  /// `role(code, requires_location)`. Un CHECK impide que mienta respecto de
+  /// `location_id`, y la clave foranea impide asignar GERENTE_LOCAL sin
+  /// ubicacion o ADMIN con una. Las dos cosas en la base, no en un `if`.
+  hasLocation Boolean @default(false) @map("has_location")
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  usuario  AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// La relacion es por PAR (rol, tiene ubicacion), no solo por rol.
+  rol      Role      @relation(fields: [roleCode, hasLocation], references: [code, requiresLocation], onDelete: Restrict)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleCode, locationId])
+  @@index([companyId, userId])
+  @@map("user_role")
+}
+
+/// Sesion con token OPACO. En la base vive solo el hash: un volcado de la base
+/// no permite suplantar a nadie (SEGURIDAD.md §2.2).
+model Session {
+  id         String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId  String    @map("company_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  ip        String? @db.Inet
+  userAgent String? @map("user_agent")
+  deviceId  String? @map("device_id") @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  usuario AppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId, expiresAt])
+  @@map("session")
+}
+
+/// Intentos de login — SEGURIDAD.md §2.1.
+///
+/// NO LLEVA `company_id`, Y ES DELIBERADO. El login ocurre antes de saber a que
+/// tenant pertenece quien lo intenta; una tabla con tenant no se podria
+/// consultar en ese momento. Se acota por otro lado: solo guarda correo e IP,
+/// nunca sale por ninguna respuesta, y ningun endpoint la expone.
+///
+/// Vive en PostgreSQL y no en Redis (decision del usuario, ver ADR-006): el
+/// bloqueo de una cuenta SOBREVIVE a un reinicio. Con un almacen volatil, un
+/// flush levanta todos los bloqueos activos sin que nadie se entere.
+model LoginAttempt {
+  id      String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email   String
+  ip      String?  @db.Inet
+  at      DateTime @default(now()) @db.Timestamptz(6)
+  outcome String
+
+  resultado AuditOutcome @relation(fields: [outcome], references: [code])
+
+  @@index([email, at(sort: Desc)])
+  @@index([ip, at(sort: Desc)])
+  @@map("login_attempt")
 }

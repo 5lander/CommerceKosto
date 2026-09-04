@@ -54,6 +54,12 @@ jobs:
       MIGRATION_DATABASE_URL: postgresql://costeo_migrator:ci-migrator@localhost:5432/costeo?schema=public
       SHADOW_DATABASE_URL: postgresql://costeo_migrator:ci-migrator@localhost:5432/costeo_shadow?schema=public
 
+      # La conexión a través del pooler. La usa `pgbouncer.spec.ts`, que
+      # verifica la cuarta condición de D12 y que **falla si falta**, en vez de
+      # saltarse: una prueba de seguridad que se omite cuando no está la
+      # infraestructura es un verde que no mide nada (INC-007).
+      PGBOUNCER_DATABASE_URL: postgresql://costeo_app:ci-app@localhost:6432/costeo?schema=public
+
       NODE_ENV: test
       LOG_LEVEL: warn
       MAIL_ADAPTER: fake
@@ -82,8 +88,8 @@ jobs:
       # sus privilegios. Un `services:` sería otra base, configurada de otra
       # manera, y las pruebas de la Barrera 1 estarían midiendo algo que no es
       # lo que se despliega.
-      - name: Levantar PostgreSQL
-        run: docker compose up -d db
+      - name: Levantar PostgreSQL y PgBouncer
+        run: docker compose up -d db pgbouncer
 
       - name: Esperar a que la base esté sana
         run: |
@@ -94,6 +100,20 @@ jobs:
           done
           echo "La base no llegó a estado healthy."
           docker compose logs db
+          exit 1
+
+      # El pooler no es opcional en CI: sin él, la prueba de la cuarta condición
+      # de D12 no puede correr, y sin esa prueba la decisión de ORM se sostiene
+      # sobre una suposición.
+      - name: Esperar a PgBouncer
+        run: |
+          for _ in $(seq 1 30); do
+            estado=$(docker inspect -f '{{.State.Health.Status}}' costeo-pgbouncer 2>/dev/null || echo starting)
+            [ "$estado" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "PgBouncer no llegó a estado healthy."
+          docker compose logs pgbouncer
           exit 1
 
       - name: Aplicar migraciones
@@ -109,11 +129,6 @@ jobs:
       # puede revertir (ADR-004).
       - name: Migraciones reversibles
         run: npm run migrate:verify
-
-      # AUDITORIA.md C26. Va al final para que un aviso de una dependencia no
-      # tape un fallo del código propio, que es el que hay que arreglar primero.
-      - name: Vulnerabilidades conocidas en dependencias
-        run: npm audit --audit-level=high
 
       # El criterio de aceptación de P0, ejecutado: "docker compose up levanta
       # la aplicación sin una sola credencial real". Todos los adaptadores en

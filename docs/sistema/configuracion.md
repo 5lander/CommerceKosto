@@ -122,3 +122,47 @@ Los parámetros de costeo de `DECISIONES.md` D3. Se siembran al crear el tenant 
 | `config/periods.ts` | Política de cierre y reapertura (D6) | P7 |
 | `config/plans.ts` | Límites por plan (D5) | P11 |
 | `config/locale.ts` | Idioma, moneda, zona horaria, formatos (D11) | P1 |
+
+
+---
+
+## Variables que añade P1
+
+| Variable | Para qué | Obligatoria |
+|---|---|---|
+| `PGBOUNCER_DATABASE_URL` | La conexión **a través del pooler**. La usa únicamente la prueba que verifica la cuarta condición de D12 | Solo para pruebas de integración |
+
+`npm run db:up` levanta ahora **PostgreSQL y PgBouncer**. La aplicación sigue conectándose por `DATABASE_URL` (directa); el día que se decida poner el pooler en el camino se cambia esa variable y no esta.
+
+**La prueba de PgBouncer falla si la variable no está**, en vez de saltarse. Es deliberado: una prueba de seguridad que se omite cuando falta la infraestructura es un verde que no mide nada (INC-007).
+
+## Configuración de PgBouncer, y por qué cada valor
+
+| Ajuste | Valor | Por qué |
+|---|---|---|
+| `pool_mode` | `transaction` | Lo exige ADR-001. Es también el modo donde la fuga de tenant sería posible, y por eso se prueba |
+| `max_prepared_statements` | `100` | Prisma usa sentencias preparadas; con `0`, en modo transacción, mueren con «prepared statement already exists» |
+| `default_pool_size` | `1` | **No es una limitación: es el instrumento.** Con una sola conexión al servidor, la reutilización entre clientes no es probable sino segura, y la prueba es concluyente |
+| `auth_type` | `scram-sha-256` | Es el cifrado de contraseñas por defecto de PostgreSQL 18 |
+| Usuario | Solo `costeo_app` | El rol de migraciones usa conexión **directa** siempre: el CLI de Prisma emite sentencias que el modo transacción no soporta |
+
+**Sin `?pgbouncer=true` en la cadena.** Prisma dejó de recomendarlo a partir de PgBouncer 1.21.0 (ADR-001).
+
+## Parámetros de sesión y de bloqueo
+
+Viven en el dominio, como constantes con nombre, no en variables de entorno: son **reglas**, no configuración de despliegue, y cambiarlas debe ser un commit que alguien revisa.
+
+| Constante | Valor | Dónde |
+|---|---|---|
+| Vida absoluta de sesión | 12 h | `politica-de-sesion.ts` |
+| Inactividad máxima | 4 h | ídem |
+| Refresco de `last_seen_at` | 5 min | `validar-sesion.ts` |
+| Umbral de bloqueo por cuenta | 5 fallos | `politica-de-intentos.ts` |
+| Umbral de bloqueo por IP | 25 fallos | ídem |
+| Ventana de disparo / de escalada | 15 min / 60 min | ídem |
+| Escala de bloqueo | 1 → 5 → 15 → 60 min | ídem |
+| Largo de contraseña | 12–128 | `politica-de-contrasenas.ts` |
+| Caducidad de invitación | 7 días | `usuarios.ts` |
+| Parámetros de Argon2id | m=65536, t=3, p=1 | `argon2-hasher.ts` |
+
+El límite de ubicaciones **sí** es configuración, y por company: `company.max_locations`, con valor por defecto 10 (D5). El plan como entidad llega en P11.

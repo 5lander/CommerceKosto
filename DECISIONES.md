@@ -76,6 +76,23 @@ El punto 4 de la tabla de `CLAUDE.md` §1 resultó **positivo pero condicionado*
 
 Debe quedar registrado en **ADR-002**, incluyendo por qué se descartó Drizzle: la garantía real la aporta PostgreSQL, la madurez de Prisma, y la integración futura con Noctis Commerce, que ya usa Prisma.
 
+### Cerrado en P1: las cuatro condiciones, verificadas
+
+| # | Condición | Estado | Dónde se comprueba |
+|---|---|---|---|
+| 1 | Envoltorio único que fuerce transacción + tenant | ✅ | `shared/infrastructure/persistence/tenant-transaction.ts`, el único archivo que toca el cliente crudo |
+| 2 | Regla de `audit:forbidden` que impida usarlo fuera | ✅ | `tools/audit/rules/tenant.rules.mjs`, tres reglas |
+| 3 | Test de dos tenants que falla si el envoltorio se omite | ✅ | `apps/api/test/integracion/aislamiento-entre-companies.spec.ts` |
+| 4 | **Prueba explícita bajo PgBouncer en modo transacción** | ✅ | `apps/api/test/integracion/pgbouncer.spec.ts` |
+
+**La cuarta era la que podía obligar a reabrir esta decisión, y pasó.** PgBouncer 1.25.2 en modo transacción con `default_pool_size = 1` —una sola conexión al servidor, para que la reutilización entre clientes sea segura y no probable—: dos clientes distintos alternando dos companies, en serie y en paralelo, nunca cruzan datos, y un cliente que consulta sin tenant sobre la conexión reutilizada ve cero filas.
+
+Se comprobó además que esa prueba **mide algo**: con `set_config(..., FALSE)` en vez de `TRUE`, el segundo cliente ve la fila del primero. Detalle que conviene conocer: al deshacer el cambio la prueba seguía fallando hasta reiniciar PgBouncer — el tenant filtrado vivía en la conexión que el pooler guarda y sobrevivió al reinicio del proceso entero.
+
+Una desviación respecto de lo que decía esta decisión: **no se usa `$extends`**. El envoltorio es una clase con un método `run(company, trabajo)` que abre `$transaction` y ejecuta `set_config(..., TRUE)` dentro. Cumple lo mismo que pedía la condición 1 —un único punto que fuerza transacción y tenant— sin heredar el descargo de «not intended to be used in production» que lleva el patrón de Client Extension.
+
+**Detalle completo en ADR-006.**
+
 ---
 
 ## D3 — Parámetros de costeo por defecto ✅

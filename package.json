@@ -15,7 +15,7 @@
   "scripts": {
     "prepare": "node tools/setup-hooks.mjs && npm run db:generate",
     "doctor": "node tools/doctor.mjs",
-    "audit": "npm run audit:types && npm run audit:lint && npm run audit:forbidden && npm run audit:arch && npm run audit:deadcode && npm run audit:complexity && npm run audit:duplication && npm run audit:migrations && npm run audit:secrets && npm run audit:sec-headers && npm run audit:tests",
+    "audit": "npm run audit:types && npm run audit:lint && npm run audit:forbidden && npm run audit:arch && npm run audit:deadcode && npm run audit:complexity && npm run audit:duplication && npm run audit:migrations && npm run audit:secrets && npm run audit:deps && npm run audit:sec-headers && npm run audit:tests",
     "audit:types": "tsc -p apps/api/tsconfig.json && tsc -p tools/tsconfig.json",
     "audit:lint": "eslint . --max-warnings=0 --no-inline-config",
     "audit:forbidden": "node tools/audit/forbidden.mjs",
@@ -25,6 +25,7 @@
     "audit:duplication": "jscpd apps tools scripts",
     "audit:migrations": "node tools/audit/migrations.mjs",
     "audit:secrets": "secretlint --secretlintignore .secretlintignore \"**/*\"",
+    "audit:deps": "node tools/audit/dependencies.mjs",
     "audit:tests": "node tools/audit/tests.mjs",
     "audit:sec-headers": "npm run test:integration --workspace @costeo/api -- --testNamePattern=\"cabeceras de seguridad\"",
     "test": "npm run test:unit && npm run test:integration",
@@ -32,7 +33,7 @@
     "test:integration": "npm run test:integration --workspace @costeo/api",
     "dev": "npm run dev --workspace @costeo/api",
     "build": "npm run build --workspace @costeo/api",
-    "db:up": "docker compose up -d db",
+    "db:up": "docker compose up -d db pgbouncer",
     "db:down": "docker compose down",
     "db:psql": "node scripts/psql-shell.mjs",
     "db:generate": "npm run db:generate --workspace @costeo/api",
@@ -56,6 +57,7 @@
   },
   "allowScripts": {
     "@prisma/engines@7.10.0": true,
+    "argon2@0.44.0": true,
     "@swc/core@1.16.1": true,
     "esbuild@0.28.2": true,
     "prisma@7.10.0": true

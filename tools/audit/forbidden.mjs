@@ -27,6 +27,7 @@ import { sinComentarios, sinComentariosNiCadenas } from './lib/comentarios.mjs';
 import { matchesAny, normalizePath } from './lib/glob.mjs';
 import { coreRules } from './rules/core.rules.mjs';
 import { appendOnlyRules } from './rules/append-only.rules.mjs';
+import { tenantRules } from './rules/tenant.rules.mjs';
 import { repoRules } from './rules/repo.rules.mjs';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -69,7 +70,7 @@ const SOLO_INDICE = process.argv.includes('--staged');
 /** @typedef {Hallazgo & {regla: ReglaDeContenido | ReglaDeRepositorio}} Infraccion */
 
 /** @type {ReglaDeContenido[]} */
-const reglasDeContenido = [...coreRules, ...appendOnlyRules];
+const reglasDeContenido = [...coreRules, ...appendOnlyRules, ...tenantRules];
 
 /** Archivos versionados o nuevos, nunca los ignorados. */
 function listarArchivos() {

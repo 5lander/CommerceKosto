@@ -14,7 +14,7 @@
 git clone <repo> && cd CommerceKosto
 cp .env.example .env          # y edita las tres contraseñas
 npm ci                        # instala, activa los hooks y genera el cliente de Prisma
-npm run db:up                 # levanta PostgreSQL 18.6 y crea los roles
+npm run db:up                 # levanta PostgreSQL 18.6 (crea los roles) y PgBouncer
 npm run migrate:deploy        # aplica las migraciones como costeo_migrator
 npm run audit                 # los once checks
 ```
