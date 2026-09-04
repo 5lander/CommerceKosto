@@ -187,6 +187,151 @@ Lo que `BODEGA` necesita para reponer es un semáforo `REPONER`/`OK` **sin la ca
 
 ---
 
+## El mes contable y el conteo físico (desde P7)
+
+**El Excel no tiene dimensión temporal**: todo es «del mes», un único período
+implícito (SPEC §3). Esto es la extensión que hace falta para comparar un mes
+con el siguiente, y para que el conteo físico congele un corte contra el que
+calcular el food cost real.
+
+```mermaid
+graph TD
+    subgraph mes["el mes de UNA ubicacion"]
+        SIN["sin fila en period<br/>= ABIERTO"]
+        ABI["ABIERTO"]
+        CER["CERRADO"]
+    end
+
+    SIN -->|"abrir un conteo"| ABI
+    ABI -->|"confirmar el conteo<br/>+ period.close"| CER
+    CER -->|"reapertura<br/>SOLO OWNER, con motivo"| ABI
+
+    CER -.->|"toda escritura del libro<br/>con fecha dentro -> 409"| BLQ["guarda + trigger"]
+
+    subgraph conteo["el conteo de ese mes"]
+        BOR["BORRADOR<br/>se anota la hoja"]
+        CNF["CONFIRMADO<br/>teorico y costo CONGELADOS"]
+    end
+
+    BOR -->|"confirmar"| CNF
+    CNF -.->|"no admite cambios"| BOR
+```
+
+### La frontera del mes es un instante, no una fecha
+
+`occurred_at` es `timestamptz`: un instante absoluto. Preguntar «¿de qué mes
+es?» exige una zona horaria, y la respuesta cambia con ella — las 02:00 UTC del
+1 de abril son las 21:00 del 31 de marzo en Guayaquil, que es **marzo**.
+
+Por eso `period` guarda `starts_at` y `ends_at` **resueltos una sola vez**, al
+abrir el período. A partir de ahí todo es una comparación de instantes: en SQL,
+en el trigger y en TypeScript, sin aritmética de zonas en ninguno de los tres.
+
+Cambiar la zona algún día no reescribe la historia: los meses ya abiertos
+conservan la frontera con la que se abrieron. El intervalo es semiabierto
+`[starts_at, ends_at)`, así que ningún instante cae en dos períodos ni se
+escapa de todos.
+
+> Las cinco primeras horas UTC de cada día 1 pertenecen al mes anterior en
+> Ecuador. Es la trampa de **INC-013**, y aparece antes escribiendo una fecha a
+> mano que operando el sistema.
+
+### La ausencia de fila es el estado abierto
+
+Un mes del que nadie se ha ocupado no tiene fila en `period`. Exigir que
+alguien «abra» el mes antes de registrar nada dejaría a una company recién
+creada sin poder anotar su primera compra, y pararía el sistema solo el día 1
+de cada mes. **Cerrar es un acto explícito; bloquear el libro también.**
+
+### Un mes cerrado no admite movimientos, y la garantía está en la base
+
+La guarda de aplicación —`exigirLibroEscribible`, que llaman las cinco
+escrituras del libro— convierte el rechazo en un `409` con un mensaje que dice
+cómo seguir. **La garantía es otra cosa**: el trigger
+`inventory_movement_respeta_periodo_cerrado`, que cubre toda fila que entre,
+venga de donde venga, incluida la sexta escritura que alguien añada mañana sin
+acordarse de llamar a nada.
+
+Con la guarda retirada, ningún movimiento entra igualmente; lo que cambia es
+que sale como **500** en vez de 409. La base garantiza, el dominio explica.
+
+**Alcanza también a la corrección**, y es la consecuencia menos evidente: una
+corrección conserva la fecha del movimiento que anula (R3), así que corregir
+dentro de un mes sellado se detiene igual. Eso es lo que «cerrado es de solo
+lectura» significa, y la salida es reabrir — acto del `OWNER`, con motivo, que
+queda en `audit_log`.
+
+### El conteo NO ajusta el libro
+
+Es la decisión de la que depende que el conteo signifique algo. SPEC §18
+calcula `diferencia = conteo_fisico − stock_teorico`; si al confirmar se
+emitiera un `AJUSTE` por la diferencia, esa resta daría **cero siempre** y el
+hallazgo desaparecería en el mismo acto de registrarlo.
+
+```
+el libro    dice lo que DEBERIA haber
+el conteo   dice lo que HAY
+la resta    es el hallazgo, y no se puede tener y hacer desaparecer a la vez
+```
+
+### Lo que no se contó vale lo que el libro dice, no cero
+
+Un conteo puede ser parcial (D7). Un ítem sin línea **no genera diferencia** y
+aporta **su valor teórico** al inventario final. Si valiera cero, no haber
+mirado un estante equivaldría a declarar que su contenido se consumió entero, y
+el consumo real se dispararía por una omisión de captura.
+
+Lo que dice cuánto fiarse es la **cobertura**:
+
+```
+cobertura = valor verificado / valor total
+```
+
+Se mide sobre el **valor**, no sobre el número de ítems: contar cuarenta ítems
+baratos y dejar el jamón sin contar es una cobertura mala aunque sean 40 de 41.
+Y **viaja siempre pegada** a los números que dependen de ella — un consumo real
+calculado sobre el 12 % del valor es una estimación, no un consumo real.
+
+### Confirmar congela, y por eso la conciliación de un mes cerrado es una lectura
+
+Al confirmar se guardan en cada línea el stock teórico y el costo de uso, y en
+la cabecera los tres valores agregados. El costo sale de precios **con
+vigencia** (R5): un precio nuevo con fecha retroactiva cambiaría el valor de un
+inventario que ya se informó.
+
+Es la misma razón por la que P6 congela el costo estándar de una producción:
+**el valor de un inventario no puede cambiar porque alguien toque una tabla de
+precios.** El efecto colateral es que P8 no tiene que recalcular nada para el
+inventario valorizado de un mes cerrado.
+
+### Quién cuenta y quién concilia
+
+`BODEGA` cuenta y **no** concilia. La conciliación lleva stock teórico,
+diferencia y valorización: tres de los datos prohibidos de CLAUDE.md §4.3, y
+desde el stock teórico se despeja el consumo y desde el consumo la receta.
+
+Es la misma asimetría que P6 instaló sobre el saldo, con la misma consecuencia:
+**ninguna escritura devuelve lo que acaba de calcular.** Confirmar un conteo
+calcula la conciliación entera y responde `204` sin cuerpo.
+
+**Y el efecto colateral es el que SPEC §4 pide expresamente:** `BODEGA` cuenta a
+ciegas, sin saber cuánto debería haber. Quien conoce el número esperado tiende a
+ajustar el conteo hacia él, así que la restricción de confidencialidad **mejora
+la calidad del dato de inventario**. Para que sea ciego de verdad, la hoja lista
+todos los ítems almacenables: si trajera solo los que el libro conoce, la
+presencia de una fila ya diría algo.
+
+### Tres números que se parecen y no son el mismo
+
+Conviene tenerlos separados por nombre, porque P8 los va a usar los tres:
+
+| | |
+|---|---|
+| **saldo del libro** | `SUM(quantity)` sobre `inventory_movement`. Lo de P6 |
+| **stock teórico del corte** | El saldo del libro **hasta `cutoff_at`** del conteo |
+| **inventario físico** | Lo contado donde se contó, **lo teórico donde no** |
+
+
 ## El proceso de la API por dentro (desde P0)
 
 Lo que atraviesa una petición, en orden. Las cuatro protecciones globales se registran en `AppModule`/`bootstrap.ts`, de modo que **las pruebas levantan exactamente la misma aplicación que se despliega**: una defensa cableada solo en `main.ts` no existe en los tests, y entonces el test de que existe no prueba nada.

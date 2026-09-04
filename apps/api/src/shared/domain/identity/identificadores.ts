@@ -30,6 +30,8 @@ declare const MARCA_PROPAGATION: unique symbol;
 declare const MARCA_MOVEMENT: unique symbol;
 declare const MARCA_TRANSFER: unique symbol;
 declare const MARCA_PRODUCTION: unique symbol;
+declare const MARCA_PERIOD: unique symbol;
+declare const MARCA_COUNT: unique symbol;
 
 export type CompanyId = string & { readonly [MARCA_COMPANY]: 'company' };
 export type LocationId = string & { readonly [MARCA_LOCATION]: 'location' };
@@ -45,6 +47,8 @@ export type RecipePropagationId = string & { readonly [MARCA_PROPAGATION]: 'reci
 export type MovementId = string & { readonly [MARCA_MOVEMENT]: 'inventory-movement' };
 export type TransferId = string & { readonly [MARCA_TRANSFER]: 'inventory-transfer' };
 export type ProductionId = string & { readonly [MARCA_PRODUCTION]: 'inventory-production' };
+export type PeriodId = string & { readonly [MARCA_PERIOD]: 'period' };
+export type PhysicalCountId = string & { readonly [MARCA_COUNT]: 'physical-count' };
 
 export class IdentificadorInvalidoError extends Error {
   public override readonly name = 'IdentificadorInvalidoError';
@@ -142,4 +146,14 @@ export function transferId(valor: string): TransferId {
 /** @throws {IdentificadorInvalidoError} */
 export function productionId(valor: string): ProductionId {
   return exigirUuid('ProductionId', valor) as ProductionId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function periodId(valor: string): PeriodId {
+  return exigirUuid('PeriodId', valor) as PeriodId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function physicalCountId(valor: string): PhysicalCountId {
+  return exigirUuid('PhysicalCountId', valor) as PhysicalCountId;
 }

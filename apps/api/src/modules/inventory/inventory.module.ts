@@ -19,9 +19,19 @@ import { Module } from '@nestjs/common';
 import { RELOJ } from '../../shared/application/ports/reloj.port';
 import { RelojDelSistema } from '../../shared/infrastructure/time/reloj-del-sistema';
 import { CatalogModule } from '../catalog/catalog.module';
+import { PeriodsModule } from '../periods/periods.module';
 import { PricingModule } from '../pricing/pricing.module';
 import { RecipesModule } from '../recipes/recipes.module';
 import { RegistrarConsumoPorVenta } from './application/casos-de-uso/consumo';
+import {
+  CerrarPeriodoDelConteo,
+  ConfirmarConteo,
+  CrearConteo,
+  GuardarLineasDeConteo,
+  LeerConciliacion,
+  LeerHojaDeConteo,
+  ListarConteos,
+} from './application/casos-de-uso/conteos';
 import {
   ConsultarSaldos,
   CorregirMovimiento,
@@ -30,6 +40,7 @@ import {
 } from './application/casos-de-uso/movimientos';
 import { RegistrarProduccion } from './application/casos-de-uso/produccion';
 import { RegistrarTransferencia } from './application/casos-de-uso/transferencias';
+import { REPOSITORIO_DE_CONTEOS } from './application/ports/repositorio-de-conteos.port';
 import { REPOSITORIO_DE_INVENTARIO } from './application/ports/repositorio-de-inventario.port';
 import { DependenciasDeInventarioNest } from './infrastructure/dependencias-de-inventario';
 import {
@@ -38,15 +49,28 @@ import {
   LecturasDelLibro,
   ProduccionController,
 } from './infrastructure/http/inventario.controller';
+import {
+  ConciliacionController,
+  ConteosController,
+  EscriturasDeConteo,
+  LecturasDeConteo,
+} from './infrastructure/http/conteos.controller';
+import { PrismaConteosRepositorio } from './infrastructure/prisma-conteos.repositorio';
 import { PrismaInventarioRepositorio } from './infrastructure/prisma-inventario.repositorio';
 
 type Deps = DependenciasDeInventarioNest;
 
 @Module({
-  imports: [CatalogModule, PricingModule, RecipesModule],
-  controllers: [InventarioController, ProduccionController],
+  imports: [CatalogModule, PeriodsModule, PricingModule, RecipesModule],
+  controllers: [
+    InventarioController,
+    ProduccionController,
+    ConteosController,
+    ConciliacionController,
+  ],
   providers: [
     { provide: REPOSITORIO_DE_INVENTARIO, useClass: PrismaInventarioRepositorio },
+    { provide: REPOSITORIO_DE_CONTEOS, useClass: PrismaConteosRepositorio },
     { provide: RELOJ, useClass: RelojDelSistema },
 
     DependenciasDeInventarioNest,
@@ -88,6 +112,40 @@ type Deps = DependenciasDeInventarioNest;
     },
 
     {
+      provide: ListarConteos,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): ListarConteos => new ListarConteos(d),
+    },
+    {
+      provide: LeerHojaDeConteo,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): LeerHojaDeConteo => new LeerHojaDeConteo(d),
+    },
+    {
+      provide: LeerConciliacion,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): LeerConciliacion => new LeerConciliacion(d),
+    },
+
+    {
+      provide: EscriturasDeConteo,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): EscriturasDeConteo =>
+        new EscriturasDeConteo({
+          crear: new CrearConteo(d),
+          lineas: new GuardarLineasDeConteo(d),
+          confirmar: new ConfirmarConteo(d),
+          cierre: new CerrarPeriodoDelConteo(d),
+        }),
+    },
+    {
+      provide: LecturasDeConteo,
+      inject: [ListarConteos, LeerHojaDeConteo],
+      useFactory: (listar: ListarConteos, hoja: LeerHojaDeConteo): LecturasDeConteo =>
+        new LecturasDeConteo(listar, hoja),
+    },
+
+    {
       provide: EscriturasDelLibro,
       inject: [RegistrarMovimiento, CorregirMovimiento, RegistrarTransferencia],
       useFactory: (
@@ -103,6 +161,6 @@ type Deps = DependenciasDeInventarioNest;
         new LecturasDelLibro(saldos, movimientos),
     },
   ],
-  exports: [ConsultarSaldos, ListarMovimientos],
+  exports: [ConsultarSaldos, ListarMovimientos, LeerConciliacion],
 })
 export class InventoryModule {}

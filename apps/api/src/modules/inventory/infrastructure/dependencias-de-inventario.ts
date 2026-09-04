@@ -5,6 +5,11 @@
  * caso de uso recibe **un** objeto de dependencias y no seis parámetros, que es
  * lo que CLAUDE.md §3 pide con su máximo de tres.
  *
+ * `periodos`, `asegurarPeriodo`, `consultarPeriodo` y `cerrarPeriodo` son las
+ * piezas de `periods`. La flecha va en un solo sentido —`inventory` depende de
+ * `periods` y nunca al revés— porque toda escritura del libro pregunta si el
+ * mes está cerrado y la confirmación del conteo es la que lo cierra.
+ *
  * `leerItem` y `listarItems` son los puertos de LECTURA del catálogo:
  * `inventory` no toca sus tablas (CLAUDE.md §2). `costosDeItems` es el de
  * `pricing`, y hace falta para R10 — el costo estándar de una preparación y el
@@ -17,8 +22,20 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
 import { RELOJ, type Reloj } from '../../../shared/application/ports/reloj.port';
 import { LeerItem, ListarItems } from '../../catalog/application/casos-de-uso/items';
+import {
+  AsegurarPeriodo,
+  CerrarPeriodo,
+  ConsultarPeriodo,
+  ExigirPeriodoAbierto,
+} from '../../periods/application/casos-de-uso/periodos';
+import { CalendarioDePeriodos } from '../../periods/domain/periodo';
+import { CALENDARIO_DE_PERIODOS } from '../../periods/infrastructure/dependencias-de-periodos';
 import { CostosDeItems } from '../../pricing/application/casos-de-uso/costos-de-items';
 import { LeerCarta } from '../../recipes/application/casos-de-uso/carta';
+import {
+  REPOSITORIO_DE_CONTEOS,
+  type RepositorioDeConteos,
+} from '../application/ports/repositorio-de-conteos.port';
 import {
   REPOSITORIO_DE_INVENTARIO,
   type RepositorioDeInventario,
@@ -40,6 +57,25 @@ export class DependenciasDeInventarioNest {
 
   @Inject(LeerCarta)
   public readonly leerCarta!: LeerCarta;
+
+  @Inject(REPOSITORIO_DE_CONTEOS)
+  public readonly conteos!: RepositorioDeConteos;
+
+  /** La guarda del mes cerrado (D6): la llaman las cinco escrituras del libro. */
+  @Inject(ExigirPeriodoAbierto)
+  public readonly periodos!: ExigirPeriodoAbierto;
+
+  @Inject(AsegurarPeriodo)
+  public readonly asegurarPeriodo!: AsegurarPeriodo;
+
+  @Inject(ConsultarPeriodo)
+  public readonly consultarPeriodo!: ConsultarPeriodo;
+
+  @Inject(CerrarPeriodo)
+  public readonly cerrarPeriodo!: CerrarPeriodo;
+
+  @Inject(CALENDARIO_DE_PERIODOS)
+  public readonly calendario!: CalendarioDePeriodos;
 
   @Inject(AUDIT_LOG_PORT)
   public readonly auditoria!: AuditLogPort;

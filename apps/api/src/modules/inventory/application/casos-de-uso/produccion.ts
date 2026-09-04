@@ -34,13 +34,9 @@ import type {
 import { Money, Quantity } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ItemLeido } from '../../../catalog/application/ports/repositorio-de-catalogo.port';
-import {
-  exigirUbicacionEnAlcance,
-  type SesionActiva,
-} from '../../../iam/application/casos-de-uso/validar-sesion';
+import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import type { CostosDeItems } from '../../../pricing/application/casos-de-uso/costos-de-items';
 import { ItemDelLibroNoEncontradoError, ItemNoProducibleError } from '../../domain/errores';
-import { exigirFechaPasada } from '../../domain/movimiento';
 import {
   producirLote,
   type InsumoDelLote,
@@ -51,7 +47,11 @@ import type {
   DatosDeProduccionRegistrada,
   MovimientoParaGuardar,
 } from '../ports/repositorio-de-inventario.port';
-import { registrarEvento, type DependenciasDeInventario } from './movimientos';
+import {
+  exigirLibroEscribible,
+  registrarEvento,
+  type DependenciasDeInventario,
+} from './movimientos';
 
 export interface DependenciasDeProduccion extends DependenciasDeInventario {
   readonly costosDeItems: CostosDeItems;
@@ -81,8 +81,12 @@ export class RegistrarProduccion {
    * @throws {FechaFuturaError} @throws {SignoIncoherenteError}
    */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeProduccion): Promise<ProductionId> {
-    exigirUbicacionEnAlcance(sesion, datos.locationId);
-    exigirFechaPasada(datos.occurredAt, this.deps.reloj.ahora());
+    await exigirLibroEscribible({
+      deps: this.deps,
+      sesion,
+      locationId: datos.locationId,
+      ocurridoEn: datos.occurredAt,
+    });
 
     const [items, costos] = await Promise.all([
       this.deps.listarItems.ejecutar(sesion, false),

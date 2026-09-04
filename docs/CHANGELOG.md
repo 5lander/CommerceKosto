@@ -4,6 +4,52 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P7 — Períodos · conteo físico · 2026-09-04
+
+**Objetivo:** poder cerrar un mes y compararlo con el siguiente.
+
+### Entregado
+
+- **El período es de una UBICACIÓN**, no de la company: el conteo se hace por ubicación (R2) y el cierre ocurre al cargarlo, así que un período de company obligaría a que las diez ubicaciones de una cadena contaran el mismo día
+- **La frontera del mes se guarda como dos instantes**, resueltos una sola vez al abrirlo. `occurred_at` es absoluto y su mes depende de la zona horaria: las 02:00 UTC del 1 de abril son marzo en Guayaquil. Con la frontera escrita, cambiar la zona algún día **no mueve de mes movimientos ya cerrados**
+- **La ausencia de fila es el estado abierto.** Exigir abrir el mes pararía el sistema solo el día 1 de cada mes
+- **Un mes cerrado no admite movimientos, y la garantía está en la base**: trigger `BEFORE INSERT` sobre el libro, más la guarda `exigirLibroEscribible` que las cinco escrituras comparten. **Alcanza a la corrección**, que conserva la fecha del original (R3)
+- **Reapertura solo del `OWNER`**, con motivo obligatorio y evento `period.reopened`
+- **El conteo NO ajusta el libro.** Emitir un `AJUSTE` por la diferencia haría que `diferencia = conteo − teórico` (SPEC §18) diera cero siempre: el hallazgo desaparecería en el mismo acto de registrarlo
+- **Conteo parcial (D7) con su cobertura**, medida sobre el **valor** y no sobre el número de ítems. **Un ítem sin contar vale su teórico, no cero** — valorarlo en cero equivaldría a declararlo consumido entero
+- **Confirmar congela** el stock teórico y el costo de cada línea, y materializa una línea por cada ítem con saldo. La conciliación de un mes cerrado pasa a ser **una lectura**: 500 filas en 0,165 ms
+- **`CONSUMO_REAL` de SPEC §16** —`inicial + compras − final físico`— encadenado mes a mes, con la cobertura pegada. Es la mitad física del food cost real; la otra necesita las unidades vendidas, que son de P8
+- **`BODEGA` cuenta y no concilia**: `count.write` sí, `count.read` no. La hoja lista **todos** los ítems almacenables tengan saldo o no, para que el conteo sea ciego de verdad — que es lo que SPEC §4 pide y lo que mejora la calidad del dato
+- **`shared/infrastructure/config/periods.ts`**: la zona horaria del calendario contable, como configuración versionada (D6, D11)
+- **ADR-010** con las nueve decisiones que el SPEC no escribe
+- **659 pruebas**: 413 unitarias con la base apagada, 246 de integración
+- **El presupuesto medido**: `GET /conteos/:id` p95 **88,4 ms** contra 300, con 500 ítems; y `POST /inventario/movimientos` **52,3 ms** con 240 períodos cerrados en la tabla
+
+### Lo que se descubrió por el camino
+
+**INC-013, encontrada escribiendo una prueba del propio paquete.** Una compra fechada `2026-09-01T00:00:00Z` se rechazó por un período que nadie había cerrado: en Guayaquil eran las 19:00 del 31 de agosto. **Las cinco primeras horas UTC de cada día 1 pertenecen al mes anterior.** Es exactamente el fallo que P7 existe para prevenir, visto desde dentro. La prevención automatizada es una prueba de propiedad —doce meses en tres zonas horarias, una de ellas sin DST— y la del dato de prueba es una convención (`12:00Z`), porque una regla de `audit:forbidden` daría falsos positivos y se desactivaría en una semana.
+
+**`migrate:verify` paró el `down.sql` el primer día.** No se puede soltar una función mientras un trigger vivo la use, y los triggers caen con sus tablas, que se borran **después** del bloque manual. No se registró como incidencia porque su prevención ya existía y funcionó.
+
+**La siembra del test de rendimiento chocó contra su propia garantía**, ejecutando como dueño de la tabla: el trigger `physical_count_line_solo_en_borrador` no distingue roles. Hay que sembrar en `BORRADOR` y confirmar al final — el mismo orden que el repositorio se ve obligado a seguir.
+
+**Nadie puede leer `audit_log`, ni siquiera el dueño de la tabla.** Se quiso comprobar que `period.reopened` guarda su motivo y no se pudo: `FORCE ROW LEVEL SECURITY` sin política de `SELECT` para ningún rol, que es lo que SEGURIDAD.md §10 pide. Los eventos de P0 a P7 se escriben y **su contenido no está verificado por ninguna prueba**. Queda con nombre para **P11**.
+
+### Lo que el guardián 3 enseña
+
+Valorar en **cero** lo que nadie contó rompe **3 pruebas de 659**. Sigue en verde la diferencia por línea, el cierre, los permisos, las cinco de confidencialidad — y, sobre todo, **la cobertura, que sigue diciendo 50 %**. El indicador que existe para avisar de que un conteo parcial no se lee como uno completo **no detecta esto**. Y el número que cambia es plausible: `consumo_real` pasa de −3,00 a +17,00.
+
+Tercera vez que aparece la misma forma de fallo: P5 con R7, P6 con el saldo, P7 con la cobertura. **Un invariante agregado que se cumple tapando un desglose que no.**
+
+### Pendiente
+
+- **La tabla de unidades vendidas**, que P8 necesita para `venta_neta_mes` y con ella el food cost real completo
+- El estado del período **en el consolidado de P9**: puede estar sumando meses cerrados con meses abiertos, y tiene que decirlo
+- **Leer `audit_log`** — P11
+- D4 (`LNK`) sigue en 🔴, y sigue sin bloquear nada
+
+---
+
 ## P6 — Inventario · libro mayor append-only · 2026-09-04
 
 **Objetivo:** saber cuánto hay y por qué, sin poder mentir.

@@ -1,0 +1,58 @@
+GUARDIAN 3 — el que mas ensena: un item sin contar valorado en CERO
+====================================================================
+
+Que se rompio: en `conciliacion.ts`, `valorFisicoDe` deja de arrastrar el valor
+teorico de los items sin contar y devuelve cero.
+
+  -  return valorDe(entrada.contado ?? entrada.teorico, entrada.costoDeUso);
+  +  if (entrada.contado === null) return Money.CERO;
+  +  return valorDe(entrada.contado, entrada.costoDeUso);
+
+Es un cambio de dos lineas, y es exactamente lo que escribiria alguien que lee
+"conteo parcial" como "lo que no se conto no esta".
+
+RESULTADO: 3 PRUEBAS DE 655
+---------------------------
+
+$ npm run test:unit
+  x la conciliación > un ítem sin contar no genera diferencia y aporta su valor
+    TEÓRICO al inventario físico
+    -> expected '20.000000000000' to be '40.000000000000'
+  Tests  1 failed | 412 passed (413)
+
+$ npx vitest run --project integration
+  x la cobertura es valor verificado sobre valor total, no items contados
+    -> expected '17.000000000000' to be '37.000000000000'
+  x con el mes anterior confirmado, el inicial se encadena y el consumo real sale
+    -> expected '17.000000000000' to be '-3.000000000000'
+  Tests  2 failed | 240 passed (242)
+
+LO QUE SIGUE EN VERDE, CON EL FOOD COST REAL ROTO
+--------------------------------------------------
+  - la diferencia por linea y su valorizacion       (siguen exactas)
+  - LA COBERTURA: sigue diciendo 0.500000000000     <-- lo importante
+  - el cierre del mes, la reapertura, los permisos
+  - las cinco pruebas de confidencialidad frente a BODEGA
+  - las 240 restantes de integracion
+
+Y EL NUMERO QUE CAMBIA ES PLAUSIBLE. `consumo_real` pasa de -3,00 a +17,00: no
+es un NaN, ni un negativo absurdo, ni un cero sospechoso. Es una cifra que un
+dueno de restaurante leeria sin parpadear, y que dice que se consumieron 17
+dolares de mercancia que siguen en el estante.
+
+LA LECCION, QUE ES LA MISMA DE P5 Y P6 EN OTRO SITIO
+-----------------------------------------------------
+El indicador de cobertura existe precisamente para avisar de que un conteo
+parcial no se puede leer como uno completo. **Y NO DETECTA ESTO.** Sigue
+diciendo "verificaste el 50 % del valor" tanto si el otro 50 % se arrastra
+como si se tira a la basura. Un invariante que se cumple tapando uno que no.
+
+  P5:  R7 da cero y el desglose esta mal
+  P6:  el saldo cuadra y el tipo de movimiento esta mal
+  P7:  la cobertura dice 50 % y el inventario final esta a la mitad
+
+Lo unico que lo caza es el numero absoluto —`valorFisico`— comparado contra un
+caso calculado a mano. Por eso las dos pruebas de integracion que fallan
+afirman CIFRAS CONCRETAS (37,00 y -3,00) y no relaciones entre ellas.
+
+Restaurado tras la captura.

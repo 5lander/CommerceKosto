@@ -148,11 +148,33 @@ export interface RepositorioDeInventario {
   /** El lote y sus movimientos, atómicamente. */
   registrarProduccion(datos: DatosDeProduccionRegistrada): Promise<ProductionId>;
 
-  /** El saldo de cada ítem con movimiento en la ubicación, agregado en SQL. */
+  /**
+   * El saldo de cada ítem con movimiento en la ubicación, agregado en SQL.
+   *
+   * `hasta` recorta el libro a un instante: es lo que convierte «el saldo» en
+   * «el saldo en el corte» que el conteo físico necesita. `null` significa todo
+   * el libro, que es la consulta de P6.
+   */
   saldos(entrada: {
     readonly companyId: CompanyId;
     readonly locationId: LocationId;
+    readonly hasta: Date | null;
   }): Promise<readonly SaldoLeido[]>;
+
+  /**
+   * `compras_del_mes` de SPEC §16: la suma de los importes de los movimientos
+   * `COMPRA` en `[desde, hasta)`.
+   *
+   * **SALE DEL LIBRO Y NO DE OTRO SITIO**, y por eso las correcciones se
+   * cancelan solas: la corrección de una compra es una `COMPRA` de importe
+   * invertido, no un `AJUSTE`. Ver ADR-009.
+   */
+  comprasEntre(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly desde: Date;
+    readonly hasta: Date;
+  }): Promise<string>;
 
   /** Paginación por cursor, nunca `OFFSET` (CLAUDE.md §5). */
   libro(consulta: ConsultaDelLibro): Promise<PaginaDelLibro>;

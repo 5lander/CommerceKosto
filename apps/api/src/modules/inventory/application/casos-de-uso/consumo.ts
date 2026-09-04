@@ -29,10 +29,7 @@ import type {
 import { Quantity, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ItemLeido } from '../../../catalog/application/ports/repositorio-de-catalogo.port';
-import {
-  exigirUbicacionEnAlcance,
-  type SesionActiva,
-} from '../../../iam/application/casos-de-uso/validar-sesion';
+import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import type { CartaDeUbicacion, LeerCarta } from '../../../recipes/application/casos-de-uso/carta';
 import type { RecetaLeida } from '../../../recipes/application/ports/repositorio-de-recetas.port';
 import { ItemDelLibroNoEncontradoError } from '../../domain/errores';
@@ -42,9 +39,13 @@ import {
   type ItemConsumible,
   type LineaDeConsumo,
 } from '../../domain/explosion';
-import { conSignoDelTipo, exigirFechaPasada } from '../../domain/movimiento';
+import { conSignoDelTipo } from '../../domain/movimiento';
 import type { MovimientoParaGuardar } from '../ports/repositorio-de-inventario.port';
-import { registrarEvento, type DependenciasDeInventario } from './movimientos';
+import {
+  exigirLibroEscribible,
+  registrarEvento,
+  type DependenciasDeInventario,
+} from './movimientos';
 
 export interface DependenciasDeConsumo extends DependenciasDeInventario {
   readonly leerCarta: LeerCarta;
@@ -74,8 +75,12 @@ export class RegistrarConsumoPorVenta {
     sesion: SesionActiva,
     datos: DatosDeConsumo,
   ): Promise<readonly MovementId[]> {
-    exigirUbicacionEnAlcance(sesion, datos.locationId);
-    exigirFechaPasada(datos.occurredAt, this.deps.reloj.ahora());
+    await exigirLibroEscribible({
+      deps: this.deps,
+      sesion,
+      locationId: datos.locationId,
+      ocurridoEn: datos.occurredAt,
+    });
 
     const [carta, items] = await Promise.all([
       this.deps.leerCarta.ejecutar(sesion, {

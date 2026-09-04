@@ -1,0 +1,48 @@
+GUARDIAN 4 — la frontera de §4.3, rota por los dos sitios por los que se rompe
+==============================================================================
+
+Que se rompio, a la vez:
+
+  1. `ConciliacionController` pasa de `@Requiere('count.read')` a
+     `@Requiere('count.write')`, que BODEGA si tiene.
+  2. `comoConteoBasicoDto` copia ademas `valorTeorico` y `valorFisico`.
+
+Son las dos formas reales de que esto se rompa: relajar el permiso, y anadir un
+campo a la proyeccion "basica" sin pararse a pensar en quien la recibe.
+
+$ npx vitest run --project integration test/integracion/periodos-y-conteo.spec.ts
+
+  x confidencialidad frente a BODEGA (§4.3) > y NO concilia: la conciliacion le
+    devuelve 403
+    -> expected 200 to be 403
+
+  x confidencialidad frente a BODEGA (§4.3) > ni la hoja ni la lista que recibe
+    BODEGA llevan teorico, diferencia ni valorizacion
+    -> expected '{"conteo":{"id":"01a06eb2-379a-7976-b...' not to contain 'teorico'
+
+  Tests  2 failed | 27 passed (29)
+
+POR QUE LA SEGUNDA PRUEBA MIRA EL JSON EN TEXTO
+------------------------------------------------
+Porque lo que importa es que el byte no salga del backend. Una asercion sobre
+un objeto tipado comprobaria la forma que TypeScript cree que tiene la
+respuesta; el `.toLowerCase().not.toContain(...)` sobre `JSON.stringify` del
+cuerpo crudo comprueba lo que de verdad viaja por el cable. Un campo que la
+interfaz escondera sigue siendo un campo publicado.
+
+Notese que el segundo fallo lo produjo `valorTeorico` colandose en la HOJA a
+traves de `conteo`, que es una propiedad anidada. Una revision humana leyendo
+`comoConteoBasicoDto` habria visto dos lineas nuevas inocentes.
+
+LA SIMETRIA CON P6
+-------------------
+P6: BODEGA escribe el libro y no lee el saldo, porque
+    saldo = inicial + compras - consumo, y despeja el consumo.
+P7: BODEGA cuenta y no concilia, porque la conciliacion LLEVA el stock teorico,
+    que es el mismo numero por otro camino.
+
+Y el efecto colateral que SPEC §4 pide expresamente: BODEGA cuenta a ciegas.
+Quien conoce el numero esperado tiende a ajustar el conteo hacia el, asi que la
+restriccion de confidencialidad MEJORA la calidad del dato de inventario.
+
+Restaurado tras la captura.

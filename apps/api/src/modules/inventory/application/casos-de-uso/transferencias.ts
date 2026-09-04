@@ -18,16 +18,13 @@ import type {
 } from '../../../../shared/domain/identity/identificadores';
 import { Quantity } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
-import {
-  exigirUbicacionEnAlcance,
-  type SesionActiva,
-} from '../../../iam/application/casos-de-uso/validar-sesion';
-import { exigirFechaPasada } from '../../domain/movimiento';
+import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { construirTransferencia } from '../../domain/transferencia';
 import type { MovimientoParaGuardar } from '../ports/repositorio-de-inventario.port';
 import {
   exigirItem,
   registrarEvento,
+  exigirLibroEscribible,
   type DependenciasDeInventario,
 } from './movimientos';
 
@@ -50,11 +47,19 @@ export class RegistrarTransferencia {
    * @throws {FechaFuturaError}
    */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeTransferencia): Promise<TransferId> {
-    exigirUbicacionEnAlcance(sesion, datos.origen);
-    exigirUbicacionEnAlcance(sesion, datos.destino);
+    // LAS DOS UBICACIONES, y las dos por su propio período: mover mercancía
+    // desde un almacén cuyo mes ya se cerró alteraría un inventario final que
+    // ya se informó, aunque el local de destino tenga el suyo abierto.
+    for (const ubicacion of [datos.origen, datos.destino]) {
+      await exigirLibroEscribible({
+        deps: this.deps,
+        sesion,
+        locationId: ubicacion,
+        ocurridoEn: datos.occurredAt,
+      });
+    }
 
     const item = await exigirItem(this.deps, sesion, datos.itemId);
-    exigirFechaPasada(datos.occurredAt, this.deps.reloj.ahora());
 
     const par = construirTransferencia({
       origen: datos.origen,

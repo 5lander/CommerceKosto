@@ -503,6 +503,143 @@ Medido con **1,2 millones de movimientos** en la tabla y 12.000 en la ubicación
 
 **Un detalle que costó descubrir y quedó escrito en la prueba:** con una sola ubicación en la tabla, PostgreSQL elige `Seq Scan` — correctamente, porque la tabla entera es el resultado. La prueba siembra 19 ubicaciones de ruido para que el filtro tenga algo que descartar. Sin eso, el check del plan no medía nada.
 
+## Lo que añade P7 — el mes contable y el conteo físico
+
+```mermaid
+erDiagram
+    company              ||--o{ period : "toda fila lleva tenant"
+    location             ||--o{ period : "EL PERIODO ES DE UNA UBICACION"
+    period_status        ||--o{ period : "ABIERTO CERRADO"
+    period               ||--o{ physical_count : "un mes, N borradores, UN confirmado"
+    physical_count_status||--o{ physical_count : ""
+    physical_count       ||--o{ physical_count_line : "una por item con saldo o conteo"
+    item                 ||--o{ physical_count_line : "que se conto"
+
+    period {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    location_id FK "R2: cada ubicacion cierra su mes"
+        int     year
+        int     month
+        timestamp starts_at "RESUELTO al abrir. Semiabierto [starts, ends)"
+        timestamp ends_at
+        text    status FK
+        timestamp closed_at "el rastro SOBREVIVE a la reapertura"
+        uuid    closed_by FK
+        timestamp reopened_at
+        uuid    reopened_by FK
+    }
+    physical_count {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    period_id FK "compuesta con company_id"
+        text    status FK
+        timestamp cutoff_at "period.ends_at CONGELADO"
+        uuid    confirmed_period_id "UNICO. Copia de period_id solo si CONFIRMADO"
+        numeric theoretical_value "lo que el libro dice que hay, TODO"
+        numeric covered_value "la parte que alguien verifico"
+        numeric physical_value "SPEC 16: contado donde se conto, teorico donde no"
+        timestamp confirmed_at
+        uuid    confirmed_by FK
+    }
+    physical_count_line {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    count_id FK
+        uuid    item_id FK
+        numeric quantity "NULL = SIN VERIFICAR. Cero = mire y no habia"
+        numeric theoretical_quantity "CONGELADO al confirmar"
+        numeric unit_cost "CONGELADO al confirmar"
+    }
+```
+
+### El período es de una ubicación, y su frontera son dos instantes
+
+`occurred_at` es un instante absoluto y el mes al que pertenece depende de la
+zona horaria. `starts_at` y `ends_at` se resuelven **una vez**, al abrir el
+período, con la zona de `config/periods.ts`; a partir de ahí todo es una
+comparación de instantes, en SQL y en TypeScript, sin `AT TIME ZONE` en ninguna
+consulta.
+
+El precio de no hacerlo se ve en el plan: con `date_trunc('month', occurred_at
+AT TIME ZONE …)` la agregación del saldo hasta el corte sería un `Seq Scan`
+sobre todo el libro. Con instantes, el `hasta` entra en la misma condición de
+índice que el tenant y la ubicación — y **P7 no necesitó ningún índice nuevo
+sobre `inventory_movement`**.
+
+Razonado en **ADR-010 §1 y §2**.
+
+### La ausencia de fila es el estado abierto
+
+No hay fila para los meses de los que nadie se ha ocupado. La alternativa
+—exigir abrir el mes— pararía el sistema el día 1 de cada mes.
+
+Consecuencia en el modelo: `period` nace `ABIERTO` cuando alguien abre un conteo
+o cierra el mes, y `reopened_at` solo puede estar relleno si `closed_at` lo
+está. Un `CHECK` lo hace cumplir.
+
+### `NULL` en `quantity` no es cero, y esa distinción es D7
+
+| | |
+|---|---|
+| `quantity = 0` | **alguien miró y no había** |
+| `quantity IS NULL` | **nadie miró** — no genera diferencia |
+
+Mientras el conteo es `BORRADOR` solo existen líneas de lo que se anotó. Al
+**confirmar** se materializa una línea por cada ítem con saldo, con `quantity`
+nula en los que nadie contó, y se congelan `theoretical_quantity` y `unit_cost`.
+
+A partir de ahí la conciliación entera es **una lectura de esta tabla**: 500
+filas en 0,165 ms, y da el mismo número dentro de un año aunque después entre un
+precio con vigencia retroactiva.
+
+### El conteo no ajusta el libro, y el libro no sabe que hubo conteo
+
+No hay ninguna clave foránea de `inventory_movement` hacia `physical_count`, y
+confirmar no escribe ni un movimiento. Si lo hiciera, `diferencia = conteo −
+teorico` (SPEC §18) daría cero siempre y la señal desaparecería al registrarla.
+
+### «Un solo confirmado por período», con una columna anulable
+
+`confirmed_period_id` es una copia de `period_id` que solo existe cuando el
+conteo está `CONFIRMADO`, con índice único, y dos `CHECK` que la atan a su
+original. Dice lo mismo que `CREATE UNIQUE INDEX … WHERE status = 'CONFIRMADO'`,
+que Prisma no sabe declarar: un índice parcial tendría que vivir en el bloque
+`MANUAL` y podría aparecer como deriva en `migrate:verify`.
+
+Sin la restricción, `inventario_final_fisico` de SPEC §16 dependería de cuál
+conteo eligiera cada consulta.
+
+### Lo inmutable es la FILA confirmada, no la tabla
+
+Al revés que en `audit_log` y en el libro, donde la tabla entera es
+append-only y basta con negar la sentencia. Aquí los triggers son `FOR EACH ROW`
+porque hay que distinguir qué fila está confirmada, y para eso hace falta `OLD`.
+
+| Trigger | Qué impide |
+|---|---|
+| `physical_count_confirmado_no_se_edita` | Editar o borrar un conteo confirmado |
+| `physical_count_line_solo_en_borrador` | Insertar, editar o borrar líneas de un conteo confirmado |
+| `inventory_movement_respeta_periodo_cerrado` | Insertar en el libro con fecha dentro de un mes cerrado |
+
+El tercero alcanza también al dueño de la tabla: la siembra de la prueba de
+rendimiento chocó contra el segundo ejecutando como `costeo_migrator`.
+
+### Los índices tienen su consulta delante
+
+| Índice | Consulta |
+|---|---|
+| `period (company_id, location_id, starts_at)` | la guarda del mes cerrado, que hace **toda** escritura del libro |
+| `period (company_id, location_id, year, month)` único | el mes de una ubicación |
+| `physical_count (company_id, period_id)` | los conteos de un mes |
+| `physical_count_line (company_id, count_id)` | la conciliación congelada |
+
+**No hay índice parcial sobre los cerrados**, y no por olvido: `period` tiene
+doce filas por ubicación y año, el índice completo la resuelve en 0,096 ms, y un
+índice que Prisma no sabe declarar podría aparecer como deriva. El plan está en
+`docs/pasos/P7/evidencia/explain-analyze.txt`.
+
+
 ---
 
 ## Entidades por paquete
@@ -516,7 +653,7 @@ Medido con **1,2 millones de movimientos** en la tabla y 12.000 en la ubicación
 | **P4** | `product`, `product_location`, `combo_component`, `recipe`, `recipe_line`, `recipe_propagation`, `recipe_propagation_target` + 5 catálogos | ✅ |
 | **P5** | **Ninguna tabla nueva.** El motor es dominio puro: añade `product.packaging_item_id`, un índice y el permiso `costing.read` | ✅ |
 | **P6** | `inventory_movement`, `inventory_transfer`, `inventory_production` + `inventory_movement_type`. **No hay `inventory_balance`**, y era lo previsto: el saldo es una agregación sobre el libro, no una tabla — R3 | ✅ |
-| P7 | `period`, `physical_count`, `physical_count_line` | ⬜ |
+| **P7** | `period`, `physical_count`, `physical_count_line` + `period_status`, `physical_count_status`. **El conteo no ajusta el libro**: no hay clave foránea de `inventory_movement` hacia aquí, y confirmar no escribe ni un movimiento | ✅ |
 | P8 | vistas materializadas de período cerrado | ⬜ |
 | P10 | `import_job`, `import_row` | ⬜ |
 | P11 | `plan`, `subscription`, `cross_tenant_access_log` | ⬜ |
@@ -558,4 +695,11 @@ Los de P1, todos con su consulta delante:
 | **`inventory_movement(company_id, location_id, item_id, occurred_at)`** | **P6, y es de §5:** «saldo actual de un ítem en una ubicación». Lo usa el libro paginado |
 | `inventory_movement(company_id, transfer_id)` · `(company_id, production_id)` | Recuperar las dos patas de una transferencia o los movimientos de un lote |
 | `inventory_movement(reverses_movement_id)` único | Es la restricción, no una optimización: **un movimiento se corrige una sola vez** |
+| **`period(company_id, location_id, starts_at)`** | **P7:** la guarda del mes cerrado, que hace **toda** escritura del libro. 0,096 ms con 240 períodos en la tabla |
+| `period(company_id, location_id, year, month)` único | Un mes de una ubicación existe una sola vez |
+| `physical_count(confirmed_period_id)` único | Es la restricción: **un solo conteo confirmado por período**, o `inventario_final_fisico` (SPEC §16) sería ambiguo |
+| `physical_count(company_id, period_id)` · `physical_count_line(company_id, count_id)` | Los conteos de un mes y la conciliación congelada: 500 filas en 0,165 ms |
+| `physical_count_line(count_id, item_id)` único | Un ítem no se cuenta dos veces en el mismo conteo |
+
+**P7 no añadió ningún índice sobre `inventory_movement`**, y merece decirse: el corte del conteo (`occurred_at < cutoff_at`) entra en la misma condición del índice de P6 que el tenant y la ubicación. Es lo que se gana guardando la frontera del mes como un instante en vez de calcularla con `date_trunc` en cada consulta.
 | `inventory_transfer(company_id, occurred_at DESC)` · `inventory_production(company_id, location_id, occurred_at DESC)` | El historial de transferencias y de lotes |

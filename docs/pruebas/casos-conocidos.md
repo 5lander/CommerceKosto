@@ -490,3 +490,9 @@ Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se r
 **CC-R7 subió de nivel.** En P0 corría con aritmética suelta sobre valores de `V_COSTEO`. En P5 **corre a través del motor**: los `costo_por_porcion`, `venta_neta` y `margen_contribucion` ya no se transcriben, los produce `costearProducto` a partir de los ítems y las líneas. La versión con el dataset completo y el inventario real sigue siendo de P8, que es donde existen las compras y el conteo físico.
 
 **CC-002 dejó de tener un valor escrito a mano.** Su línea `INS-131` valía `0.20` porque el Excel lo tenía así. Con CC-005, esa `0.20` la produce la cascada desde una receta, y el resto de CC-002 no se mueve ni un decimal. Es la prueba de que la cascada no cambió la respuesta, solo su origen.
+
+**P7 tampoco añade casos, y el motivo es distinto del de P6.** No es que el conteo no calcule nada —calcula el `CONSUMO_REAL` de SPEC §16, que es una fórmula del Excel—: es que **el Excel no tiene dimensión temporal** (SPEC §3). Todo es «del mes», un único período implícito, así que no hay una celda con un consumo real de marzo contra la que contrastar el consumo real de marzo.
+
+Lo que sí se prueba, con cifras concretas calculadas a mano en la suite de integración, es la aritmética completa de la cadena: `inicial + compras − final físico`, encadenada entre dos meses, con un conteo parcial y su cobertura. La verificación **contra el Excel** llega con P8, cuando existan las unidades vendidas y `venta_neta_mes` cierre la fórmula.
+
+**Y P7 aporta a CC-R7 lo que le faltaba después de P6.** El dataset completo necesita `inventario_inicial_valorizado` e `inventario_final_fisico`, y esos dos números no existían: son el conteo confirmado del mes anterior y el de este. Ahora existen, congelados, y encadenados.

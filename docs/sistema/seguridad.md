@@ -46,7 +46,11 @@ La prueba **falla si no hay pooler**, no se salta: una prueba de seguridad que s
 | **Saldo de inventario** *(P6)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
 | **Libro de movimientos** *(P6)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
 | **Registrar producción** *(P6)* | ✅ | ✅ | ✅ su ubicación | ❌ | ❌ |
-| Conteo físico | ✅ | ✅ | ✅ su ubicación | ✅ **a ciegas** | ❌ |
+| **Conteo físico: contar** *(P7)* | ✅ | ✅ | ✅ su ubicación | ✅ **a ciegas** | ❌ |
+| **Conteo físico: conciliar** *(P7)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
+| **Cerrar el mes** *(P7)* | ✅ | ✅ | ✅ su ubicación | ❌ | ❌ |
+| **Reabrir un mes** *(P7)* | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Estado del período** *(P7)* | ✅ | ✅ | ✅ su ubicación | ✅ | ✅ |
 | Propagar recetas | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Suscripción y eliminar company | ✅ | ❌ | ❌ | ❌ | ❌ |
 
@@ -69,6 +73,27 @@ Tiene tres consecuencias que valen para todo endpoint futuro que toque el libro:
 3. El **semáforo de reposición** —que sí le corresponde— necesita el punto de reorden, que sale del consumo teórico de SPEC §18. Llega en P8; P6 dejó los permisos repartidos para que sea el único dato que reciba.
 
 Hay guardián que lo mide: `docs/pasos/P6/evidencia/guardian-2-confidencialidad-bodega.txt` rompe las dos primeras de la forma en que alguien lo haría de buena fe —«si puede escribir, que pueda leer lo que escribió»— y las tres pruebas caen.
+
+### La misma asimetría en el conteo físico *(P7)*
+
+`BODEGA` cuenta y **no concilia**. La conciliación lleva stock teórico, diferencia y valorización de la diferencia: tres de los datos prohibidos de la matriz, y desde el stock teórico se despeja el consumo por el mismo camino de arriba.
+
+| | |
+|---|---|
+| `count.write` | Sí. Contar es su trabajo |
+| `count.read` | **No.** La conciliación es la vista de costeo del inventario |
+| `period.read` | Sí. Saber que un mes está cerrado no permite despejar nada, y sin ello no entendería por qué le rechazan una compra |
+| `period.close` | No. Contar y sellar el mes son actos distintos |
+
+Tres consecuencias, hermanas de las tres de P6:
+
+1. **La hoja de conteo lista todos los ítems almacenables, tengan saldo o no.** Si trajera solo los que el libro conoce, la presencia de una fila diría «de esto hay algo» y su ausencia diría «cero». El conteo dejaría de ser ciego por la puerta de atrás.
+2. **Confirmar devuelve `204` sin cuerpo**, aunque acabe de calcular la conciliación entera.
+3. **La lista de conteos no lleva los tres valores.** `valorTeorico` y `valorFisico` viven solo en la proyección que exige `count.read`, y son dos interfaces distintas y no una con campos opcionales: así el compilador obliga a decidir dónde va cada campo nuevo.
+
+**Y el efecto colateral lo pide el propio SPEC §4:** `BODEGA` cuenta a ciegas, sin saber cuánto debería haber. Quien conoce el número esperado tiende a ajustar el conteo hacia él, así que la restricción de confidencialidad **mejora la calidad del dato de inventario**.
+
+Guardián: `docs/pasos/P7/evidencia/guardian-4-confidencialidad-frente-a-bodega.txt`, que lo rompe por los dos sitios reales —relajar el permiso, y añadir un campo a la proyección «básica»— y captura los dos fallos.
 
 ## Back office
 

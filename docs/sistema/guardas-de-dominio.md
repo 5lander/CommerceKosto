@@ -149,6 +149,49 @@ Lo que sí es 🔴 en ese camino es otra cosa, y tiene su guarda: **corregir dos
 
 ---
 
+## `20260904223303_p7_periodos_y_conteo`
+
+**Es la migración que el README de incidencias tenía anotada como reaparición probable de INC-012**, y con razón: por primera vez desde P5 hay `RAISE EXCEPTION` en triggers que una petición corriente **sí** alcanza. Tres de los cuatro 🔴 de aquí son triggers, no `CHECK`.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `period_status_codigo_conocido` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él |
+| `physical_count_status_codigo_conocido` | ⚪ | Ídem |
+| `period_mes_valido` | 🟡 | Esquema: `z.number().int().min(1).max(12)`. El dominio lo repite en `exigirMesValido` para quien no entre por HTTP |
+| `period_anio_valido` | 🟡 | Ídem, con el rango 2000–2100 |
+| `period_rango_coherente` | ⚪ | Los dos instantes los calcula `CalendarioDePeriodos`; nadie los escribe |
+| `period_cierre_coherente` | ⚪ | El repositorio escribe fecha y autor en la misma sentencia |
+| `period_cerrado_tiene_autor` | ⚪ | Ídem |
+| `period_reapertura_coherente` | ⚪ | Ídem |
+| `period_reapertura_exige_cierre` | ⚪ | `exigirReabrible` ya rechaza reabrir lo que no está cerrado |
+| `physical_count_confirmacion_coherente` | ⚪ | Los escribe `ConfirmarConteo` juntos |
+| `physical_count_confirmado_tiene_fecha` | ⚪ | Ídem |
+| `physical_count_confirmado_marca_periodo` | ⚪ | Ídem |
+| `physical_count_periodo_confirmado_es_el_suyo` | ⚪ | La copia la pone el repositorio desde la propia fila |
+| `physical_count_valores_congelados_juntos` | ⚪ | Los tres salen de una sola llamada a `conciliar()` |
+| `physical_count_confirmado_tiene_valores` | ⚪ | Ídem |
+| `physical_count_note_acotada` | 🟡 | Esquema |
+| `physical_count_line_cantidad_no_negativa` | 🔴 | **`exigirLineasValidas`** → `CantidadDeConteoNegativaError`. El esquema acepta el signo **a propósito**, para que el mensaje sea «si no había nada, la cantidad es cero» y no «debe ser positivo» |
+| `physical_count_line_congelados_juntos` | ⚪ | Los congela `ConfirmarConteo` a la vez |
+| `physical_count_line_costo_no_negativo` | ⚪ | El costo lo trae `pricing`, no el cliente |
+| **único** `physical_count_confirmed_period_id_key` | 🔴 | **`ConfirmarConteo`** → `ConteoDelPeriodoYaConfirmadoError`. Sin él sería un `23505` → 500, exactamente como el de corregir dos veces en P6 |
+| **único** `physical_count_line_count_id_item_id_key` | 🔴 | **`exigirLineasValidas`** → `ItemRepetidoEnConteoError` |
+| **trigger** `inventory_movement_respeta_periodo_cerrado` | 🔴 | **`ExigirPeriodoAbierto`** → `PeriodoCerradoError`. Ver abajo |
+| **trigger** `physical_count_confirmado_no_se_edita` | 🔴 | **`exigirBorrador`** → `ConteoYaConfirmadoError` |
+| **trigger** `physical_count_line_solo_en_borrador` | 🔴 | **`exigirBorrador`**, comprobado sobre la cabecera antes de tocar las líneas |
+
+### El trigger del período cerrado es 🔴 justo por lo contrario que los de P6
+
+En P6 los triggers de append-only quedaron ⚪ porque **ninguna ruta de la API podía alcanzarlos**: no existe endpoint que edite un movimiento, y lo sostiene `audit:forbidden` y no la disciplina de nadie.
+
+Aquí pasa lo opuesto. El trigger se dispara ante un `INSERT` perfectamente normal —una compra con fecha del mes pasado— hecho por un usuario que hace su trabajo. Es la ruta **más** transitada del sistema, no una excepción.
+
+Y hay una segunda razón para que exista además de la guarda: **la guarda vive en cinco sitios y el trigger en uno.** Las cinco escrituras del libro llaman a `ExigirPeriodoAbierto`; la sexta que alguien escriba mañana podría no hacerlo, y el fallo sería silencioso —un movimiento dentro de un mes ya informado— en vez de ruidoso. La aplicación explica; la base garantiza.
+
+**Alcanza también a la corrección**, y conviene saberlo antes de encontrárselo: una corrección conserva la fecha del movimiento que anula (R3), así que corregir dentro de un mes sellado se detiene igual. Eso es lo que «cerrado es de solo lectura» significa, y la salida es reabrir el mes, que solo puede el `OWNER` y queda en `audit_log`.
+
+---
+
 ## Cómo se mantiene
 
 Al añadir una migración con `CHECK` o `RAISE EXCEPTION`:

@@ -1,0 +1,33 @@
+GUARDIAN 1 — M11 exige clasificar las restricciones ANTES de escribir el endpoint
+=================================================================================
+
+Que se rompio: se retiro la seccion `20260904223303_p7_periodos_y_conteo` de
+docs/sistema/guardas-de-dominio.md, dejando la migracion con sus 20 CHECK y sus
+tres triggers sin clasificar.
+
+Esto NO es un experimento de laboratorio: M11 fallo exactamente asi en la
+PRIMERA ejecucion real de la migracion de P7, antes de que existiera un solo
+endpoint. La captura de abajo lo reproduce.
+
+$ npm run audit:migrations
+
+> costeo-saas@0.0.0 audit:migrations
+> node tools/audit/migrations.mjs
+
+
+  20260904223303_p7_periodos_y_conteo
+     [M11] anade restricciones (CHECK o RAISE) y no tiene seccion en
+     docs\sistema\guardas-de-dominio.md. Cada restriccion alcanzable desde la
+     API necesita una guarda de dominio que la explique, o el error sale como
+     INTERNAL_ERROR 500 en vez de 400. Ver docs/incidencias/INC-012
+
+audit:migrations  FALLO — 1 problema(s) en 8 migracion(es)
+
+Por que importa en P7 mas que en P6. El README de incidencias tenia anotado que
+INC-012 reaparecia "en P7 (conteo fisico) y P10 (importacion), donde si hay
+campos que un usuario teclea". Acerto: P7 tiene CUATRO restricciones 🔴, y tres
+de ellas son triggers que una peticion corriente alcanza —cerrar un mes y
+seguir comprando es lo que va a pasar todos los meses—. En P6 los triggers
+quedaron ⚪ porque ninguna ruta de la API podia alcanzarlos.
+
+Restaurado tras la captura.

@@ -145,3 +145,85 @@ export class CicloEnConsumoError extends ErrorDeDominio {
     );
   }
 }
+
+/* --- Conteo físico (P7) --------------------------------------------------- */
+
+export class ConteoNoEncontradoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+
+  public constructor() {
+    super('Ese conteo físico no existe en tu company.');
+  }
+}
+
+/**
+ * Editar un conteo ya confirmado.
+ *
+ * Confirmar congela el stock teórico y el costo de cada línea: es lo que hace
+ * que la diferencia siga significando lo mismo dentro de un año. Si el conteo
+ * salió mal, se abre otro.
+ */
+export class ConteoYaConfirmadoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor() {
+    super(
+      'Ese conteo ya está confirmado y no admite cambios. Si hay que rehacerlo, ' +
+        'abre un conteo nuevo para el mismo período.',
+    );
+  }
+}
+
+/** Dos líneas del mismo ítem: una de las dos es la buena y nadie sabe cuál. */
+export class ItemRepetidoEnConteoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('Un conteo no puede tener dos líneas del mismo ítem.');
+  }
+}
+
+/** Contar en negativo no es un hallazgo: es un error de captura. */
+export class CantidadDeConteoNegativaError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('Lo contado no puede ser negativo. Si no había nada, la cantidad es cero.');
+  }
+}
+
+/**
+ * Ya hay un conteo confirmado para ese mes y esa ubicación.
+ *
+ * Solo puede haber uno, y no es una limitación arbitraria: `inventario_final_
+ * fisico` de SPEC §16 es **el** conteo del mes. Con dos confirmados, el food
+ * cost real de ese período dependería de cuál eligiera cada consulta.
+ */
+export class ConteoDelPeriodoYaConfirmadoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor(etiqueta: string) {
+    super(`Ese período (${etiqueta}) ya tiene un conteo físico confirmado.`, {
+      periodo: etiqueta,
+    });
+  }
+}
+
+/**
+ * Cerrar el mes con el conteo todavia en borrador.
+ *
+ * Sellar un periodo cuya medicion no se ha confirmado dejaria un mes que ya no
+ * admite movimientos y del que nunca se sabra cuanto habia: el
+ * `inventario_final_fisico` de SPEC 16 se quedaria sin dato, y el food cost
+ * real de ese mes no se podria calcular jamas.
+ */
+export class ConteoNoConfirmadoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor() {
+    super(
+      'Ese conteo todavia esta en borrador. Confirmalo antes de cerrar el periodo: ' +
+        'un mes cerrado sin conteo confirmado no puede producir food cost real.',
+    );
+  }
+}

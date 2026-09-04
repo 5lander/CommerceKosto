@@ -29,6 +29,7 @@ import {
   exigirUbicacionEnAlcance,
   type SesionActiva,
 } from '../../../iam/application/casos-de-uso/validar-sesion';
+import type { ExigirPeriodoAbierto } from '../../../periods/application/casos-de-uso/periodos';
 import { corregir } from '../../domain/correccion';
 import {
   ItemDelLibroNoEncontradoError,
@@ -49,8 +50,40 @@ export interface DependenciasDeInventario {
   readonly repositorio: RepositorioDeInventario;
   readonly leerItem: LeerItem;
   readonly listarItems: ListarItems;
+  /** La guarda del mes cerrado (D6). La llaman las CINCO escrituras. */
+  readonly periodos: ExigirPeriodoAbierto;
   readonly auditoria: AuditLogPort;
   readonly reloj: Reloj;
+}
+
+/**
+ * Las tres comprobaciones que hace TODA escritura del libro, en un solo sitio.
+ *
+ * Estaban repetidas en las cinco, y la del período iba a ser la sexta línea
+ * copiada. Reunirlas tiene un efecto que va más allá de no duplicar: `grep
+ * exigirLibroEscribible` da **la lista completa** de formas de escribir en el
+ * libro, y una escritura que no aparezca ahí salta a la vista en la revisión.
+ *
+ * El orden es el que produce el mejor mensaje: primero si puedes escribir en
+ * esa ubicación, luego si la fecha es registrable, y por último si ese mes
+ * sigue abierto. Al usuario que se equivoca de local no se le habla de meses.
+ *
+ * **NO ES LA GARANTÍA DEL PERÍODO CERRADO.** Esa es el trigger
+ * `inventory_movement_respeta_periodo_cerrado`, que cubre toda fila que entre
+ * aunque alguien escriba una sexta escritura y no llame a esto.
+ */
+export async function exigirLibroEscribible(entrada: {
+  readonly deps: DependenciasDeInventario;
+  readonly sesion: SesionActiva;
+  readonly locationId: LocationId;
+  readonly ocurridoEn: Date;
+}): Promise<void> {
+  exigirUbicacionEnAlcance(entrada.sesion, entrada.locationId);
+  exigirFechaPasada(entrada.ocurridoEn, entrada.deps.reloj.ahora());
+  await entrada.deps.periodos.ejecutar(entrada.sesion, {
+    locationId: entrada.locationId,
+    ocurridoEn: entrada.ocurridoEn,
+  });
 }
 
 /** El saldo con lo que el catálogo aporta: cómo se llama y en qué se mide. */
@@ -83,14 +116,18 @@ export class RegistrarMovimiento {
    * @throws {FechaFuturaError}
    */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeMovimiento): Promise<MovementId> {
-    exigirUbicacionEnAlcance(sesion, datos.locationId);
+    await exigirLibroEscribible({
+      deps: this.deps,
+      sesion,
+      locationId: datos.locationId,
+      ocurridoEn: datos.occurredAt,
+    });
 
     const item = await exigirItem(this.deps, sesion, datos.itemId);
     const cantidad = conSignoDelTipo(
       datos.tipo,
       Quantity.of(datos.cantidad, unidadDeUso(item.unidadDeUso)),
     );
-    exigirFechaPasada(datos.occurredAt, this.deps.reloj.ahora());
 
     const id = await this.deps.repositorio.registrarUno({
       companyId: sesion.companyId,
@@ -148,7 +185,15 @@ export class CorregirMovimiento {
     });
     if (original === null) throw new MovimientoNoEncontradoError();
 
-    exigirUbicacionEnAlcance(sesion, original.locationId);
+    // La corrección conserva la fecha del original (R3), así que corregir
+    // dentro de un mes cerrado también se detiene aquí. Es lo que «cerrado es
+    // de solo lectura» significa: para arreglarlo hay que reabrirlo.
+    await exigirLibroEscribible({
+      deps: this.deps,
+      sesion,
+      locationId: original.locationId,
+      ocurridoEn: original.occurredAt,
+    });
     if (original.corregidoPor !== null) throw new MovimientoYaCorregidoError();
 
     const item = await exigirItem(this.deps, sesion, original.itemId);
@@ -195,6 +240,7 @@ export class ConsultarSaldos {
       this.deps.repositorio.saldos({
         companyId: sesion.companyId,
         locationId: entrada.locationId,
+        hasta: null,
       }),
       this.deps.listarItems.ejecutar(sesion, false),
     ]);

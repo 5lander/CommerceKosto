@@ -157,6 +157,9 @@ model Company {
   movimientos           InventoryMovement[]
   transferencias        InventoryTransfer[]
   producciones          InventoryProduction[]
+  periodos              Period[]
+  conteos               PhysicalCount[]
+  lineasDeConteo        PhysicalCountLine[]
 
   @@map("company")
 }
@@ -222,6 +225,7 @@ model Location {
   transferenciasSalida  InventoryTransfer[]   @relation("origen")
   transferenciasEntrada InventoryTransfer[]   @relation("destino")
   producciones          InventoryProduction[]
+  periodos              Period[]
 
   @@unique([companyId, name])
   /// Clave candidata para las FK COMPUESTAS del libro de inventario: atan cada
@@ -285,6 +289,11 @@ model AppUser {
   movimientos    InventoryMovement[]
   transferencias InventoryTransfer[]
   producciones   InventoryProduction[]
+
+  periodosCerrados   Period[]        @relation("cerro")
+  periodosReabiertos Period[]        @relation("reabrio")
+  conteosCreados     PhysicalCount[] @relation("conteos_creados")
+  conteosConfirmados PhysicalCount[] @relation("conteos_confirmados")
 
   @@index([companyId, status])
   @@map("app_user")
@@ -544,6 +553,7 @@ model Item {
   empaqueDe      Product[]             @relation("empaque")
   movimientos    InventoryMovement[]
   producciones   InventoryProduction[]
+  lineasDeConteo PhysicalCountLine[]
 
   @@unique([companyId, name])
   /// Clave candidata para las FK COMPUESTAS de receta y linea: atan el item a
@@ -1132,4 +1142,177 @@ model InventoryProduction {
 
   @@index([companyId, locationId, occurredAt(sort: Desc)])
   @@map("inventory_production")
+}
+
+// ============================================================================
+// P7 - Periodos y conteo fisico
+// ============================================================================
+
+/// ABIERTO - CERRADO (D6)
+model PeriodStatus {
+  code String @id
+
+  periodos Period[]
+
+  @@map("period_status")
+}
+
+/// El mes contable de UNA UBICACION - SPEC 3, D6.
+///
+/// POR UBICACION Y NO POR COMPANY. El conteo fisico se hace por ubicacion (R2)
+/// y el cierre ocurre al cargarlo, asi que un periodo de company obligaria a
+/// que las diez ubicaciones de una cadena contaran el mismo dia para poder
+/// cerrar el mes. El consolidado de P9 agrega sobre ubicaciones, que es lo que
+/// SPEC 18 ya dice de todo lo demas.
+///
+/// LA AUSENCIA DE FILA ES EL ESTADO ABIERTO. Un mes del que nadie se ha
+/// ocupado no tiene fila, y eso significa abierto: exigir que alguien abra el
+/// mes antes de registrar nada dejaria el sistema parado el dia 1 de cada mes.
+///
+/// `starts_at` / `ends_at` SE GUARDAN RESUELTOS. `occurred_at` es un instante
+/// absoluto y preguntar de que mes es exige una zona horaria; resolverla una
+/// vez, al abrir el periodo, hace que cambiarla algun dia no mueva de mes
+/// movimientos ya cerrados. El intervalo es semiabierto: [starts_at, ends_at).
+model Period {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+
+  locationId String @map("location_id") @db.Uuid
+  year       Int
+  month      Int
+
+  startsAt DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt   DateTime @map("ends_at") @db.Timestamptz(6)
+
+  status String
+
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+  closedBy   String?   @map("closed_by") @db.Uuid
+  reopenedAt DateTime? @map("reopened_at") @db.Timestamptz(6)
+  reopenedBy String?   @map("reopened_by") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  location     Location     @relation(fields: [locationId, companyId], references: [id, companyId], onDelete: Restrict)
+  estado       PeriodStatus @relation(fields: [status], references: [code])
+  cerradoPor   AppUser?     @relation("cerro", fields: [closedBy], references: [id], onDelete: Restrict)
+  reabiertoPor AppUser?     @relation("reabrio", fields: [reopenedBy], references: [id], onDelete: Restrict)
+
+  conteos PhysicalCount[]
+
+  @@unique([companyId, locationId, year, month])
+  /// Clave candidata para la FK COMPUESTA del conteo: ata cada conteo a la
+  /// misma company que su periodo.
+  @@unique([id, companyId])
+  /// La consulta caliente: la hace TODA escritura del libro, para saber si la
+  /// fecha cae en un mes cerrado. No lleva indice parcial sobre los cerrados
+  /// —seria lo natural— porque la tabla tiene doce filas por ubicacion y ano y
+  /// el indice completo ya resuelve la consulta con una hoja; un indice que
+  /// Prisma no sabe declarar tendria que vivir en el bloque MANUAL y podria
+  /// aparecer como deriva en `migrate:verify`, a cambio de nada medible.
+  @@index([companyId, locationId, startsAt])
+  @@map("period")
+}
+
+/// BORRADOR - CONFIRMADO
+model PhysicalCountStatus {
+  code String @id
+
+  conteos PhysicalCount[]
+
+  @@map("physical_count_status")
+}
+
+/// El conteo fisico de un periodo - SPEC 3 y 16, D7.
+///
+/// NO AJUSTA EL LIBRO. Emitir un AJUSTE por la diferencia haria que
+/// `diferencia = conteo - stock_teorico` (SPEC 18) diera cero siempre, que es
+/// justo la senal que el conteo existe para producir. El libro dice lo que
+/// deberia haber; el conteo dice lo que hay; su resta es el hallazgo.
+///
+/// LOS TRES VALORES SE CONGELAN AL CONFIRMAR, y es la misma razon por la que
+/// `inventory_production` congela el costo estandar (P6, ADR-009): dependen de
+/// precios con vigencia, y recalcularlos manana podria dar otro numero para un
+/// mes ya informado.
+model PhysicalCount {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  periodId  String @map("period_id") @db.Uuid
+
+  status String
+
+  /// El corte: `period.ends_at` congelado. Es la frontera hasta la que se
+  /// suman los movimientos para obtener el stock teorico.
+  cutoffAt DateTime @map("cutoff_at") @db.Timestamptz(6)
+
+  /// Copia de `period_id` cuando el conteo esta CONFIRMADO, y NULL mientras
+  /// sea borrador. Es como se expresa "un solo conteo confirmado por periodo"
+  /// con un indice unico corriente: `inventario_final_fisico` de SPEC 16 es EL
+  /// conteo del mes, y con dos el food cost real dependeria de cual eligiera
+  /// cada consulta. Un CHECK ata la copia a su original.
+  confirmedPeriodId String? @unique @map("confirmed_period_id") @db.Uuid
+
+  /// Suma sobre TODOS los items: lo que el libro dice que hay.
+  theoreticalValue Decimal? @map("theoretical_value") @db.Decimal(24, 12)
+  /// La parte de `theoretical_value` que alguien fue a verificar. La cobertura
+  /// de D7 es su cociente, y no se guarda: dividir dos valores exactos es
+  /// determinista, y guardar el cociente seria un tercer sitio para el mismo
+  /// numero.
+  coveredValue     Decimal? @map("covered_value") @db.Decimal(24, 12)
+  /// El inventario final de SPEC 16: lo contado donde se conto, lo teorico
+  /// donde no. Un item sin contar NO vale cero - eso equivaldria a declararlo
+  /// consumido entero (D7).
+  physicalValue    Decimal? @map("physical_value") @db.Decimal(24, 12)
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String    @map("created_by") @db.Uuid
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  confirmedBy String?   @map("confirmed_by") @db.Uuid
+  note        String?
+
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  periodo     Period              @relation(fields: [periodId, companyId], references: [id, companyId], onDelete: Restrict)
+  estado      PhysicalCountStatus @relation(fields: [status], references: [code])
+  autor       AppUser             @relation("conteos_creados", fields: [createdBy], references: [id], onDelete: Restrict)
+  confirmante AppUser?            @relation("conteos_confirmados", fields: [confirmedBy], references: [id], onDelete: Restrict)
+
+  lineas PhysicalCountLine[]
+
+  @@unique([id, companyId])
+  @@index([companyId, periodId])
+  @@map("physical_count")
+}
+
+/// Una linea del conteo.
+///
+/// `quantity` NULL SIGNIFICA "SIN VERIFICAR", y no es lo mismo que cero (D7).
+/// Cero es un dato: alguien miro y no habia. NULL es que nadie miro.
+///
+/// Mientras el conteo es BORRADOR solo existen lineas de lo que se conto. Al
+/// CONFIRMAR se materializa una linea por cada item con saldo, con `quantity`
+/// NULL en los que nadie conto, y se congelan `theoretical_quantity` y
+/// `unit_cost`. A partir de ahi la conciliacion entera es una lectura de esta
+/// tabla, y sigue dando el mismo numero dentro de un ano.
+model PhysicalCountLine {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  countId   String @map("count_id") @db.Uuid
+  itemId    String @map("item_id") @db.Uuid
+
+  quantity Decimal? @db.Decimal(24, 12)
+
+  /// Congelados al confirmar. NULL mientras el conteo sea borrador.
+  theoreticalQuantity Decimal? @map("theoretical_quantity") @db.Decimal(24, 12)
+  unitCost            Decimal? @map("unit_cost") @db.Decimal(24, 12)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  conteo  PhysicalCount @relation(fields: [countId, companyId], references: [id, companyId], onDelete: Restrict)
+  item    Item          @relation(fields: [itemId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([countId, itemId])
+  @@index([companyId, countId])
+  @@map("physical_count_line")
 }

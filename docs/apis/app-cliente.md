@@ -604,6 +604,199 @@ Cambiarlo **no reescribe el pasado**: los movimientos ya registrados siguen sien
 
 Vive en `catalog` y no en `inventory` porque el catálogo es la fuente única de verdad (CLAUDE.md §2).
 
+## Períodos y conteo físico (P7)
+
+**Dos permisos separan contar de conciliar, y esa línea es CLAUDE.md §4.3.**
+`BODEGA` tiene `count.write` y `period.read`; no tiene `count.read`. La hoja de
+conteo no lleva stock teórico ni nada derivado de él, y la conciliación —que sí
+lo lleva— le devuelve 403.
+
+| Endpoint | Permiso | Quién lo tiene |
+|---|---|---|
+| `GET /periodos` | `period.read` | Todos, `BODEGA` incluido |
+| `POST /periodos/:id/reapertura` | `period.reopen` | **Solo `OWNER`** |
+| `POST /conteos` · `GET /conteos` · `GET /conteos/:id/hoja` · `PUT /conteos/:id/lineas` · `POST /conteos/:id/confirmacion` | `count.write` | `OWNER`, `ADMIN`, `GERENTE_LOCAL`, `BODEGA` |
+| `POST /conteos/:id/cierre-de-periodo` | `count.write` **y** `period.close` | `OWNER`, `ADMIN`, `GERENTE_LOCAL` |
+| `GET /conteos/:id` | `count.read` | Todos **menos `BODEGA`** |
+
+### `GET /periodos?locationId=…` — `period.read`
+
+Los meses de una ubicación **de los que alguien ya se ha ocupado**. Un mes sin
+fila está abierto: la ausencia es el estado (ADR-010 §3).
+
+```json
+[
+  {
+    "id": "01a06e…", "locationId": "01a06e…",
+    "anio": 2026, "mes": 3, "etiqueta": "2026-03",
+    "inicioEn": "2026-03-01T05:00:00.000Z",
+    "finEn": "2026-04-01T05:00:00.000Z",
+    "estado": "CERRADO",
+    "cerradoEn": "2026-04-03T14:22:10.412Z", "cerradoPor": "01a06e…",
+    "reabiertoEn": null, "reabiertoPor": null
+  }
+]
+```
+
+`inicioEn` y `finEn` son **instantes resueltos**, no un mes: `2026-03-01T05:00Z`
+es la medianoche del 1 de marzo en Guayaquil. El intervalo es semiabierto
+`[inicioEn, finEn)`, así que un movimiento en `finEn` exacto es de abril.
+
+### `POST /periodos/:periodId/reapertura` — `period.reopen`
+
+```json
+{ "motivo": "faltó una factura de febrero" }
+```
+
+`204` sin cuerpo. `motivo` es **obligatorio** (3–500 caracteres) y viaja al
+evento `period.reopened` de `audit_log`.
+
+| Código | Cuándo |
+|---|---|
+| `403` | Cualquier rol que no sea `OWNER` |
+| `409` | El período está abierto: no hay nada que reabrir |
+| `404` | Ese período no existe en la company |
+
+### `POST /conteos` — `count.write`
+
+```json
+{ "locationId": "01a06e…", "anio": 2026, "mes": 3, "note": null }
+```
+
+`201 { "id": "…" }`. **El corte es el fin del mes, no el día en que se cuenta**:
+«el conteo de marzo» significa el estado al cerrar marzo, se levante el 2 de
+abril o el 5. La fecha real de captura queda en `creadoEn`.
+
+Crea la fila del período si no existía. `409` si ese mes ya tiene un conteo
+confirmado.
+
+### `GET /conteos?locationId=…` — `count.write`
+
+La lista, **sin ninguno de los tres valores**: `valorTeorico` y `valorFisico`
+son datos prohibidos para `BODEGA`, que es quien más usa esta pantalla.
+
+```json
+[
+  {
+    "id": "01a06e…", "locationId": "01a06e…",
+    "anio": 2026, "mes": 3, "etiqueta": "2026-03",
+    "estado": "CONFIRMADO",
+    "corteEn": "2026-04-01T05:00:00.000Z",
+    "creadoEn": "2026-04-02T13:10:00.000Z",
+    "confirmadoEn": "2026-04-02T18:44:02.113Z",
+    "note": null
+  }
+]
+```
+
+### `GET /conteos/:countId/hoja` — `count.write`
+
+**La hoja para contar, a ciegas.** Lista **todos** los ítems almacenables —los
+`COMPRADO` y las preparaciones con `llevaStock`—, tengan saldo o no.
+
+```json
+{
+  "conteo": { "…": "igual que en la lista" },
+  "filas": [
+    { "itemId": "01a06e…", "nombre": "Cebolla paiteña",
+      "unidadDeUso": "kg", "cantidad": "8.500000000000" },
+    { "itemId": "01a06e…", "nombre": "Aceite de girasol",
+      "unidadDeUso": "lt", "cantidad": null }
+  ]
+}
+```
+
+`cantidad: null` es **«sin anotar todavía»**. Si la hoja trajera solo los ítems
+con saldo, la sola presencia de una fila diría «de esto el libro cree que hay
+algo» y su ausencia diría «cero»: el conteo dejaría de ser ciego por la puerta
+de atrás.
+
+### `PUT /conteos/:countId/lineas` — `count.write`
+
+```json
+{ "lineas": [ { "itemId": "01a06e…", "cantidad": "8.5" } ] }
+```
+
+`204`. **Reescribe la hoja entera**: es un `PUT` porque la pantalla es una
+grilla y lo que el usuario ve al guardar es lo que queda. Un ítem que
+desaparece de la lista deja de estar contado.
+
+| Código | Cuándo |
+|---|---|
+| `400` | Cantidad negativa (*«si no había nada, la cantidad es cero»*), dos líneas del mismo ítem, o un ítem que no existe |
+| `409` | El conteo ya está confirmado |
+
+**Cero es un dato**: significa «miré y no había». `null` —no mandar la línea—
+significa «nadie miró», y son cosas distintas (D7).
+
+### `POST /conteos/:countId/confirmacion` — `count.write`
+
+`204` **y nada más**. Congela el stock teórico y el costo de cada línea, y
+materializa una línea por cada ítem con saldo, incluidas las de lo que nadie
+contó. La conciliación que acaba de calcularse **no viaja de vuelta**: quien
+confirma puede ser `BODEGA`.
+
+`409` si ya está confirmado, o si ese período ya tiene otro conteo confirmado.
+
+### `POST /conteos/:countId/cierre-de-periodo` — `count.write` + `period.close`
+
+Cierra el mes de la ubicación del conteo. `204`.
+
+| Código | Cuándo |
+|---|---|
+| `403` | Falta `period.close` — `BODEGA` cuenta pero no sella |
+| `409` | El conteo sigue en borrador |
+| `409` | El mes todavía no ha terminado |
+| `409` | El mes ya está cerrado |
+
+**A partir de aquí, toda escritura del libro con fecha dentro de ese mes
+devuelve `409`**, incluida la corrección de un movimiento anterior —que conserva
+la fecha del original (R3)—. Para modificarlo hay que reabrir.
+
+### `GET /conteos/:countId` — `count.read`
+
+**La conciliación. `BODEGA` recibe 403.**
+
+```json
+{
+  "conteo": { "…": "igual que en la lista" },
+  "filas": [
+    { "itemId": "01a06e…", "nombre": "Cebolla paiteña", "unidadDeUso": "kg",
+      "contado": "8.500000000000", "teorico": "10.000000000000",
+      "diferencia": "-1.500000000000", "valorDeDiferencia": "-3.000000000000",
+      "costoUnitario": "2.000000000000" },
+    { "itemId": "01a06e…", "nombre": "Aceite de girasol", "unidadDeUso": "lt",
+      "contado": null, "teorico": "4.000000000000",
+      "diferencia": null, "valorDeDiferencia": null,
+      "costoUnitario": "5.000000000000" }
+  ],
+  "valorTeorico": "40.000000000000",
+  "valorCubierto": "20.000000000000",
+  "valorFisico": "37.000000000000",
+  "cobertura": "0.500000000000",
+  "comprasDelPeriodo": "40.000000000000",
+  "valorInicial": null,
+  "consumoReal": null
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `diferencia` | `contado − teorico`. **`null` si nadie contó** — no es cero: es «sin verificar» |
+| `valorTeorico` | Lo que el libro dice que hay, todo el inventario |
+| `valorCubierto` | La parte de `valorTeorico` que alguien fue a verificar |
+| `valorFisico` | El inventario final de SPEC §16: **lo contado donde se contó, lo teórico donde no** |
+| `cobertura` | `valorCubierto / valorTeorico`. `null` si no había nada que verificar — no es «0 %» |
+| `costoUnitario` | El `costo_neto_uso` con que se valoró. **Un cero significa «este ítem no tiene precio confirmado»** |
+| `valorInicial` | El `valorFisico` del conteo confirmado del mes anterior. `null` si no lo hubo |
+| `consumoReal` | `inicial + compras − final físico` (SPEC §16). **`null` sin inventario inicial**: no se inventa |
+
+**La cobertura viaja siempre pegada al consumo real**, y no es decoración: un
+consumo calculado sobre el 12 % del valor no es un consumo real, es una
+estimación. Sobre un conteo en **borrador** la conciliación se calcula al vuelo
+—es la previsualización que un gerente quiere antes de sellar el mes—; sobre uno
+confirmado se lee lo congelado, y da el mismo número dentro de un año.
+
 ## Salud
 
 `GET /health` (liveness, no toca la base) y `GET /ready` (readiness, sí la toca). Públicas y fuera del limitador: las sondea el orquestador cada pocos segundos.

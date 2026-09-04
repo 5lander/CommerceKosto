@@ -1,0 +1,94 @@
+EXPLAIN ANALYZE de las consultas nuevas de P7 — CLAUDE.md §5
+=============================================================
+
+Volumen: 1 company, 20 ubicaciones, 500 items, 24 movimientos por item y
+ubicacion (12.000 en la ubicacion medida), 240 periodos CERRADOS, y un conteo
+confirmado con sus 500 lineas congeladas.
+
+Las 19 ubicaciones de ruido son imprescindibles: sin ellas la tabla entera
+pertenece a la ubicacion consultada, el filtro no descarta nada y PostgreSQL
+elige —correctamente— un Seq Scan. Es la leccion de INC-007 aplicada al dato.
+
+
+1. EL SALDO HASTA EL CORTE  (la consulta del conteo sobre el libro)
+-------------------------------------------------------------------
+SELECT item_id, SUM(quantity) FROM inventory_movement
+ WHERE company_id = $1 AND location_id = $2 AND occurred_at < $3
+ GROUP BY item_id
+
+ HashAggregate  (cost=375.10..377.63 rows=203 width=48)
+                (actual time=5.448..5.541 rows=500.00 loops=1)
+   Group Key: item_id
+   Buffers: shared hit=293
+   ->  Index Scan using inventory_movement_company_id_location_id_occurred_at_idx
+         on inventory_movement
+         (cost=0.43..374.07 rows=206 width=21)
+         (actual time=0.053..2.701 rows=12000.00 loops=1)
+         Index Cond: ((company_id = ...) AND (location_id = ...)
+                      AND (occurred_at < '2026-04-01 05:00:00+00'))
+         Buffers: shared hit=293
+ Planning Time: 0.969 ms
+ Execution Time: 5.656 ms
+
+El `hasta` del conteo entra en la MISMA condicion de indice que el tenant y la
+ubicacion: el indice de P6 —(company_id, location_id, occurred_at)— ya servia
+para esto, y P7 no ha necesitado ninguno nuevo sobre el libro. Es la ventaja de
+que la frontera del mes sea un instante y no una expresion sobre la fecha: con
+`date_trunc('month', occurred_at AT TIME ZONE ...)` este plan seria un Seq Scan
+sobre las 240.000 filas.
+
+
+2. LA GUARDA DEL PERIODO  (la consulta mas repetida que anade P7)
+------------------------------------------------------------------
+SELECT 1 FROM period
+ WHERE company_id = $1 AND location_id = $2 AND status = 'CERRADO'
+   AND $3 >= starts_at AND $3 < ends_at
+
+ Index Scan using period_company_id_location_id_starts_at_idx on period
+   (cost=0.28..8.30 rows=1 width=4) (actual time=0.053..0.054 rows=1.00 loops=1)
+   Index Cond: ((company_id = ...) AND (location_id = ...)
+                AND (starts_at <= '2025-06-15 12:00:00+00'))
+   Filter: (('2025-06-15 12:00:00+00' < ends_at) AND (status = 'CERRADO'))
+   Rows Removed by Filter: 5
+   Buffers: shared hit=4
+ Planning Time: 0.587 ms
+ Execution Time: 0.096 ms
+
+Usa el indice completo, sin el indice PARCIAL sobre los cerrados que habria
+sido lo natural. Ese indice no se creo a proposito (ADR-010 §7 explica el
+motivo con la unicidad; aqui el motivo es el mismo): Prisma no sabe declararlo,
+tendria que vivir en el bloque MANUAL y podria aparecer como deriva en
+`migrate:verify`. A cambio de 0,096 ms no compensa.
+
+La prueba automatizada de esta consulta exige TIEMPO y no PLAN, y es
+deliberado: `period` es diminuta —doce filas por ubicacion y ano— y en una
+company de una sola ubicacion un Seq Scan sera la eleccion correcta. Exigir
+`Index Scan` romperia la prueba por un plan que esta bien.
+
+
+3. LAS LINEAS DE UN CONTEO CONFIRMADO  (la conciliacion congelada)
+-------------------------------------------------------------------
+SELECT item_id, quantity, theoretical_quantity, unit_cost
+  FROM physical_count_line WHERE company_id = $1 AND count_id = $2
+
+ Bitmap Heap Scan on physical_count_line
+   (cost=8.59..19.29 rows=11 width=30) (actual time=0.079..0.165 rows=500.00 loops=1)
+   Recheck Cond: ((company_id = ...) AND (count_id = ...))
+   Heap Blocks: exact=9
+   ->  Bitmap Index Scan on physical_count_line_company_id_count_id_idx
+         (actual time=0.066..0.066 rows=500.00 loops=1)
+
+500 filas en 0,165 ms. Es lo que compra la decision de congelar (ADR-010 §6):
+la conciliacion de un mes cerrado no vuelve a tocar el libro ni los precios.
+
+
+PRESUPUESTO SOBRE HTTP  (20 mediciones, p95)
+---------------------------------------------
+Medido bajando PRESUPUESTO_MS a 1 para que la asercion imprimiera el valor:
+
+  GET  /conteos/:id          p95 =  88,4 ms   (presupuesto 300 ms, CLAUDE.md §5)
+  POST /inventario/movimientos p95 = 52,3 ms  (con 240 periodos cerrados en la tabla)
+
+El segundo numero es el que P7 hace crecer: la guarda del periodo y el trigger
+se pagan en CADA escritura del libro. 52 ms de extremo a extremo incluyen
+sesion, alcance, guarda, trigger e insercion.

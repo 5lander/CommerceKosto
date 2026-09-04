@@ -136,7 +136,7 @@ No implementar cobro, pasarela ni facturación en este proyecto. Ver D9.
 
 ---
 
-## D6 — Retención y cierre de períodos 🟡
+## D6 — Retención y cierre de períodos 🟡 *(implementada en P7)*
 
 **Valor provisional:** un período es un mes calendario. Se cierra manualmente al cargar el conteo físico. Un período cerrado es de solo lectura: los movimientos con fecha dentro de él se rechazan.
 
@@ -144,13 +144,51 @@ Reapertura: posible solo por rol `OWNER`, registrada en el log de auditoría.
 
 Vive en `config/periods.ts`.
 
+### Lo que P7 tuvo que decidir para implementarla
+
+El valor provisional se implementó **entero y al pie de la letra**. Lo que no decía, y hubo que resolver (**ADR-010**):
+
+| Pregunta que D6 no responde | Decisión de P7 |
+|---|---|
+| ¿El período es de la company o de una ubicación? | **De una ubicación.** El conteo se hace por ubicación (R2), y un período de company obligaría a las diez ubicaciones de una cadena a contar el mismo día |
+| ¿Dónde vive la frontera del mes? | **En dos columnas `timestamptz`, resueltas una sola vez al abrirlo.** `occurred_at` es absoluto y su mes depende de la zona; con la frontera escrita, cambiar la zona no mueve de mes movimientos ya cerrados |
+| ¿Qué pasa con un mes del que nadie se ha ocupado? | **No tiene fila, y eso significa abierto.** Exigir abrirlo pararía el sistema el día 1 de cada mes |
+| «Se cierra al cargar el conteo»: ¿es un endpoint propio? | **No.** Es `POST /conteos/:id/cierre-de-periodo`, exige el conteo confirmado, y pide `count.write` **y** `period.close` |
+| «Registrada en el log»: ¿verificado? | **Se escribe, y nadie lo ha leído.** No existe rol con `SELECT` sobre `audit_log`, ni siquiera el dueño (SEGURIDAD.md §10). Es trabajo de P11 |
+
+**`config/periods.ts` acabó en `shared/infrastructure/config/periods.ts`**: una carpeta `src/config/` suelta quedaría fuera de las tres capas que `audit:arch` vigila. Contiene la zona horaria del calendario contable, que es la de D11.
+
 ---
 
-## D7 — Política de conteo físico parcial 🟡
+## D7 — Política de conteo físico parcial 🟡 *(implementada en P7)*
 
 **Valor provisional:** el conteo puede ser parcial. Los ítems sin conteo no generan diferencia y quedan marcados como "sin verificar"; el food cost real se calcula señalando qué porcentaje del valor del inventario fue efectivamente contado.
 
 Alternativa descartada por ahora: exigir conteo completo. Se descartó porque en la práctica nadie cuenta 200 ítems y forzarlo produce números inventados.
+
+### Lo que «no generan diferencia» significa exactamente
+
+Es la frase de la que dependía todo el paquete, y admitía dos lecturas. La que se implementó (**ADR-010 §5**):
+
+> **Un ítem sin contar aporta su valor TEÓRICO al inventario final, no cero.**
+
+Si valiera cero, no haber mirado un estante equivaldría a declarar que su contenido se consumió entero, y el consumo real de SPEC §16 se dispararía por una omisión de captura. En el modelo, `physical_count_line.quantity` es anulable y las tres cosas son distintas:
+
+| | |
+|---|---|
+| `quantity = 0` | alguien miró y no había |
+| `quantity IS NULL` | **nadie miró** |
+| sin línea (borrador) | todavía no se ha anotado |
+
+**«Qué porcentaje del valor» se mide sobre el VALOR, no sobre el número de ítems.** Contar cuarenta ítems baratos y dejar el jamón sin contar es una cobertura mala aunque sean 40 de 41:
+
+```
+cobertura = Σ(teórico × costo) de los contados / Σ(teórico × costo) de todos
+```
+
+Es `null` —no «0 %»— cuando no hay nada que verificar, y **viaja siempre pegada** a los números que dependen de ella.
+
+⚠️ **La cobertura no detecta un error en el inventario final.** El guardián 3 de P7 lo demuestra: valorando en cero lo que nadie contó, la cobertura sigue diciendo 50 % y el consumo real se multiplica por seis. Lo único que lo caza es el número absoluto contra un caso calculado a mano.
 
 ---
 

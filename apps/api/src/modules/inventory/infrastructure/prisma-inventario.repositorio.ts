@@ -69,6 +69,9 @@ function aEscalaDeAlmacenamiento(valor: Decimal): string {
   return valor.toFixed(ALMACENAMIENTO);
 }
 
+/** Un agregado sin filas no vale `null` hacia fuera: vale cero, a su escala. */
+const CERO_ALMACENADO = (0).toFixed(ALMACENAMIENTO);
+
 /** Lo que hace falta de un movimiento para responderlo. */
 const CAMPOS = {
   id: true,
@@ -269,11 +272,18 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
   public async saldos(entrada: {
     readonly companyId: CompanyId;
     readonly locationId: LocationId;
+    readonly hasta: Date | null;
   }): Promise<readonly SaldoLeido[]> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       const agregados = await tx.inventoryMovement.groupBy({
         by: ['itemId'],
-        where: { companyId: entrada.companyId, locationId: entrada.locationId },
+        where: {
+          companyId: entrada.companyId,
+          locationId: entrada.locationId,
+          // El corte del conteo fisico. Semiabierto igual que el periodo: un
+          // movimiento en el instante exacto del corte ya es del mes siguiente.
+          ...(entrada.hasta === null ? {} : { occurredAt: { lt: entrada.hasta } }),
+        },
         _sum: { quantity: true },
       });
 
@@ -307,6 +317,39 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
         movimientos: pagina.map(comoMovimiento),
         siguiente: filas.length > consulta.limite ? (pagina.at(-1)?.id ?? null) : null,
       };
+    });
+  }
+
+  /**
+   * `compras_del_mes` de SPEC 16, agregado en SQL.
+   *
+   * Filtra por `type = 'COMPRA'` y suma el importe, asi que **las correcciones
+   * se cancelan solas**: la correccion de una compra es una COMPRA de importe
+   * invertido y no un AJUSTE (ADR-009). Si conservara otro tipo, este numero
+   * seguiria contando dinero que no se gasto.
+   */
+  public async comprasEntre(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly desde: Date;
+    readonly hasta: Date;
+  }): Promise<string> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const agregado = await tx.inventoryMovement.aggregate({
+        where: {
+          companyId: entrada.companyId,
+          locationId: entrada.locationId,
+          type: 'COMPRA',
+          occurredAt: { gte: entrada.desde, lt: entrada.hasta },
+        },
+        _sum: { totalCost: true },
+      });
+
+      // El importe es una magnitud sin signo; el sentido lo lleva la cantidad.
+      // La correccion de una compra la registra `RegistrarCompra` con el mismo
+      // importe, y su cantidad negativa es la que la anula en el saldo.
+      const suma = agregado._sum.totalCost;
+      return suma === null ? CERO_ALMACENADO : aEscalaDeAlmacenamiento(suma);
     });
   }
 

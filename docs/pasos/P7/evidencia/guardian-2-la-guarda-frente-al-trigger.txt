@@ -1,0 +1,49 @@
+GUARDIAN 2 — sin la guarda de dominio, el rechazo SIGUE OCURRIENDO... como 500
+==============================================================================
+
+Que se rompio: en `exigirLibroEscribible` se sustituyo la llamada a
+`ExigirPeriodoAbierto` por un `await` vacio. Las CINCO escrituras del libro
+pasan por esa funcion, asi que la guarda desaparece de golpe en todas.
+
+$ npx vitest run --project integration test/integracion/periodos-y-conteo.spec.ts
+
+  x una compra con fecha del mes cerrado devuelve 409, no un 500 del trigger
+    -> expected 500 to be 409
+  x y una transferencia, una produccion y un consumo tambien
+    -> expected 500 to be 409
+  x corregir un movimiento de un mes cerrado tambien se rechaza
+    -> expected 500 to be 409
+  x el instante exacto del fin del mes cerrado ya es del mes siguiente y SI entra
+    -> expected 500 to be 409
+  x el OWNER si, y despues el movimiento entra
+    -> expected 500 to be 409
+  x reabrir un periodo que esta abierto se rechaza
+    -> expected 204 to be 409
+
+  Tests  6 failed | 23 passed (29)
+
+LO QUE ESTE GUARDIAN DEMUESTRA NO ES QUE LA GUARDA SEA LA DEFENSA
+-----------------------------------------------------------------
+Es lo contrario, y por eso vale la pena. Con la guarda retirada NINGUN
+movimiento entro en un mes cerrado: el trigger
+`inventory_movement_respeta_periodo_cerrado` los rechazo todos. La integridad
+de los datos no dependia de la guarda.
+
+Lo que cambio es el CODIGO DE RESPUESTA: 500 en vez de 409. Y un 500 dispara
+alertas de operacion, cuenta como caida en cualquier metrica de
+disponibilidad, y no le dice al usuario que corregir. Es INC-012 exactamente:
+"la base rechaza y el dominio no explica".
+
+Reparto de papeles, que es la conclusion:
+
+  el trigger    GARANTIZA. Cubre las cinco escrituras y la sexta que alguien
+                escriba manana sin acordarse de llamar a nada
+  la guarda     EXPLICA. Convierte un P0001 del driver en un 409 con un
+                mensaje que dice como seguir: "hay que reabrirlo primero"
+
+Y observese que una prueba PASO igualmente: "el trigger de la base rechaza la
+fila aunque nadie pase por la API". Esa inserta directamente en la tabla, asi
+que nunca dependio de la guarda. Es la que mide la garantia; las otras seis
+miden la explicacion.
+
+Restaurado tras la captura.

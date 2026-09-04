@@ -119,9 +119,21 @@ Los parámetros de costeo de `DECISIONES.md` D3. Se siembran al crear el tenant 
 | Archivo | Contiene | Desde |
 |---|---|---|
 | `config/branding.ts` | Nombre visible del producto (D1) | P1 |
-| `config/periods.ts` | Política de cierre y reapertura (D6) | P7 |
+| **`shared/infrastructure/config/periods.ts`** | **La zona horaria del calendario contable (D6, D11)** | **P7 ✅** |
 | `config/plans.ts` | Límites por plan (D5) | P11 |
 | `config/locale.ts` | Idioma, moneda, zona horaria, formatos (D11) | P1 |
+
+### `periods.ts`: por qué es configuración versionada y no variable de entorno
+
+```ts
+export const ZONA_HORARIA_DE_PERIODOS = 'America/Guayaquil';
+```
+
+**Cambiar esta zona cambia a qué mes pertenece cada movimiento futuro.** Un cambio así tiene que pasar por una revisión de código y quedar en el historial, no aparecer en el `.env` de una máquina y desaparecer con ella.
+
+**Y cambiarla no reescribe la historia.** Las fronteras de un período se resuelven una sola vez, al abrirlo, y se guardan en `period.starts_at` / `ends_at` como instantes. Los meses ya abiertos conservan la frontera con la que se abrieron; solo los nuevos usarían la zona nueva. Es la razón de que el modelo guarde instantes y no un mes — ver ADR-010 §2.
+
+**Vive bajo `shared/infrastructure/config/` y no en un `src/config/` suelto**, que es donde D6 la sitúa por nombre: una carpeta a ese nivel quedaría fuera de las tres capas que `audit:arch` vigila. El dominio no la lee nunca: `CalendarioDePeriodos` recibe la zona por constructor.
 
 
 ---
