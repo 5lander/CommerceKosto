@@ -485,6 +485,8 @@ Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se r
 
 **CC-004 ya no depende de un número que nadie más haya calculado.** Se pensó como un caso íntegramente construido; se escribió partiendo de `INS-113`, cuya mitad `EP` **el Excel ya tiene calculada** (`0.4615384615`). Lo único a mano es la mitad `AP`, que es una multiplicación por `0.20`. La advertencia del ítem B2 de `FASE0-CHECKLIST` —«no debe calcularlo quien escriba después la aritmética que lo verifica»— queda cubierta por esa mitad corroborada, y no por confiar en mi cuenta.
 
+**P6 no añade ningún caso conocido, y es correcto que no lo haga.** Los casos de este archivo verifican **fórmulas del Excel**, y el libro de inventario no calcula ninguna: registra hechos y los suma. Lo que P6 sí aporta a esta lista es el dataset que **CC-R7 con dataset completo** necesitará en P8 —compras reales, mermas y consumo— y que hasta ahora no existía.
+
 **CC-R7 subió de nivel.** En P0 corría con aritmética suelta sobre valores de `V_COSTEO`. En P5 **corre a través del motor**: los `costo_por_porcion`, `venta_neta` y `margen_contribucion` ya no se transcriben, los produce `costearProducto` a partir de los ítems y las líneas. La versión con el dataset completo y el inventario real sigue siendo de P8, que es donde existen las compras y el conteo físico.
 
 **CC-002 dejó de tener un valor escrito a mano.** Su línea `INS-131` valía `0.20` porque el Excel lo tenía así. Con CC-005, esa `0.20` la produce la cascada desde una receta, y el resto de CC-002 no se mueve ni un decimal. Es la prueba de que la cascada no cambió la respuesta, solo su origen.

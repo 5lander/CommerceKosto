@@ -111,6 +111,44 @@ La columna `product.packaging_item_id` no necesita guarda: `AsignarEmpaque` ya c
 
 ---
 
+## `20260904203551_p6_inventario`
+
+Es la migración con más restricciones del proyecto hasta ahora, y no por gusto: el libro de inventario es **append-only**, así que una fila mal escrita no se puede arreglar después. Lo que la base no rechace en el momento se queda para siempre.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `inventory_movement_type_direccion_valida` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él |
+| `inventory_movement_cantidad_no_nula` | 🔴 | **`conSignoDelTipo`** → `CantidadNulaError`. «El libro registra hechos, y *no pasó nada* no es uno» |
+| `inventory_movement_signo_segun_direccion` | 🔴 | **`conSignoDelTipo`** → `SignoIncoherenteError`. Es la que más se va a tocar: quien registra una merma escribe «2,5 kg», no «−2,5 kg» |
+| `inventory_movement_importe_no_negativo` | 🟡 | Esquema: el importe entra como decimal no negativo |
+| `inventory_movement_importe_obligatorio` | 🟡 | Esquema en `COMPRA` (el DTO lo exige); calculado por el dominio en `PRODUCCION` |
+| `inventory_movement_transferencia_agrupada` | ⚪ | Solo `RegistrarTransferencia` emite esos dos tipos, y siempre con su cabecera |
+| `inventory_movement_produccion_agrupada` | ⚪ | Solo `RegistrarProduccion` emite `PRODUCCION`, y siempre con su lote |
+| `inventory_movement_articulo_solo_en_compra` | ⚪ | Solo `RegistrarCompra` rellena el artículo |
+| `inventory_movement_fecha_no_futura` | 🔴 | **`exigirFechaPasada`** → `FechaFuturaError`, con un minuto de holgura de reloj |
+| `inventory_movement_no_se_corrige_a_si_mismo` | ⚪ | El `id` lo genera la base **después** de fijar la referencia: no hay forma de apuntarse a uno mismo |
+| `inventory_movement_note_acotada` | 🟡 | Esquema |
+| `inventory_transfer_origen_distinto_de_destino` | 🔴 | **`construirTransferencia`** → `TransferenciaSinDestinoError` |
+| `inventory_transfer_fecha_no_futura` | 🔴 | **`exigirFechaPasada`** |
+| `inventory_transfer_note_acotada` | 🟡 | Esquema |
+| `inventory_production_cantidad_positiva` | 🔴 | **`exigirMagnitud`** → `CantidadNulaError` / `SignoIncoherenteError` |
+| `inventory_production_costos_no_negativos` | 🟡 | Esquema en el costo estándar; derivados los otros dos |
+| `inventory_production_fecha_no_futura` | 🔴 | **`exigirFechaPasada`** |
+| `inventory_production_note_acotada` | 🟡 | Esquema |
+| **triggers** `*_sin_mutacion` y `*_sin_truncado` | ⚪ | Ver abajo |
+
+### Por qué los triggers de append-only son ⚪ y no 🔴
+
+Es la clasificación que más costó, porque `ESTADO.md` dejó escrito que P6 era «el candidato claro» a repetir INC-012 precisamente por esto. La conclusión, tras mirarlo:
+
+**Ninguna ruta de la API puede producir un `UPDATE` o un `DELETE` sobre el libro.** No hay endpoint que edite ni borre un movimiento — no por olvido, sino porque R3 dice que no debe haberlo. Un error se corrige con `POST /inventario/movimientos/:id/correccion`, que **inserta** una fila.
+
+Y lo que sostiene que siga siendo así no es la disciplina de nadie: es `audit:forbidden`. Las reglas `append-only-cliente-inventory_movement` y `append-only-sql-inventory_movement` rompen el build si alguien escribe `inventoryMovement.update(...)` o un `UPDATE inventory_movement` en cualquier archivo del repositorio, migraciones incluidas. **Una guarda de runtime protegería contra un código que no compila.**
+
+Lo que sí es 🔴 en ese camino es otra cosa, y tiene su guarda: **corregir dos veces el mismo movimiento**. Ahí no hay `CHECK` sino el índice único de `reverses_movement_id`, que habría subido como `23505` → 500. Lo detiene `CorregirMovimiento` con `MovimientoYaCorregidoError`, y encadenar correcciones lo detiene `corregir()` con `CorreccionDeCorreccionError`.
+
+---
+
 ## Cómo se mantiene
 
 Al añadir una migración con `CHECK` o `RAISE EXCEPTION`:

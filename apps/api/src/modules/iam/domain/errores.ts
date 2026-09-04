@@ -98,3 +98,24 @@ export class ContrasenaDebilError extends ErrorDeDominio {
     super(motivo);
   }
 }
+
+/**
+ * La ubicacion pedida no esta en el alcance de quien pregunta.
+ *
+ * ES LA ESCALADA HORIZONTAL, y vive en `iam` porque es una regla sobre la
+ * SESION y no sobre lo que se estaba consultando. RLS garantiza que no se vean
+ * datos de otra company; no sabe nada de que un `GERENTE_LOCAL` solo puede
+ * tocar la suya. Esa mitad se decide en la aplicacion, y la deciden todos los
+ * modulos que tienen datos por ubicacion — recetas, costeo e inventario.
+ *
+ * NACIO EN `recipes` EN P4 Y SE MUDO AQUI EN P6, cuando el segundo modulo la
+ * necesito. Dejarla alli habria obligado a `inventory` a importar un error de
+ * dominio de `recipes` para hablar de permisos, o a duplicar la funcion.
+ */
+export class UbicacionFueraDeAlcanceError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'PERMISO_DENEGADO';
+
+  public constructor() {
+    super('Esa ubicacion no esta en tu alcance.');
+  }
+}

@@ -4,6 +4,46 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P6 — Inventario · libro mayor append-only · 2026-09-04
+
+**Objetivo:** saber cuánto hay y por qué, sin poder mentir.
+
+### Entregado
+
+- **`inventory_movement` append-only en tres capas** —privilegio, trigger de sentencia y `audit:forbidden`— con los **siete** tipos del SPEC §7. Extendido a `inventory_transfer` e `inventory_production`, que son cabeceras de hechos ya escritos
+- **El saldo es `SUM(quantity)`, no un campo.** No existe `inventory_balance`, y era lo previsto: R3
+- **La cantidad lleva signo, y lo garantiza la base.** `CHECK` que cruza dirección con signo, más **clave foránea compuesta `(type, direction)`** para que la dirección no pueda discrepar de su catálogo — sin ella, declarar `('COMPRA','SALIDA')` colaría una cantidad negativa
+- **Transferencias como par atómico** que **suma cero por construcción**: la entrada es `salida.negated()`, no una comprobación que alguien pueda quitar
+- **Producción con R10 entera**: el alta al costo **estándar**, el costo **real** del lote al lado, y la varianza. Efecto buscado: la suma de los importes de los movimientos `PRODUCCION` de un lote **es** la varianza
+- **Corrección de signo contrario que CONSERVA el tipo**, para que `compras_del_mes` (SPEC §16) se cancele sola. Es la única excepción a la regla de signos, acotada en el `CHECK` a `reverses_movement_id IS NOT NULL`
+- **El interruptor de stock, conmutable** (`llevaStock` en `catalog`): con stock propio se consume la preparación; sin él, al vender se explota su receta
+- **`BODEGA` escribe el libro y no puede leerlo**: `inventory.read` no se le concede, y **ninguna escritura devuelve el saldo resultante** — con él despejaría la receta (§4.3)
+- **`exigirUbicacionEnAlcance` se muda de `recipes` a `iam`**, que es su sitio: es autorización de sesión
+- **El presupuesto medido**: p95 **60,8 ms** contra 300, con 500 ítems y 1,2 millones de movimientos en la tabla, y los planes verificados
+- **ADR-009** con las cinco decisiones que el SPEC no escribe
+- **596 pruebas**: 383 unitarias con la base apagada, 213 de integración
+
+### Lo que se descubrió por el camino
+
+**Novena recurrencia de INC-007, y la cazó la regla que dejó escrita la octava.** Al forzar el guardián de las dos reglas append-only nuevas, falló en **2 sitios cuando debía fallar en 4**. El glob `prisma/migrations/**/*.sql` está anclado a la raíz y las migraciones viven en `apps/api/prisma/...`: **desde P0, `no-select-star` y `append-only-sql-audit_log` no habían examinado una sola migración.** El contador del informe pasó de 189 a 203 archivos, que es la medida de que el arreglo hizo algo.
+
+**La prueba del plan de ejecución no medía nada al principio.** Con una sola ubicación en la tabla, `Seq Scan` es la elección correcta —la tabla entera es el resultado— y la prueba fallaba por un motivo ajeno al índice. Se arregló sembrando 19 ubicaciones de ruido. Misma lección de INC-007, aplicada a un dato en vez de a un glob.
+
+**El mismo número salía con dos formas:** `_sum` de Prisma devuelve `"8.5"` y leer la columna devuelve `"8.500000000000"`. Todo pasa ahora por la escala de almacenamiento, que además permite comparar el `SUM` de PostgreSQL con el pliegue del dominio sin normalizar nada.
+
+**INC-012 no reapareció, aunque `ESTADO.md` la daba por segura en este paquete.** Los triggers append-only resultaron inalcanzables desde la API —no existe ruta que edite un movimiento, y lo sostiene `audit:forbidden`, no la disciplina de nadie— y **M11 paró la primera migración a la que se enfrentó**, obligando a clasificar las 18 restricciones antes del primer endpoint.
+
+**El guardián 3 enseña más por lo que no rompe.** Emitiendo la corrección como `AJUSTE` fallan 3 pruebas de 74, y siguen en verde el saldo, la reconstrucción del libro y el criterio de aceptación de P6. Lo único que lo caza es la agregación por tipo. Es la misma forma de fallo que R7 en P5: un invariante que se cumple tapando uno que no.
+
+### Pendiente
+
+- **La tabla de unidades vendidas.** P6 registra la *consecuencia* de una venta sobre el stock, no la cifra de ventas: son datos distintos, con períodos distintos. La necesita P8
+- **El semáforo `REPONER`/`OK` para `BODEGA`** llega en P8, con el punto de reorden de SPEC §18. Los permisos ya están repartidos para que sea el único dato que reciba
+- **El rendimiento por lote de una subpreparación**: se decidió **no** añadir columna. La receta ya es por unidad de uso y producir 5 litros es `receta × 5`. Es aditiva si el usuario la quiere
+- **La explosión del consumo no aplica el rendimiento**, siguiendo SPEC §4.3. Anotado como duda: afecta al stock teórico de P8
+
+---
+
 ## P5 — Motor de costeo · 2026-09-04
 
 **Objetivo:** el cálculo correcto, demostrable y sin base de datos.

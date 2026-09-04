@@ -1,0 +1,36 @@
+GUARDIAN 4 — la base sostiene el signo aunque la aplicacion falle
+
+No hace falta romper nada: estas comprobaciones estan escritas como pruebas
+permanentes en `test/integracion/append-only.spec.ts`, y se ejecutan como la
+DUENA de la tabla —no como la aplicacion— precisamente para saltarse el dominio
+y atacar la fila directamente.
+
+Es lo que distingue una defensa real de una decorativa: `conSignoDelTipo` pone
+el signo en el dominio, pero si alguien escribiera por otra via, esto es lo que
+queda de pie.
+
+   v una COMPRA sin importe se para antes que nada: de ahi sale SPEC 16
+       -> constraint: inventory_movement_importe_obligatorio
+   v una COMPRA negativa la para el CHECK, no una clave foranea
+       -> constraint: inventory_movement_signo_segun_direccion
+   v una MERMA positiva, igual
+       -> constraint: inventory_movement_signo_segun_direccion
+   v una cantidad de cero no es un hecho
+       -> constraint: inventory_movement_cantidad_no_nula
+
+Y en `inventario.spec.ts`, con filas reales contra las que apuntar:
+
+   v la clave foranea COMPUESTA impide declarar una direccion que no es la del tipo
+       -> constraint: inventory_movement_type_direction_fkey
+
+ESA ULTIMA ES LA QUE CIERRA EL CIRCULO. El `CHECK` de signo compara la cantidad
+contra la columna `direction` de la propia fila, asi que la forma de burlarlo
+seria declarar `('COMPRA', 'SALIDA')` y meter una cantidad negativa. La clave
+foranea compuesta contra `inventory_movement_type(code, direction)` lo hace
+imposible: esa pareja no existe en el catalogo.
+
+UNA COSA QUE COSTO DESCUBRIR, y que quedo escrita en la prueba: con
+identificadores inventados salta ANTES la clave foranea de `company`, y la
+prueba pasaria por el motivo equivocado. Por eso esa comprobacion vive en
+`inventario.spec.ts`, donde hay company, ubicacion e item de verdad, y no en la
+suite de append-only.

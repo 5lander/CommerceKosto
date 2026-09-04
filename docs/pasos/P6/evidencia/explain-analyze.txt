@@ -1,0 +1,54 @@
+EXPLAIN ANALYZE del inventario — CLAUDE.md 5
+
+PRESUPUESTO: "vista de inventario de una ubicacion con 500 items: < 300 ms" (p95).
+MEDIDO: p95 = 60,8 ms sobre HTTP, con 500 items y 12.000 movimientos en la
+ubicacion consultada.
+
+EL VOLUMEN DE LA TABLA NO ES EL DE LA CONSULTA, y es lo que hace que estos
+planes signifiquen algo. La tabla acumula 1,2 millones de movimientos de todas
+las corridas; la ubicacion medida tiene 12.000. Sin ese contraste PostgreSQL
+elegiria —correctamente— un Seq Scan, porque la tabla entera seria el resultado,
+y la prueba del plan pasaria o fallaria por un motivo que no tiene que ver con
+el indice. Esta anotado en la constante `UBICACIONES_DE_RUIDO` de la prueba.
+
+LOS DOS INDICES QUE CLAUDE.md 5 NOMBRA, USADOS:
+  (company_id, location_id, occurred_at)           -> agregacion del saldo
+  (company_id, location_id, item_id, occurred_at)  -> libro paginado de un item
+
+Hay una prueba de integracion que FALLA si aparece un `Seq Scan on
+inventory_movement`: el tiempo depende de la maquina, el plan no.
+
+===============================================================================
+
+Tabla completa: 1212376 movimientos. Ubicacion medida: 12000.
+
+--- saldos: SUM agrupado por item ---
+HashAggregate  (cost=201.28..202.62 rows=107 width=48) (actual time=92.836..93.062 rows=500.00 loops=1)
+  Group Key: item_id
+  Batches: 1  Memory Usage: 345kB
+  Buffers: shared hit=5653 read=245
+  ->  Index Scan using inventory_movement_company_id_location_id_occurred_at_idx on inventory_movement  (cost=0.43..200.73 rows=109 width=21) (actual time=0.031..85.896 rows=12000.00 loops=1)
+        Index Cond: ((company_id = '01a06e3a-1b0a-78a8-ae25-d3253120ec30'::uuid) AND (location_id = '01a06e3a-1b12-7a9e-9175-4dad8258a6dd'::uuid))
+        Index Searches: 1
+        Buffers: shared hit=5653 read=245
+Planning:
+  Buffers: shared hit=29
+Planning Time: 0.613 ms
+Execution Time: 93.196 ms
+
+--- libro paginado de un item ---
+Limit  (cost=8.58..8.63 rows=2 width=29) (actual time=0.101..0.106 rows=24.00 loops=1)
+  Buffers: shared hit=11
+  ->  Incremental Sort  (cost=8.58..8.63 rows=2 width=29) (actual time=0.100..0.102 rows=24.00 loops=1)
+        Sort Key: occurred_at DESC, id DESC
+        Presorted Key: occurred_at
+        Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 26kB  Peak Memory: 26kB
+        Buffers: shared hit=11
+        ->  Index Scan Backward using inventory_movement_company_id_location_id_item_id_occurred__idx on inventory_movement  (cost=0.55..8.57 rows=1 width=29) (actual time=0.019..0.027 rows=24.00 loops=1)
+              Index Cond: ((company_id = '01a06e3a-1b0a-78a8-ae25-d3253120ec30'::uuid) AND (location_id = '01a06e3a-1b12-7a9e-9175-4dad8258a6dd'::uuid) AND (item_id = '01a06e3a-1b27-7f4d-8e68-ae5ed6e1fa27'::uuid))
+              Index Searches: 1
+              Buffers: shared hit=5
+Planning:
+  Buffers: shared hit=13
+Planning Time: 0.327 ms
+Execution Time: 0.155 ms

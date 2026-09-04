@@ -376,6 +376,10 @@ describe('catálogo', () => {
           grupoId: null,
           confianzaDePrecio: 'FACTURA',
           estado: 'INACTIVE',
+          // El interruptor de stock lo añade P6, y es OBLIGATORIO: este `PUT`
+          // reemplaza el ítem entero, no lo parchea. `null` es el valor de un
+          // COMPRADO, que es lo que este es.
+          llevaStock: null,
         });
       expect(cambio.status).toBe(SIN_CONTENIDO);
 

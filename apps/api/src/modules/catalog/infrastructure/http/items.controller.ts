@@ -89,6 +89,7 @@ export class ItemsController {
       grupoId: cuerpo.grupoId === null ? null : itemGroupId(cuerpo.grupoId),
       confianzaDePrecio: cuerpo.confianzaDePrecio,
       estado: cuerpo.estado,
+      llevaStock: cuerpo.llevaStock,
     });
   }
 }

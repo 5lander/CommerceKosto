@@ -1,0 +1,38 @@
+GUARDIAN 2 — la confidencialidad frente a BODEGA (CLAUDE.md 4.3, R8)
+
+VIOLACION DELIBERADA, en dos sitios del controlador:
+
+  1. `GET /inventario/saldos` y `GET /inventario/movimientos` pasan de exigir
+     `inventory.read` a exigir `inventory.write`, que BODEGA SI tiene.
+  2. `POST /inventario/movimientos` devuelve el saldo resultante
+     "por comodidad de la UI".
+
+Las dos son cambios que alguien podria hacer de buena fe. La primera parece un
+permiso mas coherente —"si puede escribir, que pueda leer lo que escribio"—; la
+segunda ahorra una peticion al frontend. Las dos entregan la receta.
+
+SALIDA (npx vitest run --project integration test/integracion/inventario.spec.ts):
+
+   x inventario > 4.3 - BODEGA escribe el libro y no puede leerlo
+       > la respuesta de esa escritura NO trae el saldo resultante
+     -> expected '{"id":"01a06e50-13af-76a3-9a58-0fbe7b...' not to contain 'cantidad'
+
+   x inventario > 4.3 - BODEGA escribe el libro y no puede leerlo
+       > NO puede leer los saldos: con ellos despejaria la receta
+     -> expected 200 to be 403
+
+   x inventario > 4.3 - BODEGA escribe el libro y no puede leerlo
+       > NO puede leer el libro de movimientos
+     -> expected 200 to be 403
+
+   Tests  3 failed | 31 passed (34)
+
+LO QUE ESTO DEMUESTRA, Y LO QUE NO
+
+Demuestra que las tres comprobaciones MIDEN: cazan las dos formas realistas de
+filtrar el saldo, y la del cuerpo lo hace sobre el JSON CRUDO —no sobre un
+objeto tipado—, que es lo que CLAUDE.md 4.3 exige.
+
+No demuestra que la lista de campos prohibidos este completa. Cada endpoint
+nuevo que devuelva algo derivado del libro necesita su propia comprobacion; es
+lo que P7 y P8 tienen que repetir con el conteo fisico y con las vistas.

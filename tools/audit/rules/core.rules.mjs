@@ -25,6 +25,22 @@
  * tienta saltarse el sistema de tipos "porque es solo un test". Las reglas que
  * de verdad no aplican a una prueba se excluyen una a una con `PRUEBAS`.
  */
+/**
+ * LAS MIGRACIONES VIVEN BAJO `apps/*`, no en la raiz.
+ *
+ * Hasta P6 este glob decia `prisma/migrations/**{@literal /}*.sql`, anclado a la raiz del
+ * repositorio, y las rutas que el escaner compara son relativas a esa raiz:
+ * `apps/api/prisma/migrations/...`. El patron no casaba con NADA, asi que las
+ * dos reglas que lo usan —`no-select-star` y `append-only-sql-*`— llevaban
+ * desde P0 sin examinar una sola migracion.
+ *
+ * NO SE DESTAPO PORQUE EL CHECK ESTUVIERA EN VERDE, sino porque al forzar el
+ * guardian de P6 fallo en DOS sitios cuando debia fallar en cuatro. Es la
+ * novena recurrencia de INC-007 y la segunda seguida del mismo tipo: un check
+ * que falla tampoco esta verificado hasta que se cuenta EN CUANTOS sitios falla.
+ */
+const MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql';
+
 const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
 
 /**
@@ -133,7 +149,7 @@ export const coreRules = [
     porQue:
       'Devuelve columnas que nadie pidio. Ademas de coste, es la via por la que un campo protegido acaba en una respuesta.',
     patron: /\bSELECT\s+\*/gi,
-    incluye: [...CODIGO, 'prisma/migrations/**/*.sql', 'docker/**/*.sql'],
+    incluye: [...CODIGO, MIGRACIONES, 'docker/**/*.sql'],
     excluye: META,
     desde: 'P0',
     referencia: 'CLAUDE.md §5 · AUDITORIA.md D10',

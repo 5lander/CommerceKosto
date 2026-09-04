@@ -79,6 +79,8 @@ export interface DatosParaActualizarItem {
   readonly grupoId: ItemGroupId | null;
   readonly confianzaDePrecio: ConfianzaDePrecio;
   readonly estado: EstadoDeCatalogo;
+  /** El interruptor de stock de una preparación (P6). `null` en un COMPRADO. */
+  readonly llevaStock: boolean | null;
 }
 
 export interface DatosParaCrearArticulo {

@@ -408,6 +408,202 @@ Un solo producto, con la misma forma que un elemento de `productos`. **404** si 
 
 ---
 
+## Inventario (P6)
+
+> **Antes de leer los endpoints, la regla que explica su forma.** `BODEGA` tiene `inventory.write` e `inventory.transfer`, y **no** tiene `inventory.read`. No es un permiso olvidado: es CLAUDE.md §4.3.
+>
+> ```
+> saldo = inicial + compras − consumo
+> ```
+>
+> Quien registra las compras conoce el inicial y las compras. Si además ve el saldo, despeja el consumo — y el consumo dividido entre las unidades vendidas **es** la cantidad de la receta. Por eso las dos lecturas exigen `inventory.read`, y por eso **ninguna escritura de esta sección devuelve el saldo resultante**: responden con un id, y nada más.
+>
+> **No existe `PUT` ni `DELETE` de un movimiento.** Es R3: el libro no se edita. Un error se corrige insertando la fila que lo anula.
+
+**Reparto de capacidades**
+
+| Capacidad | OWNER | ADMIN | GERENTE_LOCAL | BODEGA | LECTURA |
+|---|:--:|:--:|:--:|:--:|:--:|
+| `inventory.read` | ✅ | ✅ | ✅ | ❌ | ✅ |
+| `inventory.write` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `inventory.transfer` | ✅ | ✅ | ✅ | ✅ | ❌ |
+| `inventory.produce` | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+`GERENTE_LOCAL` las tiene todas salvo el límite de su **ubicación**: `exigirUbicacionEnAlcance` le devuelve 403 sobre cualquier otra, en las dos puntas de una transferencia.
+
+### `GET /inventario/saldos?locationId=…` — `inventory.read`
+
+El saldo por ítem de una ubicación: la **proyección** del libro (R3). No hay campo `stock` en ninguna tabla.
+
+```jsonc
+[
+  {
+    "itemId": "…",
+    "nombre": "Cebolla paiteña",
+    "unidadDeUso": "kg",
+    // CON SIGNO y a escala de almacenamiento. Un saldo negativo es un hecho
+    // legítimo: significa que se consumió más de lo que se registró comprado,
+    // y esconderlo taparía justo lo que hay que ver.
+    "cantidad": "11.000000000000"
+  }
+]
+```
+
+Un ítem sin ningún movimiento **no aparece**; uno cuyos movimientos se cancelan aparece con `"0.000000000000"`. La diferencia importa: «hubo movimiento y quedó en nada» y «nunca hubo nada» son estados distintos.
+
+### `GET /inventario/movimientos?locationId=…` — `inventory.read`
+
+El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
+
+| Parámetro | |
+|---|---|
+| `locationId` | obligatorio |
+| `itemId` | opcional |
+| `desde` · `hasta` | ISO 8601, sobre `occurredAt` |
+| `limite` | 1–200, por defecto 50 |
+| `cursor` | opaco. Es el `siguiente` de la página anterior |
+
+```jsonc
+{
+  "movimientos": [
+    {
+      "id": "…",
+      "tipo": "COMPRA",
+      "cantidad": "10.000000000000",
+      "costoTotal": "25.000000000000",
+      // Cuándo ocurrió en el negocio, y cuándo entró al libro. La diferencia
+      // dice cuánto se tardó en registrar, que es dato de auditoría.
+      "occurredAt": "2026-03-15T00:00:00.000Z",
+      "recordedAt": "2026-09-04T20:41:02.113Z",
+      "transferId": null,
+      "productionId": null,
+      "corrigeA": null,        // este movimiento anula a otro
+      "corregidoPor": "…",     // este movimiento fue anulado por otro
+      "note": null
+    }
+  ],
+  "siguiente": null
+}
+```
+
+### `POST /inventario/movimientos` — `inventory.write`
+
+Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el signo lo pone el tipo. `AJUSTE` es la excepción: existe para mover el saldo en la dirección que haga falta, y ahí el signo sí es de quien escribe.
+
+```jsonc
+{
+  "locationId": "…",
+  "itemId": "…",
+  "tipo": "COMPRA",              // COMPRA · MERMA · AJUSTE
+  "cantidad": "10",              // "-2" solo válido en AJUSTE
+  "costoTotal": "25.00",         // obligatorio en COMPRA; de ahí sale SPEC §16
+  "purchaseArticleId": "…",      // solo en COMPRA: en qué presentación se compró
+  "occurredAt": "2026-03-15T00:00:00.000Z",
+  "note": null
+}
+```
+
+→ `201 { "id": "…" }` — **y nada más.** Ver la nota de cabecera.
+
+| Error | Cuándo |
+|---|---|
+| `400` | cantidad cero · signo contrario al tipo · fecha futura (con un minuto de holgura de reloj) · `COMPRA` sin importe |
+| `403` | la ubicación no está en tu alcance |
+| `404` | el ítem no existe en tu company |
+
+### `POST /inventario/movimientos/:id/correccion` — `inventory.write`
+
+**R3, la única forma de deshacer.** Inserta un movimiento **del mismo tipo**, de cantidad e importe invertidos, con la **fecha del original** — corregir es decir «esto que registré el día 3 no pasó», y ponerle fecha de hoy dejaría el saldo del día 3 mal para siempre.
+
+Que conserve el tipo no es un detalle: es lo que hace que `compras_del_mes` (SPEC §16) se cancele sola.
+
+```jsonc
+{ "note": "me equivoqué de bodega" }
+```
+
+| Error | Cuándo |
+|---|---|
+| `409` | ese movimiento **ya** tiene corrección · el movimiento **es** una corrección (encadenarlas es editar con otro nombre; para eso está `AJUSTE`) |
+| `404` | no existe en tu company |
+
+### `POST /inventario/transferencias` — `inventory.transfer`
+
+**Un par de movimientos que suma cero** (R2): el total de la company no cambia y los saldos de las dos ubicaciones sí. Se escriben junto a su cabecera en una transacción; media transferencia no existe.
+
+```jsonc
+{
+  "origen": "…",
+  "destino": "…",   // distinto del origen
+  "itemId": "…",
+  "cantidad": "4",  // magnitud: el sentido lo pone el par
+  "occurredAt": "2026-03-15T00:00:00.000Z",
+  "note": null
+}
+```
+
+**No lleva importe**, y es deliberado: el inventario se valora al costo estándar del ítem (SPEC §16 y §18), y mover mercancía entre dos almacenes de la misma company no cambia lo que vale.
+
+El alcance se exige **en las dos puntas**. Comprobar solo el origen dejaría abierta la mitad más peligrosa: mover stock ajeno hacia el propio.
+
+### `POST /inventario/producciones` — `inventory.produce`
+
+**R10.** Da de alta la preparación al **costo estándar** —su precio de referencia confirmado— y consume los insumos a su costo real. El lote guarda los dos totales, y su diferencia es la varianza.
+
+```jsonc
+{
+  "locationId": "…",
+  "itemId": "…",                                  // ítem PRODUCIDO con llevaStock = true
+  "cantidad": "5",
+  "insumos": [{ "itemId": "…", "cantidad": "2.6" }],
+  "occurredAt": "2026-03-15T00:00:00.000Z",
+  "note": null
+}
+```
+
+**Los insumos son los que de verdad entraron, no los de la receta.** Si fueran siempre «la receta por la cantidad», el consumo real y el teórico coincidirían por construcción y la varianza operativa sería invisible. El frontend precarga desde la receta; la API registra lo que pasó.
+
+| Error | Cuándo |
+|---|---|
+| `400` | el ítem es `COMPRADO` (se compra, no se produce) · es una preparación **sin stock propio** (al vender se explota su receta) · **no tiene precio de referencia confirmado** a esa fecha, y sin costo estándar no hay contra qué medir la varianza |
+
+### `POST /inventario/consumos` — `inventory.produce`
+
+El consumo que genera una venta. **Aquí es donde el interruptor de stock hace su trabajo**: la explosión de la receta baja hasta que encuentra algo con stock propio y ahí para.
+
+```jsonc
+{
+  "locationId": "…",
+  "ventas": [{ "productId": "…", "unidades": "10" }],
+  "occurredAt": "2026-03-15T00:00:00.000Z",
+  "note": null
+}
+```
+
+→ `201 { "movimientos": ["…", "…"] }` — los ids escritos, en una sola transacción.
+
+| `llevaStock` de la preparación | Qué se consume |
+|---|---|
+| `true` | **la preparación**. Ya se descontaron sus insumos al producir el lote; bajar aquí los descontaría dos veces |
+| `false` | **sus insumos**. No pasa por ninguna estantería: consumirla es consumir su cebolla y su aceite |
+
+Una línea `INACTIVA` no consume nada, igual que no cuesta nada (SPEC §13). Un ítem cuyo consumo suma cero no genera movimiento.
+
+**No guarda las unidades vendidas**, solo su consecuencia sobre el stock. La cifra de ventas del mes —que P8 necesita para la venta neta— es un dato distinto, con su propio período, y su tabla llega con las vistas analíticas.
+
+### `PUT /catalogo/items/:id` — `catalog.update` *(cambia en P6)*
+
+El cuerpo gana un campo **obligatorio**, `llevaStock`, que es el interruptor de stock de una preparación. Es un reemplazo completo del ítem, no un parche, así que se manda siempre:
+
+| Valor | Significado |
+|---|---|
+| `true` | la preparación se produce en lote y está en el inventario |
+| `false` | al vender se explota su receta |
+| `null` | el ítem es `COMPRADO`, donde el interruptor no significa nada |
+
+Cambiarlo **no reescribe el pasado**: los movimientos ya registrados siguen siendo hechos. Lo que cambia es hasta dónde baja el consumo de las ventas que se registren a partir de entonces. Hay una prueba que lo fija.
+
+Vive en `catalog` y no en `inventory` porque el catálogo es la fuente única de verdad (CLAUDE.md §2).
+
 ## Salud
 
 `GET /health` (liveness, no toca la base) y `GET /ready` (readiness, sí la toca). Públicas y fuera del limitador: las sondea el orquestador cada pocos segundos.

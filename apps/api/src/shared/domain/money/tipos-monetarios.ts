@@ -481,6 +481,30 @@ export class Quantity extends ValorDecimal {
     );
   }
 
+  /**
+   * La magnitud SIN su unidad, para multiplicar un costo por unidad de uso.
+   *
+   * ES EL UNICO AGUJERO DELIBERADO DE LA DISCIPLINA DE UNIDADES, y conviene
+   * saber por que existe. La tabla de P0 preveia un tipo `UnitCost` que
+   * heredara la unidad, de modo que `Money / Quantity` diera `$/kg` y
+   * `UnitCost x Quantity` volviera a dar `Money` comprobando la unidad. Ese
+   * tipo nunca se construyo: P3 modelo `costo_neto_uso` como `Money` a secas y
+   * P5 levanto el motor de costeo entero encima. Introducirlo ahora obligaria
+   * a retipar `costing/domain`, que es el codigo donde un error no se ve en
+   * pantalla — el riesgo no guarda ninguna proporcion con la mejora.
+   *
+   * Asi que la conversion se hace explicita, con nombre, y en un solo sitio:
+   * quien la llama esta declarando que el `Money` que va a multiplicar ya esta
+   * expresado POR UNIDAD DE USO de este mismo item. Un `grep magnitude(`
+   * devuelve la lista completa de sitios donde eso se afirma.
+   *
+   * Devuelve `Ratio` y no `Count` porque una cantidad no es un entero: 2,5 kg
+   * es una cantidad perfectamente normal y `Count` la rechazaria.
+   */
+  public magnitude(): Ratio {
+    return Ratio.desdeNucleo(this.nucleo);
+  }
+
   public negated(): Quantity {
     return new Quantity(this.nucleo.negated(), this.#unidad);
   }

@@ -50,6 +50,18 @@ export const CUERPO_DE_CAMBIO_DE_ITEM = z
     grupoId: z.uuid().nullable(),
     confianzaDePrecio: z.enum(['FACTURA', 'ESTIMADO']),
     estado: z.enum(['ACTIVE', 'INACTIVE']),
+    /**
+     * EL INTERRUPTOR DE STOCK, que P6 hace conmutable (SPEC §5).
+     *
+     * `true`: la preparación se produce en lote y está en el inventario.
+     * `false`: al vender se explota su receta y se consumen los insumos.
+     * `null`: el ítem es COMPRADO, donde el interruptor no significa nada.
+     *
+     * Se puede cambiar, y cambiarlo NO reescribe el pasado: los movimientos ya
+     * registrados siguen siendo hechos. Lo que cambia es hasta dónde baja el
+     * consumo de las ventas que se registren a partir de entonces.
+     */
+    llevaStock: z.boolean().nullable(),
   })
   .strict();
 

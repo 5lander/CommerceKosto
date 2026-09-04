@@ -90,6 +90,7 @@ export interface DatosDeCambioDeItem {
   readonly grupoId: ItemGroupId | null;
   readonly confianzaDePrecio: ConfianzaDePrecio;
   readonly estado: EstadoDeCatalogo;
+  readonly llevaStock: boolean | null;
 }
 
 export class ActualizarItem {
@@ -115,7 +116,11 @@ export class ActualizarItem {
       nombre: datos.nombre,
       tipo: actual.tipo === 'PRODUCIDO' ? 'PRODUCIDO' : 'COMPRADO',
       rendimiento: datos.rendimiento,
-      llevaStock: actual.llevaStock,
+      // EL INTERRUPTOR DE STOCK SÍ SE PUEDE CAMBIAR (P6), y `problemaDeItem`
+      // sigue exigiendo lo mismo que al crear: obligatorio en una preparación,
+      // prohibido en un comprado. Es la guarda del CHECK
+      // `item_keeps_stock_solo_en_producido`.
+      llevaStock: datos.llevaStock,
     });
 
     await this.deps.repositorio.actualizarItem({
@@ -126,6 +131,7 @@ export class ActualizarItem {
       grupoId: datos.grupoId,
       confianzaDePrecio: datos.confianzaDePrecio,
       estado: datos.estado,
+      llevaStock: datos.llevaStock,
     });
 
     await this.deps.auditoria.record({

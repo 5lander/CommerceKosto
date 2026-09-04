@@ -43,11 +43,32 @@ La prueba **falla si no hay pooler**, no se salta: una prueba de seguridad que s
 | Semáforo de reposición | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Costos y márgenes | ✅ | ✅ | ✅ su ubicación | ❌ | configurable |
 | Compras y recepción | ✅ | ✅ | ✅ su ubicación | ✅ su ubicación | ❌ |
+| **Saldo de inventario** *(P6)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
+| **Libro de movimientos** *(P6)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
+| **Registrar producción** *(P6)* | ✅ | ✅ | ✅ su ubicación | ❌ | ❌ |
 | Conteo físico | ✅ | ✅ | ✅ su ubicación | ✅ **a ciegas** | ❌ |
 | Propagar recetas | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Suscripción y eliminar company | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 **El filtrado se implementa como proyecciones distintas por rol en la API**, no como filtro sobre una respuesta completa.
+
+### Por qué `BODEGA` registra compras y no puede ver el saldo *(P6)*
+
+Las dos filas parecen contradecirse hasta que se escribe la aritmética:
+
+```
+saldo = inicial + compras − consumo
+```
+
+`BODEGA` conoce el inicial y las compras **porque las registra él**. Con el saldo delante despeja el consumo, y `consumo ÷ unidades vendidas` **es** la cantidad de la receta. La fila «recetas y cantidades ❌» no se sostiene sin esta.
+
+Tiene tres consecuencias que valen para todo endpoint futuro que toque el libro:
+
+1. `inventory.read` **no** se le concede; `inventory.write` e `inventory.transfer`, sí.
+2. **Ninguna escritura devuelve el saldo resultante.** Un `POST` que responda «nuevo saldo: 12,4 kg» filtra lo mismo que un `GET`. Las escrituras del libro responden `{ "id": … }`.
+3. El **semáforo de reposición** —que sí le corresponde— necesita el punto de reorden, que sale del consumo teórico de SPEC §18. Llega en P8; P6 dejó los permisos repartidos para que sea el único dato que reciba.
+
+Hay guardián que lo mide: `docs/pasos/P6/evidencia/guardian-2-confidencialidad-bodega.txt` rompe las dos primeras de la forma en que alguien lo haría de buena fe —«si puede escribir, que pueda leer lo que escribió»— y las tres pruebas caen.
 
 ## Back office
 

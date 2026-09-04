@@ -395,6 +395,116 @@ Medido con 200 productos y 1.600 líneas: `Bitmap Index Scan` con 5 buffers y 0,
 
 ---
 
+## Lo que añade P6 — el libro mayor de inventario
+
+```mermaid
+erDiagram
+    company               ||--o{ inventory_movement : "toda fila lleva tenant"
+    location              ||--o{ inventory_movement : "el saldo existe POR UBICACION"
+    item                  ||--o{ inventory_movement : "de este item"
+    inventory_movement_type ||--o{ inventory_movement : "que hace al saldo"
+    purchase_article      ||--o{ inventory_movement : "solo en COMPRA"
+    inventory_transfer    ||--o{ inventory_movement : "sus DOS patas"
+    inventory_production  ||--o{ inventory_movement : "el alta y sus consumos"
+    inventory_movement    ||--o| inventory_movement : "corrige a (R3)"
+
+    inventory_movement_type {
+        text code PK "los siete del SPEC 7"
+        text direction "ENTRADA SALIDA AMBAS"
+    }
+    inventory_movement {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    location_id FK "R2: no se mezclan"
+        uuid    item_id FK
+        text    type FK
+        text    direction "copia atada por FK COMPUESTA (type, direction)"
+        numeric quantity "CON SIGNO. El saldo es SUM(quantity)"
+        numeric total_cost "MAGNITUD. Obligatorio en COMPRA y PRODUCCION"
+        uuid    purchase_article_id FK "solo en COMPRA: desglose por marca"
+        uuid    transfer_id FK
+        uuid    production_id FK
+        uuid    reverses_movement_id FK "UNICO. Es la correccion de R3"
+        timestamp occurred_at "cuando paso en el negocio"
+        timestamp recorded_at "cuando entro al libro"
+        uuid    created_by FK
+    }
+    inventory_transfer {
+        uuid id PK
+        uuid from_location_id FK "CHECK: distinto de to_location_id"
+        uuid to_location_id FK
+        timestamp occurred_at
+    }
+    inventory_production {
+        uuid    id PK
+        uuid    item_id FK "la preparacion que se da de alta"
+        numeric quantity
+        numeric standard_unit_cost "R10: el precio de referencia"
+        numeric standard_total "lo que vale el alta"
+        numeric real_total "lo que costaron los insumos"
+    }
+```
+
+### No hay campo `stock`, y no lo va a haber
+
+El saldo de un ítem en una ubicación es `SUM(quantity)` sobre el libro, y nada más. Un campo mutable sería un segundo número capaz de discrepar, y cuando discrepara nadie sabría cuál de los dos es el bueno. El libro append-only siempre puede decir **por qué** el saldo es el que es.
+
+Se comprueba en las dos direcciones: hay una prueba que reconstruye el saldo plegando los movimientos **crudos** en TypeScript —sin pasar por el repositorio— y exige que coincida hasta el último dígito con el `SUM` de la consulta. Es el criterio de aceptación de P6.
+
+### La cantidad lleva signo, y la dirección viaja en la fila
+
+`quantity` es positiva si entra y negativa si sale. Eso convierte el saldo en una suma y hace que R3 sea literal: corregir es `negated()`.
+
+El precio de esa comodidad es que ahora se puede escribir al revés, y una `COMPRA` negativa es un saldo equivocado perfectamente plausible. Lo cierran tres piezas encadenadas:
+
+| | |
+|---|---|
+| `CHECK` `..._signo_segun_direccion` | cruza `direction` con el signo de `quantity` |
+| columna `direction` | porque **un `CHECK` no puede consultar otra tabla** |
+| FK **compuesta** `(type, direction)` | para que esa copia no pueda discrepar de su catálogo |
+
+Sin la tercera la primera sería burlable: bastaría declarar `('COMPRA', 'SALIDA')`. Es el mismo mecanismo con el que P3 ató el artículo de compra a su ítem. Razonado en **ADR-009**.
+
+**La única excepción está acotada a la corrección**: el `CHECK` se salta la comprobación exactamente cuando `reverses_movement_id` no es nulo. Corregir una `COMPRA` produce una `COMPRA` negativa —tiene que ser del mismo tipo o `compras_del_mes` no se cancelaría— y su cantidad no la escribe nadie: se deriva.
+
+### Se guarda el importe TOTAL, no el unitario
+
+Al comprar, el hecho es la factura. Reconstruirla como `cantidad × costo_unitario` obliga a una división previa cuyo redondeo pierde centavos, y `compras_del_mes` (SPEC §16) dejaría de cuadrar con lo que el cliente pagó. El unitario sigue siendo calculable; no se guarda porque un derivado guardado es un segundo sitio donde el número puede discrepar.
+
+`total_cost` es **magnitud sin signo**: el sentido lo lleva la cantidad.
+
+### El movimiento no guarda la unidad de uso
+
+Sería un segundo sitio donde la unidad podría discrepar de la del ítem. Y no hace falta: **`ActualizarItem` no permite cambiar `unit_of_use`** desde P2 —cambiarla convertiría 200 «g» históricos en 200 «kg» sin tocar una fila—, así que no puede derivar.
+
+### `PRODUCCION` es bidireccional, y lo que la protege no es el signo
+
+Una producción mueve el libro en los dos sentidos a la vez: da de alta la preparación y consume sus insumos. Las dos mitades son el mismo hecho, así que comparten `production_id`, y un `CHECK` exige que todo movimiento `PRODUCCION` lo tenga. Lo mismo con las dos patas de una transferencia y `transfer_id`.
+
+**Efecto secundario buscado:** como el alta lleva el costo estándar y los consumos el real, la suma de los importes de los movimientos `PRODUCCION` de un lote **es** la varianza. No hay que reconstruirla desde ningún sitio.
+
+### Append-only en tres capas, igual que `audit_log`
+
+1. `REVOKE UPDATE, DELETE, TRUNCATE` para `costeo_app`
+2. Trigger `BEFORE ... FOR EACH STATEMENT` con la `rechazar_mutacion()` de P0 — **de sentencia y no de fila**, porque con `FORCE ROW LEVEL SECURITY` un `DELETE` de la dueña afecta a cero filas y un trigger de fila nunca llegaría a dispararse
+3. `audit:forbidden`, que rompe el build en el editor
+
+Las tres cubren también `inventory_transfer` e `inventory_production`: son cabeceras de hechos que ya están en el libro.
+
+### Los índices tienen su consulta delante
+
+| Índice | Consulta |
+|---|---|
+| `(company_id, location_id, occurred_at)` | la agregación del saldo de una ubicación |
+| `(company_id, location_id, item_id, occurred_at)` | el libro paginado de un ítem |
+| `(company_id, transfer_id)` · `(company_id, production_id)` | recuperar las patas de un hecho |
+
+Medido con **1,2 millones de movimientos** en la tabla y 12.000 en la ubicación consultada: `Index Scan` en las dos, p95 de **60,8 ms** contra 300 de presupuesto. El plan está en `docs/pasos/P6/evidencia/explain-analyze.txt`, y hay una prueba que **falla ante un `Seq Scan`**.
+
+**Un detalle que costó descubrir y quedó escrito en la prueba:** con una sola ubicación en la tabla, PostgreSQL elige `Seq Scan` — correctamente, porque la tabla entera es el resultado. La prueba siembra 19 ubicaciones de ruido para que el filtro tenga algo que descartar. Sin eso, el check del plan no medía nada.
+
+---
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -405,7 +515,7 @@ Medido con 200 productos y 1.600 líneas: `Bitmap Index Scan` con 5 buffers y 0,
 | **P3** | `reference_price` + `reference_price_origin`, `reference_price_status`. **`company_settings` se adelantó a P1** | ✅ |
 | **P4** | `product`, `product_location`, `combo_component`, `recipe`, `recipe_line`, `recipe_propagation`, `recipe_propagation_target` + 5 catálogos | ✅ |
 | **P5** | **Ninguna tabla nueva.** El motor es dominio puro: añade `product.packaging_item_id`, un índice y el permiso `costing.read` | ✅ |
-| P6 | `inventory_movement`, `inventory_balance` (proyección), `production_batch` | ⬜ |
+| **P6** | `inventory_movement`, `inventory_transfer`, `inventory_production` + `inventory_movement_type`. **No hay `inventory_balance`**, y era lo previsto: el saldo es una agregación sobre el libro, no una tabla — R3 | ✅ |
 | P7 | `period`, `physical_count`, `physical_count_line` | ⬜ |
 | P8 | vistas materializadas de período cerrado | ⬜ |
 | P10 | `import_job`, `import_row` | ⬜ |
@@ -413,7 +523,7 @@ Medido con 200 productos y 1.600 líneas: `Bitmap Index Scan` con 5 buffers y 0,
 
 ## Índices
 
-Ninguno de los de `CLAUDE.md` §5 aplica todavía —los de inventario y precios llegan con sus consultas—: **ningún índice sin consulta que lo justifique.**
+**Los de `CLAUDE.md` §5 están todos puestos desde P6**, cada uno con su consulta delante: **ningún índice sin consulta que lo justifique.** Los dos últimos que faltaban —los de movimientos— llegaron con el libro.
 
 `audit_log` lleva dos, con consumidor concreto en P11: `(at DESC)` para el listado cronológico y `(correlation_id)` para reconstruir una petición entera.
 
@@ -444,3 +554,8 @@ Los de P1, todos con su consulta delante:
 | **`recipe(company_id, location_id, valid_from DESC)`** | **P5:** TODAS las recetas vigentes de una ubicación, para costear la carta de una vez. Sin él, `Seq Scan` |
 | `recipe_line(company_id, recipe_id)` · `(recipe_id, item_id)` único | Las líneas de una receta; un ítem no se repite en la misma |
 | `recipe_propagation(company_id, product_id, propagated_at DESC)` | Las propagaciones de un producto, de la más reciente |
+| **`inventory_movement(company_id, location_id, occurred_at)`** | **P6, y es de §5:** «movimientos de una ubicación en un rango de fechas». Es el que usa la agregación del saldo |
+| **`inventory_movement(company_id, location_id, item_id, occurred_at)`** | **P6, y es de §5:** «saldo actual de un ítem en una ubicación». Lo usa el libro paginado |
+| `inventory_movement(company_id, transfer_id)` · `(company_id, production_id)` | Recuperar las dos patas de una transferencia o los movimientos de un lote |
+| `inventory_movement(reverses_movement_id)` único | Es la restricción, no una optimización: **un movimiento se corrige una sola vez** |
+| `inventory_transfer(company_id, occurred_at DESC)` · `inventory_production(company_id, location_id, occurred_at DESC)` | El historial de transferencias y de lotes |

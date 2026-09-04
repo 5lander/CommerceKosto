@@ -33,7 +33,8 @@ import type {
   RecetaLeida,
   RecetaVigenteLeida,
 } from '../ports/repositorio-de-recetas.port';
-import { exigirUbicacionEnAlcance, type DependenciasDeRecetas } from './recetas';
+import { exigirUbicacionEnAlcance } from '../../../iam/application/casos-de-uso/validar-sesion';
+import type { DependenciasDeRecetas } from './recetas';
 
 export interface CartaDeUbicacion {
   readonly productos: readonly ProductoLeido[];

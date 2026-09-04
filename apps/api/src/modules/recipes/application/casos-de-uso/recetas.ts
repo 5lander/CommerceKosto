@@ -27,13 +27,12 @@ import type {
   RecipeId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { LeerItem } from '../../../catalog/application/casos-de-uso/items';
-import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import { cicloAlGuardar, CicloEnRecetaError } from '../../domain/ciclos';
 import {
-  ProductoNoEncontradoError,
-  RecetaInvalidaError,
-  UbicacionFueraDeAlcanceError,
-} from '../../domain/errores';
+  exigirUbicacionEnAlcance,
+  type SesionActiva,
+} from '../../../iam/application/casos-de-uso/validar-sesion';
+import { cicloAlGuardar, CicloEnRecetaError } from '../../domain/ciclos';
+import { ProductoNoEncontradoError, RecetaInvalidaError } from '../../domain/errores';
 import type {
   DestinoDeReceta,
   LineaParaGuardar,
@@ -48,23 +47,6 @@ export interface DependenciasDeRecetas {
   readonly leerItem: LeerItem;
   readonly auditoria: AuditLogPort;
   readonly reloj: Reloj;
-}
-
-/**
- * Comprueba que la ubicación está en el alcance de quien pregunta.
- *
- * ES LA ESCALADA HORIZONTAL DE P1 APLICADA A RECETAS. RLS garantiza que no se
- * vean recetas de otra company; no sabe nada de que un `GERENTE_LOCAL` solo
- * puede tocar la suya. Esa mitad se decide aquí, con `sesion.alcance`, que es
- * una unión: o «company entera» o «esta lista».
- */
-export function exigirUbicacionEnAlcance(sesion: SesionActiva, locationId: LocationId): void {
-  if (sesion.alcance.clase === 'company') {
-    return;
-  }
-  if (!sesion.alcance.ids.includes(locationId)) {
-    throw new UbicacionFueraDeAlcanceError();
-  }
 }
 
 export class CrearProducto {

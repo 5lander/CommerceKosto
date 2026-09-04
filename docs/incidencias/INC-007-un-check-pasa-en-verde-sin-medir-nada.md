@@ -5,8 +5,8 @@
 | **Fecha** | 2026-08-27 |
 | **Paquete** | P0 |
 | **Área** | build |
-| **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava se cazo en un minuto, y por que se cazo esta escrito abajo |
-| **Recurrencias** | **8** |
+| **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
+| **Recurrencias** | **9** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -128,6 +128,62 @@ Tiene su prueba del guardian: se vuelve a meter el retroceso en `tools/audit/mig
 
 **Esta es la primera prevencion de INC-007 que ataca la CAUSA y no el sintoma.** Las siete anteriores enseñaban a desconfiar del verde; esta impide que el fallo se escriba.
 
+## Caso 9 (P6) — la regla llevaba desde P0 sin mirar una sola migración
+
+**Lo encontró la regla del caso 8**, la que dice que hay que contar en cuántos sitios falla un check. Sin ella habría pasado por un guardián en verde.
+
+### Qué pasó
+
+P6 añade `inventory_movement` a `TABLAS_APPEND_ONLY`, lo que genera dos reglas: una para el cliente de Prisma y otra para SQL. Se forzó el guardián, como INC-007 exige al ampliar el alcance de un check, con **dos** violaciones deliberadas por regla:
+
+- `tx.inventoryMovement.update(...)` y `.deleteMany(...)` en un archivo de código
+- `UPDATE inventory_movement` y `DELETE FROM inventory_movement` en el bloque `MANUAL` de la migración
+
+El check falló. En rojo, con su mensaje, señalando archivo y línea:
+
+```
+audit:forbidden  FALLO — 2 infraccion(es)
+```
+
+**Dos, y tenían que ser cuatro.** La regla SQL no apareció por ninguna parte.
+
+### La causa
+
+El glob decía `prisma/migrations/**/*.sql`. El escáner compara rutas **relativas a la raíz del repositorio**, y las migraciones están en `apps/api/prisma/migrations/...`. El patrón está anclado al principio, así que no casaba con nada.
+
+La consecuencia es más vieja que P6: **desde P0, dos reglas no habían examinado una sola migración.**
+
+| Regla | Desde | Qué dejó de mirar |
+|---|---|---|
+| `no-select-star` | P0 | Un `SELECT *` en cualquier migración |
+| `append-only-sql-audit_log` | P0 | Un `UPDATE`/`DELETE` sobre `audit_log` en cualquier migración |
+
+Ninguna de las dos avisó nunca, porque nunca tuvo nada que avisar. Y el contador de archivos del informe —`OK — 30 reglas sobre 189 archivos`— tampoco chirriaba: 189 archivos son muchos, y los 14 que faltaban no se echan de menos mirando un número grande. **Es el mismo engaño del caso 3**, donde «135 archivos» tranquilizaba mientras 85 no los miraba nadie.
+
+### El arreglo
+
+Una constante compartida por las dos reglas, con su explicación al lado:
+
+```js
+const MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql';
+```
+
+Segunda pasada del guardián: **4 infracciones en 4 sitios**. Y tras revertir las violaciones:
+
+```
+audit:forbidden  OK — 30 reglas sobre 203 archivos
+```
+
+**203 y no 189.** Los catorce de diferencia son las migraciones, escaneadas por primera vez. Ese número es la medida de que el arreglo hizo algo — y es, otra vez, el contador de archivos el que lo dice.
+
+### Lo que añade sobre el caso 8
+
+El caso 8 estableció que hay que contar los sitios donde un check falla. Este añade **dónde mirar cuando el número no cuadra**: casi siempre es el alcance, no la lógica. Un patrón que no casa con nada se comporta exactamente igual que un patrón que casa y no encuentra infracciones, y las dos cosas producen la misma línea verde.
+
+**Y una consecuencia práctica que ya está aplicada:** el contador de archivos examinados de `audit:forbidden` no es decorativo. Cuando una regla cambia de alcance, ese número tiene que moverse. Si no se mueve, el alcance no cambió.
+
+**Evidencia completa:** `docs/pasos/P6/evidencia/guardian-1-append-only.txt`.
+
 ## Prevención
 
 - [x] ¿Se puede convertir en una verificación de `npm run audit`? **No en el sentido habitual, y por eso existe la prueba del guardián.** Ningún check puede verificarse a sí mismo: por cada uno de los once se introduce a mano una violación deliberada, se captura la **salida de fallo literal**, se revierte, y esa salida vive en `docs/pasos/P0/evidencia/` y en `docs/pasos/P0/AUDITORIA-RESULTADO.md`. **Sin las once salidas capturadas, P0 no cierra** — es criterio de commit, no un extra.
@@ -151,7 +207,7 @@ Momentos ya identificados en los que esto toca hacerse:
 |---|---|---|
 | **P1** | Regla nueva de `audit:forbidden`: cliente de BD fuera de la capa de tenant | `audit:forbidden` |
 | **P5** | Reglas nuevas: M11 en `audit:migrations` y `sin-caracteres-de-control` en `audit:forbidden` | Las dos, forzadas y capturadas en `docs/pasos/P5/evidencia/` |
-| **P6** | `inventory_movement` entra en la lista de tablas append-only; migraciones nuevas | `audit:forbidden`, `audit:migrations` |
+| ~~**P6**~~ | ~~`inventory_movement` entra en la lista de tablas append-only~~ | ✅ **Hecho, y encontro el caso 9** |
 | **P12** | Workspace `apps/web`: globs, `tsconfig`, reglas de capa y de complejidad nuevas | **Los once**, sobre el workspace nuevo |
 | Cualquiera | Se añade una carpeta que no casa con los globs existentes | Los checks cuyo glob se amplió |
 | Cualquiera | Se sube una herramienta de auditoría a un major nuevo | Los checks que la usan: las claves de configuración cambian de nombre y de semántica sin avisar (caso 5) |

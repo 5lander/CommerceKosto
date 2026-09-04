@@ -1,0 +1,51 @@
+GUARDIAN 1 — el append-only de `inventory_movement` (R3)
+
+AMPLIAR EL ALCANCE DE UN CHECK EXIGE VOLVER A FORZAR SU GUARDIAN. Lo dice
+INC-007, y esta vez encontro algo.
+
+VIOLACION DELIBERADA, en dos sitios:
+  1. un archivo con `tx.inventoryMovement.update(...)` y `.deleteMany(...)`
+  2. `UPDATE inventory_movement` y `DELETE FROM inventory_movement` dentro del
+     bloque MANUAL de la migracion de P6
+
+PRIMERA PASADA — 2 infracciones, y debian ser 4:
+
+  audit:forbidden  FALLO - 2 infraccion(es)
+
+    [append-only-cliente-inventory_movement]
+       apps/api/src/.../guardian-temporal.ts:3  await tx.inventoryMovement.update(...)
+       apps/api/src/.../guardian-temporal.ts:4  await tx.inventoryMovement.deleteMany(...)
+
+  La regla SQL no aparecio. No fallo el check: fallo en MENOS SITIOS de los que
+  debia, que es justo el sintoma que P5 anadio a INC-007.
+
+LA CAUSA. El glob decia `prisma/migrations/**/*.sql`, anclado a la raiz del
+repositorio, y las rutas que el escaner compara son relativas a esa raiz:
+`apps/api/prisma/migrations/...`. El patron no casaba con NADA.
+
+  Consecuencia: DESDE P0, dos reglas —`no-select-star` y
+  `append-only-sql-audit_log`— no habian examinado una sola migracion. Nunca lo
+  avisaron, porque nunca tuvieron nada que avisar.
+
+ARREGLO. Una constante `MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql'`
+compartida por las dos reglas, con la explicacion al lado.
+
+SEGUNDA PASADA — 4 infracciones en 4 sitios:
+
+  audit:forbidden  FALLO - 4 infraccion(es)
+
+    [append-only-cliente-inventory_movement]
+       apps/api/src/.../guardian-temporal.ts:3
+       apps/api/src/.../guardian-temporal.ts:4
+    [append-only-sql-inventory_movement]
+       apps/api/prisma/migrations/20260904203551_p6_inventario/migration.sql:373
+       apps/api/prisma/migrations/20260904203551_p6_inventario/migration.sql:374
+
+TRAS REVERTIR:
+
+  audit:forbidden  OK - 30 reglas sobre 203 archivos
+
+  203 y no 189. Los 14 archivos de diferencia son las migraciones, que ahora se
+  escanean por primera vez. Es la medida de que el arreglo hizo algo.
+
+INC-007 sube a NUEVE recurrencias.

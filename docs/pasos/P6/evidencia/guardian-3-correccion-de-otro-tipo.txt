@@ -1,0 +1,40 @@
+GUARDIAN 3 — la correccion conserva el TIPO del movimiento que anula (R3)
+
+VIOLACION DELIBERADA: en `domain/correccion.ts`, la correccion pasa a emitirse
+como `AJUSTE` en vez de conservar el tipo del original.
+
+Es la alternativa comoda y la que primero se ocurre: `AJUSTE` es bidireccional,
+asi que no pelea con la regla de signos y no hace falta ninguna excepcion en el
+`CHECK` de la base. Este guardian existe para dejar por escrito por que se
+descarto.
+
+SALIDA (unitarias + integracion de inventario):
+
+   x R3 > la correccion invierte el signo y CONSERVA el tipo
+     -> expected 'AJUSTE' to be 'COMPRA'
+
+   x inventario > R3 > la correccion deja el saldo como estaba, sin borrar la fila original
+     -> expected [ 'AJUSTE', 'COMPRA' ] to deeply equal [ 'COMPRA', 'COMPRA' ]
+
+   x inventario > R3 > la correccion CONSERVA el tipo, para que Sigma(COMPRA) del mes se cancele sola
+     -> expected 4 to be +0
+
+   Tests  3 failed | 71 passed (74)
+
+LO QUE HAY QUE MIRAR AQUI NO ES CUANTAS FALLAN, SINO CUALES NO FALLAN
+
+Siguen en verde, con R3 rota:
+
+  - "el saldo vuelve a cero tras la correccion"
+  - "reconstruir el libro da la misma proyeccion" (el criterio de aceptacion)
+  - las 34 pruebas de transferencia, produccion y confidencialidad
+
+Porque el SALDO cuadra igual: `+10` y `-10` suman cero se llamen como se llamen.
+Lo que NO cuadra es la agregacion POR TIPO, y de ahi sale `compras_del_mes` de
+SPEC 16. Con la correccion emitida como `AJUSTE`, el mes cerraria contando 4
+unidades de compras que nadie hizo, y el food cost real saldria mal sin que
+ningun saldo se moviera.
+
+ES LA MISMA FORMA DE FALLO QUE P5 ENCONTRO CON R7: un invariante que se cumple
+—el saldo— tapando uno que no —el desglose—. El detector no puede ser el numero
+agregado; tiene que ser el que discrimina.

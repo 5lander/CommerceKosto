@@ -32,14 +32,6 @@ export class PropagacionNoEncontradaError extends ErrorDeDominio {
  * quien pregunta **sí** pertenece a la company: lo que le falta es alcance, y
  * decírselo no revela nada que no supiera.
  */
-export class UbicacionFueraDeAlcanceError extends ErrorDeDominio {
-  public override readonly codigo: CodigoDeDominio = 'PERMISO_DENEGADO';
-
-  public constructor() {
-    super('Esa ubicación no está en tu alcance.');
-  }
-}
-
 export class PropagacionYaRevertidaError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
 

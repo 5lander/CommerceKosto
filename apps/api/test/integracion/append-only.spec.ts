@@ -16,7 +16,8 @@
  * silencio. Es el tipo de fallo que solo se descubre cuando hace falta la
  * evidencia y ya no está.
  *
- * En P6 esta misma suite cubrirá `inventory_movement` (regla R3).
+ * P6 la extiende a `inventory_movement`, `inventory_transfer` e
+ * `inventory_production` (R3), con la misma estructura de tres capas.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -175,5 +176,128 @@ describe('audit_log es append-only', () => {
         ),
       ).rejects.toMatchObject({ constraint: 'audit_log_event_type_fkey' });
     });
+  });
+});
+
+/**
+ * `inventory_movement` es append-only — R3, criterio de aceptación de P6.
+ *
+ * Las mismas tres capas que `audit_log`, y por la misma razón de fondo: un
+ * libro que se puede editar no es un libro, es un saldo con historial
+ * decorativo. La diferencia es a quién protege — allí la evidencia de una
+ * auditoría, aquí el número con el que un dueño de restaurante decide comprar.
+ *
+ * SE PRUEBA CONTRA LA TABLA REAL Y VACÍA. No hace falta insertar nada: el
+ * trigger es de SENTENCIA, así que se dispara aunque no haya una sola fila que
+ * afectar. Esa es exactamente la propiedad que se está comprobando.
+ */
+describe('inventory_movement es append-only', () => {
+  let app: Client;
+  let duena: Client;
+
+  beforeAll(async () => {
+    app = new Client({ connectionString: URL_APP });
+    duena = new Client({ connectionString: URL_MIGRATOR });
+    await app.connect();
+    await duena.connect();
+  });
+
+  afterAll(async () => {
+    await app.end();
+    await duena.end();
+  });
+
+  describe('capa 1 — privilegios, para la aplicación', () => {
+    it.each([
+      ['UPDATE', `UPDATE inventory_movement SET quantity = 1`],
+      ['DELETE', 'DELETE FROM inventory_movement'],
+      ['TRUNCATE', 'TRUNCATE inventory_movement'],
+    ])('%s es rechazado por privilegio', async (_operacion, sql) => {
+      await expect(app.query(sql)).rejects.toMatchObject({ code: PRIVILEGIO_DENEGADO });
+    });
+
+    it('la cabecera de una transferencia tampoco se edita', async () => {
+      await expect(
+        app.query(`UPDATE inventory_transfer SET note = 'otra cosa'`),
+      ).rejects.toMatchObject({ code: PRIVILEGIO_DENEGADO });
+    });
+
+    it('ni la de un lote producido', async () => {
+      await expect(
+        app.query(`UPDATE inventory_production SET real_total = 0`),
+      ).rejects.toMatchObject({ code: PRIVILEGIO_DENEGADO });
+    });
+  });
+
+  describe('capa 2 — trigger de sentencia, para la dueña de la tabla', () => {
+    it.each([
+      ['DELETE', 'DELETE FROM inventory_movement'],
+      ['UPDATE', 'UPDATE inventory_movement SET quantity = 1'],
+      ['TRUNCATE', 'TRUNCATE inventory_movement'],
+    ])('la DUEÑA tampoco puede %s: la para el trigger, no el privilegio', async (_op, sql) => {
+      await expect(duena.query(sql)).rejects.toMatchObject({
+        message: expect.stringContaining('append-only'),
+      });
+    });
+
+    it('el mensaje dice qué hacer en su lugar: una fila nueva', async () => {
+      await expect(duena.query('DELETE FROM inventory_movement')).rejects.toMatchObject({
+        message: expect.stringContaining('se corrige con una fila nueva'),
+      });
+    });
+  });
+
+  describe('el signo que la base no deja escribir al revés', () => {
+    /**
+     * Se prueba con la DUEÑA y a propósito.
+     *
+     * La aplicación nunca puede llegar aquí: `conSignoDelTipo` pone el signo
+     * antes, en el dominio. Lo que se comprueba es que la base sostenga la regla
+     * **aunque el código de aplicación falle**, que es la única defensa que no
+     * depende de que nadie se equivoque nunca.
+     */
+    async function insertar(
+      tipo: string,
+      direccion: string,
+      cantidad: string,
+      costoTotal: string | null = null,
+    ): Promise<unknown> {
+      return duena.query(
+        `INSERT INTO inventory_movement
+           (company_id, location_id, item_id, type, direction, quantity, total_cost,
+            occurred_at, created_by)
+         VALUES ($1, $1, $1, $2, $3, $4, $5, now(), $1)`,
+        [randomUUID(), tipo, direccion, cantidad, costoTotal],
+      );
+    }
+
+    it('una COMPRA sin importe se para antes que nada: de ahí sale SPEC §16', async () => {
+      await expect(insertar('COMPRA', 'ENTRADA', '10')).rejects.toMatchObject({
+        constraint: 'inventory_movement_importe_obligatorio',
+      });
+    });
+
+    it('una COMPRA negativa la para el CHECK, no una clave foránea', async () => {
+      await expect(insertar('COMPRA', 'ENTRADA', '-10', '1')).rejects.toMatchObject({
+        constraint: 'inventory_movement_signo_segun_direccion',
+      });
+    });
+
+    it('una MERMA positiva, igual', async () => {
+      await expect(insertar('MERMA', 'SALIDA', '10')).rejects.toMatchObject({
+        constraint: 'inventory_movement_signo_segun_direccion',
+      });
+    });
+
+    it('una cantidad de cero no es un hecho', async () => {
+      await expect(insertar('AJUSTE', 'AMBAS', '0')).rejects.toMatchObject({
+        constraint: 'inventory_movement_cantidad_no_nula',
+      });
+    });
+
+    // LA CLAVE FORÁNEA COMPUESTA `(type, direction)` se prueba en
+    // `inventario.spec.ts`, no aquí: con identificadores inventados salta antes
+    // la clave foránea de `company`, y la prueba pasaría por el motivo
+    // equivocado. Allí hay filas reales contra las que apuntar.
   });
 });

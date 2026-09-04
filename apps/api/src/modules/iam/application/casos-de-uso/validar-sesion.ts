@@ -18,10 +18,11 @@
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import type {
   CompanyId,
+  LocationId,
   SessionId,
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
-import { SesionInvalidaError } from '../../domain/errores';
+import { SesionInvalidaError, UbicacionFueraDeAlcanceError } from '../../domain/errores';
 import { estadoDeSesion } from '../../domain/politica-de-sesion';
 import type { GeneradorDeTokens } from '../ports/generador-de-tokens.port';
 import type {
@@ -59,6 +60,23 @@ export interface SesionActiva {
   readonly companyId: CompanyId;
   readonly permisos: readonly string[];
   readonly alcance: AlcanceDeUsuario;
+}
+
+/**
+ * Comprueba que la ubicacion esta en el alcance de quien pregunta.
+ *
+ * `alcance` es una union: o «la company entera» o «esta lista de ubicaciones».
+ * Un `OWNER` pasa siempre; un `GERENTE_LOCAL` solo por las suyas.
+ *
+ * @throws {UbicacionFueraDeAlcanceError}
+ */
+export function exigirUbicacionEnAlcance(sesion: SesionActiva, locationId: LocationId): void {
+  if (sesion.alcance.clase === 'company') {
+    return;
+  }
+  if (!sesion.alcance.ids.includes(locationId)) {
+    throw new UbicacionFueraDeAlcanceError();
+  }
 }
 
 export class ValidarSesion {

@@ -158,6 +158,7 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
           groupId: datos.grupoId,
           priceConfidence: datos.confianzaDePrecio,
           status: datos.estado,
+          keepsStock: datos.llevaStock,
         },
       });
 

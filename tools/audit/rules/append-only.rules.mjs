@@ -16,13 +16,29 @@
  *      que alcanza tambien al dueno de la tabla
  */
 
+/**
+ * LAS MIGRACIONES VIVEN BAJO `apps/*`, no en la raiz.
+ *
+ * Hasta P6 este glob decia `prisma/migrations/**{@literal /}*.sql`, anclado a la raiz del
+ * repositorio, y las rutas que el escaner compara son relativas a esa raiz:
+ * `apps/api/prisma/migrations/...`. El patron no casaba con NADA, asi que las
+ * dos reglas que lo usan —`no-select-star` y `append-only-sql-*`— llevaban
+ * desde P0 sin examinar una sola migracion.
+ *
+ * NO SE DESTAPO PORQUE EL CHECK ESTUVIERA EN VERDE, sino porque al forzar el
+ * guardian de P6 fallo en DOS sitios cuando debia fallar en cuatro. Es la
+ * novena recurrencia de INC-007 y la segunda seguida del mismo tipo: un check
+ * que falla tampoco esta verificado hasta que se cuenta EN CUANTOS sitios falla.
+ */
+const MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql';
+
 const CODIGO = ['apps/*/src/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
 const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 
 /** Nombre de la tabla en snake_case y su equivalente en el cliente de Prisma. */
 export const TABLAS_APPEND_ONLY = [
   { tabla: 'audit_log', modeloPrisma: 'auditLog', desde: 'P0' },
-  // P6: { tabla: 'inventory_movement', modeloPrisma: 'inventoryMovement', desde: 'P6' },
+  { tabla: 'inventory_movement', modeloPrisma: 'inventoryMovement', desde: 'P6' },
 ];
 
 const MUTACIONES = ['update', 'updateMany', 'delete', 'deleteMany', 'upsert'];
@@ -51,7 +67,7 @@ function reglaSql(entrada) {
       `\\b(?:UPDATE|DELETE\\s+FROM|TRUNCATE(?:\\s+TABLE)?)\\s+"?${entrada.tabla}"?\\b`,
       'gi',
     ),
-    incluye: [...CODIGO, 'prisma/migrations/**/*.sql'],
+    incluye: [...CODIGO, MIGRACIONES],
     // El `down.sql` de la migracion que CREA la tabla necesita poder soltarla;
     // eso es DROP TABLE, no UPDATE/DELETE, asi que no hace falta excepcion.
     excluye: META,

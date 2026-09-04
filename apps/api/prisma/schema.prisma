@@ -138,7 +138,7 @@ model Company {
   /// primer paquete que lo toca, que es este.
   maxLocations Int @default(10) @map("max_locations")
 
-  estado                CompanyStatus       @relation(fields: [status], references: [code])
+  estado                CompanyStatus         @relation(fields: [status], references: [code])
   settings              CompanySettings?
   locations             Location[]
   usuarios              AppUser[]
@@ -154,6 +154,9 @@ model Company {
   recetas               Recipe[]
   lineasDeReceta        RecipeLine[]
   propagaciones         RecipePropagation[]
+  movimientos           InventoryMovement[]
+  transferencias        InventoryTransfer[]
+  producciones          InventoryProduction[]
 
   @@map("company")
 }
@@ -215,7 +218,16 @@ model Location {
   recetas    Recipe[]
   propagados RecipePropagationTarget[]
 
+  movimientos           InventoryMovement[]
+  transferenciasSalida  InventoryTransfer[]   @relation("origen")
+  transferenciasEntrada InventoryTransfer[]   @relation("destino")
+  producciones          InventoryProduction[]
+
   @@unique([companyId, name])
+  /// Clave candidata para las FK COMPUESTAS del libro de inventario: atan cada
+  /// movimiento a la misma company que su ubicacion. RLS filtra lo que se lee,
+  /// no lo que se referencia.
+  @@unique([id, companyId])
   @@index([companyId, status])
   @@map("location")
 }
@@ -269,6 +281,10 @@ model AppUser {
   roles          UserRole[]
   sesiones       Session[]
   preciosCreados ReferencePrice[] @relation("precios_creados")
+
+  movimientos    InventoryMovement[]
+  transferencias InventoryTransfer[]
+  producciones   InventoryProduction[]
 
   @@index([companyId, status])
   @@map("app_user")
@@ -515,17 +531,19 @@ model Item {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  company        Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  tipo           ItemType          @relation(fields: [type], references: [code])
-  unidad         Unit              @relation(fields: [unitOfUse], references: [code])
-  grupo          ItemGroup?        @relation(fields: [groupId], references: [id], onDelete: Restrict)
-  estado         ItemStatus        @relation(fields: [status], references: [code])
-  confianza      PriceConfidence   @relation(fields: [priceConfidence], references: [code])
+  company        Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  tipo           ItemType              @relation(fields: [type], references: [code])
+  unidad         Unit                  @relation(fields: [unitOfUse], references: [code])
+  grupo          ItemGroup?            @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  estado         ItemStatus            @relation(fields: [status], references: [code])
+  confianza      PriceConfidence       @relation(fields: [priceConfidence], references: [code])
   articulos      PurchaseArticle[]
   precios        ReferencePrice[]
   recetas        Recipe[]
   lineasDeReceta RecipeLine[]
-  empaqueDe      Product[]         @relation("empaque")
+  empaqueDe      Product[]             @relation("empaque")
+  movimientos    InventoryMovement[]
+  producciones   InventoryProduction[]
 
   @@unique([companyId, name])
   /// Clave candidata para las FK COMPUESTAS de receta y linea: atan el item a
@@ -565,11 +583,12 @@ model PurchaseArticle {
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  company Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  item    Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  unidad  Unit             @relation(fields: [presentationUnit], references: [code])
-  estado  ItemStatus       @relation(fields: [status], references: [code])
-  precios ReferencePrice[]
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  item        Item                @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  unidad      Unit                @relation(fields: [presentationUnit], references: [code])
+  estado      ItemStatus          @relation(fields: [status], references: [code])
+  precios     ReferencePrice[]
+  movimientos InventoryMovement[]
 
   @@unique([companyId, name])
   /// Clave candidata para la FK COMPUESTA de `reference_price`: sostiene que el
@@ -946,4 +965,171 @@ model RecipePropagationTarget {
 
   @@id([propagationId, locationId])
   @@map("recipe_propagation_target")
+}
+
+// ---------------------------------------------------------------------------
+// P6 — Inventario: el libro mayor append-only.
+//
+// R3: NO EXISTE UN CAMPO `stock`. El saldo de un item en una ubicacion es la
+// suma de sus movimientos y nada mas. Un campo mutable seria un segundo numero
+// capaz de discrepar del libro, y cuando discrepara nadie sabria cual de los
+// dos es el bueno.
+//
+// R2: el saldo existe POR UBICACION. Ninguna consulta suma dos ubicaciones
+// salvo las vistas consolidadas explicitas de P9.
+// ---------------------------------------------------------------------------
+
+/// Los siete tipos de movimiento del SPEC 7, con lo que cada uno hace al saldo.
+///
+/// `direction` NO ES DECORATIVA: `inventory_movement` la repite y una clave
+/// foranea COMPUESTA `(type, direction)` impide que discrepen, de modo que el
+/// CHECK que cruza direccion con signo puede vivir en la fila del movimiento
+/// —donde un CHECK no puede consultar otra tabla—. Mismo mecanismo con el que
+/// P3 ato el articulo de compra a su item.
+///
+/// `AMBAS` la tienen solo `AJUSTE`, que existe para mover el saldo en la
+/// direccion que haga falta, y `PRODUCCION`, que da de alta la preparacion y
+/// consume sus insumos en el mismo hecho.
+model InventoryMovementType {
+  code      String @id
+  direction String
+
+  movimientos InventoryMovement[]
+
+  @@unique([code, direction])
+  @@map("inventory_movement_type")
+}
+
+/// El libro mayor. APPEND-ONLY EN TRES CAPAS, igual que `audit_log`:
+///   1. Privilegio: REVOKE UPDATE, DELETE, TRUNCATE para costeo_app
+///   2. Trigger BEFORE UPDATE OR DELETE OR TRUNCATE ... FOR EACH STATEMENT,
+///      que alcanza tambien al dueno de la tabla
+///   3. `audit:forbidden`, que avisa en el editor antes de llegar a la base
+model InventoryMovement {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+
+  locationId String @map("location_id") @db.Uuid
+  itemId     String @map("item_id") @db.Uuid
+
+  type      String
+  /// Copia de la direccion del tipo, atada por FK compuesta. Ver arriba.
+  direction String
+
+  /// CON SIGNO: positivo entra, negativo sale. El saldo es `SUM(quantity)`.
+  quantity Decimal @db.Decimal(24, 12)
+
+  /// El dinero que se movio, SIN signo — el sentido lo lleva `quantity`.
+  ///
+  /// SE GUARDA EL TOTAL Y NO EL COSTO UNITARIO, y es deliberado: al comprar, el
+  /// hecho es la factura. Reconstruirla como `cantidad x costo_unitario` obliga
+  /// a una division previa cuyo redondeo pierde centavos, y `compras_del_mes`
+  /// (SPEC 16) dejaria de cuadrar con lo que el cliente pago.
+  totalCost Decimal? @map("total_cost") @db.Decimal(24, 12)
+
+  /// Para una COMPRA: en que presentacion se compro. Es lo que permite el
+  /// desglose por marca del SPEC 7, que es vista informativa y no saldo.
+  purchaseArticleId String? @map("purchase_article_id") @db.Uuid
+
+  /// Las dos patas de una transferencia comparten esta fila.
+  transferId   String? @map("transfer_id") @db.Uuid
+  /// El alta y los consumos de un lote comparten esta.
+  productionId String? @map("production_id") @db.Uuid
+
+  /// El movimiento que este anula (R3). Un movimiento con esto relleno es una
+  /// correccion, y es el UNICO caso en que el signo puede contradecir a la
+  /// direccion del tipo — porque su cantidad no la escribe nadie, se deriva.
+  reversesMovementId String? @unique @map("reverses_movement_id") @db.Uuid
+
+  /// Cuando ocurrio en el negocio. Es la fecha que manda para todo informe.
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  /// Cuando entro al libro. Nunca coinciden del todo, y la diferencia importa
+  /// en una auditoria: dice cuanto se tardo en registrar.
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  createdBy String  @map("created_by") @db.Uuid
+  note      String?
+
+  company    Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  location   Location              @relation(fields: [locationId, companyId], references: [id, companyId], onDelete: Restrict)
+  item       Item                  @relation(fields: [itemId, companyId], references: [id, companyId], onDelete: Restrict)
+  tipo       InventoryMovementType @relation(fields: [type, direction], references: [code, direction])
+  articulo   PurchaseArticle?      @relation(fields: [purchaseArticleId, itemId], references: [id, itemId], onDelete: Restrict)
+  transfer   InventoryTransfer?    @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  produccion InventoryProduction?  @relation(fields: [productionId], references: [id], onDelete: Restrict)
+  corrige    InventoryMovement?    @relation("correccion", fields: [reversesMovementId], references: [id], onDelete: Restrict)
+  correccion InventoryMovement?    @relation("correccion")
+  autor      AppUser               @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  /// CLAUDE.md 5: "movimientos de una ubicacion en un rango de fechas".
+  @@index([companyId, locationId, occurredAt])
+  /// CLAUDE.md 5: "saldo actual de un item en una ubicacion".
+  @@index([companyId, locationId, itemId, occurredAt])
+  @@index([companyId, transferId])
+  @@index([companyId, productionId])
+  @@map("inventory_movement")
+}
+
+/// La cabecera de una transferencia entre ubicaciones.
+///
+/// Existe para que las dos patas se puedan encontrar entre si y para guardar lo
+/// que no cabe repetido en las dos: quien la hizo y por que. El invariante —que
+/// el par sume cero— lo sostiene el dominio y lo comprueba una prueba.
+model InventoryTransfer {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+
+  fromLocationId String   @map("from_location_id") @db.Uuid
+  toLocationId   String   @map("to_location_id") @db.Uuid
+  occurredAt     DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String   @map("created_by") @db.Uuid
+  note           String?
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  origen  Location @relation("origen", fields: [fromLocationId, companyId], references: [id, companyId], onDelete: Restrict)
+  destino Location @relation("destino", fields: [toLocationId, companyId], references: [id, companyId], onDelete: Restrict)
+  autor   AppUser  @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  movimientos InventoryMovement[]
+
+  @@index([companyId, occurredAt(sort: Desc)])
+  @@map("inventory_transfer")
+}
+
+/// Un lote producido — R10.
+///
+/// LOS DOS COSTOS VIVEN AQUI, Y ESA ES LA REGLA ENTERA. El movimiento de alta
+/// se valora al ESTANDAR, para que un plato no cambie de costo segun cuanto se
+/// produjo ese dia. El costo REAL del lote se guarda al lado, y su diferencia
+/// es la varianza — la senal de que la receta o el precio estandar se quedaron
+/// viejos, que se pierde entera si se valora al costo real.
+model InventoryProduction {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+
+  locationId String @map("location_id") @db.Uuid
+  /// El item PRODUCIDO que se da de alta.
+  itemId     String @map("item_id") @db.Uuid
+
+  quantity Decimal @db.Decimal(24, 12)
+
+  standardUnitCost Decimal @map("standard_unit_cost") @db.Decimal(24, 12)
+  standardTotal    Decimal @map("standard_total") @db.Decimal(24, 12)
+  realTotal        Decimal @map("real_total") @db.Decimal(24, 12)
+
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String   @map("created_by") @db.Uuid
+  note       String?
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId, companyId], references: [id, companyId], onDelete: Restrict)
+  item     Item     @relation(fields: [itemId, companyId], references: [id, companyId], onDelete: Restrict)
+  autor    AppUser  @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  movimientos InventoryMovement[]
+
+  @@index([companyId, locationId, occurredAt(sort: Desc)])
+  @@map("inventory_production")
 }
