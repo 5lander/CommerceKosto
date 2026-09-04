@@ -8,55 +8,60 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P3 cerrado**. El siguiente es P4 (recetas, productos y combos)
-**Fase del protocolo:** CIERRE de P3
-**Último commit:** `P3: Precios de referencia con vigencia` (P2 fue `1cd10a5`, P1 `3555c9c`)
+**Paquete en curso:** ninguno — **P4 cerrado. LA CORRIDA AUTÓNOMA P0 → P4 TERMINÓ.**
+**Fase del protocolo:** CIERRE de P4
+**Último commit:** `P4: Recetas · productos · combos` (P3 fue `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
 **Fecha de última actualización:** 2026-09-04
 
 ### Dónde se retoma exactamente
 
-**P0, P1, P2 y P3 están cerrados y commiteados.** Lo siguiente es **P4 — recetas, productos y combos**, el último de esta corrida autónoma.
+**Cinco paquetes cerrados y commiteados: P0, P1, P2, P3 y P4.** La corrida autónoma aprobada terminó aquí. **P5 —el motor de costeo— necesita confirmación del usuario antes de empezar.**
 
-**Lo que P4 hereda y no tiene que volver a construir**
+**Lo que P5 hereda listo, y es casi todo lo que necesita**
 
-- `TenantTransaction.run(company, …)` — todo acceso a datos va por ahí.
-- `SesionActiva` con `companyId`, `permisos` y `alcance` (la receta **sí** es por ubicación: `alcance` importa).
-- `CatalogModule` exporta `LeerItem`, `ListarItems` y `ListarArticulos`. **P4 lee ítems por ahí, nunca por sus tablas.**
-- `PricingModule` exporta `CostoDeItem`: el costo por unidad de uso a una fecha, con la cadena de SPEC §12 ya aplicada.
-- `Money`, `Ratio`, `Count`, `Quantity` y la aritmética decimal exacta.
-- El patrón `.strict()` y el `Record` exhaustivo de códigos de dominio.
+| Pieza | De dónde | Qué da |
+|---|---|---|
+| `Money`, `Ratio`, `Count`, `Quantity` | P0 | Aritmética decimal exacta, sin punto flotante |
+| `costoDelItem` (SPEC §12) | P3 | Precio neto, costo bruto y neto de uso, sobrecosto de merma |
+| `CostoDeItem` (caso de uso) | P3 | El costo por unidad de uso de un ítem **a una fecha** |
+| `costoDeLinea` (SPEC §13, R4) | P4 | La base AP/EP, con los dos casos probados |
+| `LeerReceta` | P4 | La receta vigente de un producto en una ubicación **a una fecha** |
+| `LeerAjustes` | P3 | Los parámetros de D3, ninguno en el código |
 
-**Lo que P4 tiene que acordarse de hacer**
+**El motor de costeo puede ser dominio puro** porque todo lo que necesita se le puede entregar resuelto: no tiene que consultar nada.
+
+**Lo que P5 tiene que hacer, del plan**
 
 | # | Qué | Por qué |
 |---|---|---|
-| 1 | **R9: ciclos rechazados AL GUARDAR, no al calcular** | CLAUDE.md §6. Presupuesto p95 de 150 ms |
-| 2 | **La base AP/EP se modela ya**, aunque el cálculo llegue en P5 | R4 |
-| 3 | **R11: propagación con previsualización, permiso de company y registro reversible** | Y su ADR-007 |
-| 4 | **La receta es por par (producto, ubicación)** y versionada por vigencia | SPEC §9 |
-| 5 | **Volver a forzar el fallo de los checks afectados** al añadir tablas o reglas | INC-007, siete recurrencias |
-| 6 | `createMany` en tablas con `SELECT` restrictivo · el `down` no borra filas referenciadas | INC-010 · INC-011 |
+| 1 | **R7: la conciliación da exactamente 0**, como prueba automatizada en cada build | Es el criterio más duro del proyecto |
+| 2 | **R6: `margen_contribucion_pct + food_cost_pct = 1`** | CLAUDE.md §6 |
+| 3 | **R14: `venta_neta = pvp / (1 + iva_venta)`** | El food cost va sobre venta neta |
+| 4 | **R12: la merma no se cobra dos veces** | El 2 % es solo lo que ningún rendimiento explica |
+| 5 | **Retirar la lista blanca de knip para `shared/domain/**`** | Se prometió: **P5 no cierra con ella puesta** |
+| 6 | **`EXPLAIN ANALYZE` con volumen sintético realista** | Aquí empieza a medirse el presupuesto de CLAUDE.md §5 |
+| 7 | Correr el motor contra `docs/pruebas/casos-conocidos.md` (CC-001..CC-R7) | Un caso que cambia de resultado es un fallo |
 
-**Hecho en P3 — completo**
+**Hecho en P4 — completo**
 
 | # | Entregable | Estado |
 |---|---|---|
-| 1 | **Migración `p3_precios`**: 3 tablas, 2 triggers, RLS completo, reversible y verificada | ✅ |
-| 2 | **`reference_price` con vigencia**, colgando del artículo de compra | ✅ |
-| 3 | **La cadena de costo de SPEC §12**, dominio puro, 13 pruebas | ✅ |
-| 4 | **`precioVigenteA`**: R5 y E8 en una función, 11 pruebas | ✅ |
-| 5 | **Los parámetros de D3** sembrados por trigger; ninguno en el código | ✅ |
-| 6 | **R5 en cuatro capas**: estado, dos permisos, trigger, condición en el `WHERE` | ✅ |
-| 7 | **E8, E9 y E20** probados de punta a punta | ✅ |
-| 8 | **`migrate:new` ya no depende de la base de nadie**: usa `migrate diff` | ✅ |
-| 9 | **408 pruebas**: 277 unitarias con la base apagada + 131 de integración | ✅ |
+| 1 | **Migración `p4_recetas`**: 12 tablas, un trigger de inmutabilidad, RLS completo, reversible y verificada | ✅ |
+| 2 | **R9 activa**: ciclos rechazados al guardar, con recorrido memorizado y el camino en el mensaje | ✅ |
+| 3 | **R11 activa**: previsualización, permiso separado, registro y reversión por local | ✅ |
+| 4 | **R4 modelada y probada**: AP 0.40 frente a EP 0.50, números distintos y conocidos | ✅ |
+| 5 | **E12 activa**: `BODEGA` no ve recetas, sobre respuesta cruda | ✅ |
+| 6 | **E14 y E18** probados de punta a punta | ✅ |
+| 7 | **ADR-007** — propagación por copia frente a herencia | ✅ |
+| 8 | **444 pruebas**: 298 unitarias con la base apagada + 146 de integración | ✅ |
 
-### Lo que conviene que el usuario mire
+### Lo que conviene que el usuario mire antes de P5
 
-1. **La tasa de IVA de compra vive en el PRECIO, no en la company** (P3). El SPEC no dice dónde va. Se eligió el superconjunto porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %. **Merece confirmación.**
+1. **La tasa de IVA de compra vive en el PRECIO, no en la company** (P3). El SPEC no dice dónde va. Se eligió el superconjunto porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %. **Es la que más merece confirmación**: entra en el costo de cada plato.
 2. **No existe la tabla `unit_conversion`** que los entregables de P2 listaban. Razonado en `docs/pasos/P2/CONSTRUCCION.md`.
-3. **Umbral de bloqueo por IP en 25 en vez de 5** (P1). Reversible: dos constantes.
+3. **Umbral de bloqueo por IP en 25 en vez de 5** (P1), para no dejar fuera a un restaurante entero detrás de un NAT.
 4. **Refresh rotativo aplazado a P12** (P1), con el riesgo residual en ADR-006.
+5. **D4 (`LNK`) sigue en 🔴.** No bloqueó P0–P4 y bloquea la migración de datos del Excel.
 
 **Hecho y verificado**
 

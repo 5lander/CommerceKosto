@@ -4,6 +4,36 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P4 — Recetas, productos y combos · 2026-09-04
+
+**Objetivo:** que un ciclo se rechace al guardar y que propagar entre locales sea una decisión con marcha atrás.
+
+### Entregado
+
+- **12 tablas**: `product`, `product_location`, `combo_component`, `recipe` versionada, `recipe_line`, el registro de propagación y cinco catálogos
+- **R9 activa** — ciclos rechazados **al guardar**, directos y a tres niveles, con el camino (`mayonesa → salsa → mayonesa`) en el mensaje. Recorrido memorizado que corta al primer ciclo
+- **R11 activa** — previsualización con cuántas ubicaciones perderían su receta, permiso separado de nivel company, registro de quién propagó qué, y **reversión por local que no borra nada**
+- **R4 modelada y probada** — la base AP/EP con los dos casos dando resultados **distintos y conocidos**
+- **E12 pasa a regla activa** — `BODEGA` no ve recetas, comprobado sobre la respuesta cruda
+- **ADR-007** — propagación por copia frente a herencia
+- **444 pruebas**: 298 unitarias con la base apagada, 146 de integración
+
+### Lo que se descubrió por el camino
+
+**Un error de dominio que no lo era.** `CicloEnRecetaError` extendía `Error` a secas y salía por el filtro como `INTERNAL_ERROR` 500 —un fallo del servidor— cuando lo que hay es una receta mal escrita. El `Record` exhaustivo de códigos hace su trabajo solo si el error entra por la puerta.
+
+**Los parámetros de consulta entraban sin validar.** `GET /recetas` empezó con cinco `@Query` sueltos y `max-params` lo marcó. La solución no fue agruparlos: se les puso **esquema**, igual que a un cuerpo. Un parámetro de URL es entrada no confiable exactamente igual.
+
+### Pendiente
+
+| Qué | Cuándo |
+|---|---|
+| El cálculo del costo del producto (SPEC §14) | P5 |
+| Componentes de combo por API | Sin paquete: la tabla y sus reglas existen, el endpoint no |
+| Lista blanca de knip para `shared/domain/**` | P5, y **P5 no cierra con ella puesta** |
+
+---
+
 ## P3 — Precios de referencia con vigencia · 2026-09-04
 
 **Objetivo:** ningún precio se mueve solo.

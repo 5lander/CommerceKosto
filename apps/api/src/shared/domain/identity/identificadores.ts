@@ -24,6 +24,9 @@ declare const MARCA_ITEM: unique symbol;
 declare const MARCA_ARTICLE: unique symbol;
 declare const MARCA_GROUP: unique symbol;
 declare const MARCA_PRICE: unique symbol;
+declare const MARCA_PRODUCT: unique symbol;
+declare const MARCA_RECIPE: unique symbol;
+declare const MARCA_PROPAGATION: unique symbol;
 
 export type CompanyId = string & { readonly [MARCA_COMPANY]: 'company' };
 export type LocationId = string & { readonly [MARCA_LOCATION]: 'location' };
@@ -33,6 +36,9 @@ export type ItemId = string & { readonly [MARCA_ITEM]: 'item' };
 export type PurchaseArticleId = string & { readonly [MARCA_ARTICLE]: 'purchase-article' };
 export type ItemGroupId = string & { readonly [MARCA_GROUP]: 'item-group' };
 export type ReferencePriceId = string & { readonly [MARCA_PRICE]: 'reference-price' };
+export type ProductId = string & { readonly [MARCA_PRODUCT]: 'product' };
+export type RecipeId = string & { readonly [MARCA_RECIPE]: 'recipe' };
+export type RecipePropagationId = string & { readonly [MARCA_PROPAGATION]: 'recipe-propagation' };
 
 export class IdentificadorInvalidoError extends Error {
   public override readonly name = 'IdentificadorInvalidoError';
@@ -100,4 +106,19 @@ export function itemGroupId(valor: string): ItemGroupId {
 /** @throws {IdentificadorInvalidoError} */
 export function referencePriceId(valor: string): ReferencePriceId {
   return exigirUuid('ReferencePriceId', valor) as ReferencePriceId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function productId(valor: string): ProductId {
+  return exigirUuid('ProductId', valor) as ProductId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function recipeId(valor: string): RecipeId {
+  return exigirUuid('RecipeId', valor) as RecipeId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function recipePropagationId(valor: string): RecipePropagationId {
+  return exigirUuid('RecipePropagationId', valor) as RecipePropagationId;
 }

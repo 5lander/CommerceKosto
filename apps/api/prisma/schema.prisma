@@ -138,16 +138,22 @@ model Company {
   /// primer paquete que lo toca, que es este.
   maxLocations Int @default(10) @map("max_locations")
 
-  estado    CompanyStatus     @relation(fields: [status], references: [code])
-  settings  CompanySettings?
-  locations Location[]
-  usuarios  AppUser[]
-  roles     UserRole[]
-  sesiones  Session[]
-  grupos    ItemGroup[]
-  items     Item[]
-  articulos PurchaseArticle[]
-  precios   ReferencePrice[]
+  estado                CompanyStatus       @relation(fields: [status], references: [code])
+  settings              CompanySettings?
+  locations             Location[]
+  usuarios              AppUser[]
+  roles                 UserRole[]
+  sesiones              Session[]
+  grupos                ItemGroup[]
+  items                 Item[]
+  articulos             PurchaseArticle[]
+  precios               ReferencePrice[]
+  productos             Product[]
+  productosPorUbicacion ProductLocation[]
+  combos                ComboComponent[]
+  recetas               Recipe[]
+  lineasDeReceta        RecipeLine[]
+  propagaciones         RecipePropagation[]
 
   @@map("company")
 }
@@ -201,10 +207,13 @@ model Location {
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  company Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  tipo    LocationType   @relation(fields: [type], references: [code])
-  estado  LocationStatus @relation(fields: [status], references: [code])
-  roles   UserRole[]
+  company    Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  tipo       LocationType              @relation(fields: [type], references: [code])
+  estado     LocationStatus            @relation(fields: [status], references: [code])
+  roles      UserRole[]
+  productos  ProductLocation[]
+  recetas    Recipe[]
+  propagados RecipePropagationTarget[]
 
   @@unique([companyId, name])
   @@index([companyId, status])
@@ -506,16 +515,21 @@ model Item {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  company   Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  tipo      ItemType          @relation(fields: [type], references: [code])
-  unidad    Unit              @relation(fields: [unitOfUse], references: [code])
-  grupo     ItemGroup?        @relation(fields: [groupId], references: [id], onDelete: Restrict)
-  estado    ItemStatus        @relation(fields: [status], references: [code])
-  confianza PriceConfidence   @relation(fields: [priceConfidence], references: [code])
-  articulos PurchaseArticle[]
-  precios   ReferencePrice[]
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  tipo           ItemType          @relation(fields: [type], references: [code])
+  unidad         Unit              @relation(fields: [unitOfUse], references: [code])
+  grupo          ItemGroup?        @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  estado         ItemStatus        @relation(fields: [status], references: [code])
+  confianza      PriceConfidence   @relation(fields: [priceConfidence], references: [code])
+  articulos      PurchaseArticle[]
+  precios        ReferencePrice[]
+  recetas        Recipe[]
+  lineasDeReceta RecipeLine[]
 
   @@unique([companyId, name])
+  /// Clave candidata para las FK COMPUESTAS de receta y linea: atan el item a
+  /// la misma company que la receta que lo usa.
+  @@unique([id, companyId])
   @@index([companyId, status])
   @@index([companyId, type])
   @@map("item")
@@ -663,4 +677,253 @@ model ReferencePrice {
   @@index([companyId, itemId, validFrom(sort: Desc)])
   @@index([companyId, status])
   @@map("reference_price")
+}
+
+// ---------------------------------------------------------------------------
+// P4 — Recetas, productos y combos (SPEC §8, §9, §13).
+// ---------------------------------------------------------------------------
+
+/// SIMPLE (receta a items) · COMBO (componentes que son productos simples).
+model ProductType {
+  code String @id
+
+  productos Product[]
+
+  @@map("product_type")
+}
+
+/// ACTIVE · INACTIVE. Sin borrado fisico.
+model ProductStatus {
+  code String @id
+
+  productos Product[]
+
+  @@map("product_status")
+}
+
+/// AP (tal como se compra) · EP (ya limpio).
+///
+/// ES EL CATALOGO MAS PEQUENO Y EL MAS PELIGROSO DEL SISTEMA. SPEC §13:
+/// `costo_linea = cantidad × (base = "EP" ? costo_neto_uso : costo_bruto_uso)`.
+/// Implementarlo al reves produce numeros plausibles y equivocados en las 293
+/// lineas del Excel. R4.
+model RecipeLineBase {
+  code String @id
+
+  lineas RecipeLine[]
+
+  @@map("recipe_line_base")
+}
+
+/// ACTIVA · INACTIVA. Una linea inactiva cuesta CERO, no se borra: SPEC §13 la
+/// tiene en la formula, y conservarla deja ver que se quito y cuando.
+model RecipeLineStatus {
+  code String @id
+
+  lineas RecipeLine[]
+
+  @@map("recipe_line_status")
+}
+
+/// ACTIVE · VOID.
+///
+/// `VOID` es una version que declara «aqui no hay receta», y hace falta para
+/// revertir una propagacion sobre una ubicacion que NO tenia receta antes. Sin
+/// ella habria que borrar la version creada —reescribiendo la historia— o
+/// dejar una receta vacia, que cuesta cero y es una respuesta peligrosamente
+/// distinta de «no hay receta».
+model RecipeStatus {
+  code String @id
+
+  recetas Recipe[]
+
+  @@map("recipe_status")
+}
+
+/// El producto de venta. Maestro de la COMPANY (SPEC §8).
+///
+/// LA UNIDAD DE COSTEO ES LA PORCION, NO EL PLATO: «Arroz con carne (segundo)»
+/// y «(plato fuerte)» son productos DISTINTOS, con distinta receta, PVP y
+/// margen. Sin jerarquia padre-hijo, porque el padre no tendria atributos
+/// propios; para agrupar hay una etiqueta.
+model Product {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String
+  type      String
+  /// Etiqueta simple de agrupacion para reportes. No es una jerarquia.
+  category  String?
+  status    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  tipo          ProductType         @relation(fields: [type], references: [code])
+  estado        ProductStatus       @relation(fields: [status], references: [code])
+  ubicaciones   ProductLocation[]
+  recetas       Recipe[]
+  componentes   ComboComponent[]    @relation("combo")
+  usadoEn       ComboComponent[]    @relation("componente")
+  propagaciones RecipePropagation[]
+
+  @@unique([companyId, name])
+  /// Clave candidata para las FK COMPUESTAS que atan todo a la misma company.
+  @@unique([id, companyId])
+  @@index([companyId, status])
+  @@map("product")
+}
+
+/// Activacion, PVP y rendimiento por lote, POR LOCAL (SPEC §8).
+///
+/// El maestro arriba permite comparar entre locales con un `GROUP BY
+/// product_id` en vez de emparejar por nombre, que es como se pierde la mitad
+/// de los datos en cuanto alguien escribe una tilde distinta.
+model ProductLocation {
+  companyId  String @map("company_id") @db.Uuid
+  productId  String @map("product_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+
+  activo               Boolean  @default(true)
+  /// PVP CON IVA incluido (R14). `venta_neta = pvp / (1 + iva_venta)`.
+  pvp                  Decimal? @db.Decimal(24, 12)
+  /// Cuantas porciones salen de un lote. Divide el costo de la receta.
+  rendimientoPorciones Decimal? @map("rendimiento_porciones") @db.Decimal(24, 12)
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  producto Product  @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@id([productId, locationId])
+  @@index([companyId, locationId])
+  @@map("product_location")
+}
+
+/// Componentes de un COMBO: productos SIMPLES, nunca items (SPEC §8).
+///
+/// «El combo usa las porciones reducidas, no los productos de carta», y en
+/// menu engineering compite como item propio: el descuento NO se prorratea.
+model ComboComponent {
+  companyId          String  @map("company_id") @db.Uuid
+  comboProductId     String  @map("combo_product_id") @db.Uuid
+  componentProductId String  @map("component_product_id") @db.Uuid
+  cantidad           Decimal @db.Decimal(24, 12)
+
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  combo      Product @relation("combo", fields: [comboProductId, companyId], references: [id, companyId], onDelete: Restrict)
+  componente Product @relation("componente", fields: [componentProductId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@id([comboProductId, componentProductId])
+  @@index([companyId, comboProductId])
+  @@map("combo_component")
+}
+
+/// Una VERSION de receta, por par (destino, ubicacion) y con vigencia.
+///
+/// EL DESTINO ES UN PRODUCTO O UN ITEM, exactamente uno. Un producto de venta
+/// tiene receta; una subpreparacion —item PRODUCIDO— tambien la tiene, y es lo
+/// que habilita la recursion que R9 tiene que cortar. Las lineas apuntan a
+/// items sin distinguir tipo (SPEC §5).
+///
+/// LAS RECETAS SE VERSIONAN POR VIGENCIA y no se editan: la propagacion crea
+/// version nueva con fecha de hoy, y los costeos historicos no se recalculan
+/// (SPEC §9). Es la misma regla que los precios de P3.
+model Recipe {
+  id         String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId  String @map("company_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+
+  productId String? @map("product_id") @db.Uuid
+  itemId    String? @map("item_id") @db.Uuid
+
+  status    String
+  validFrom DateTime @map("valid_from") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// De donde vino esta version: captura manual, propagacion o reversion.
+  note      String?
+
+  company  Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  location Location     @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  producto Product?     @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+  item     Item?        @relation(fields: [itemId, companyId], references: [id, companyId], onDelete: Restrict)
+  estado   RecipeStatus @relation(fields: [status], references: [code])
+  lineas   RecipeLine[]
+
+  creadasPor RecipePropagationTarget[] @relation("creada")
+  anteriorDe RecipePropagationTarget[] @relation("anterior")
+
+  /// El indice de CLAUDE.md §5: receta vigente de un producto en una ubicacion.
+  @@index([companyId, productId, locationId, validFrom(sort: Desc)])
+  @@index([companyId, itemId, locationId, validFrom(sort: Desc)])
+  @@map("recipe")
+}
+
+/// Una linea de receta: cuanto de que item, en que base (SPEC §13).
+model RecipeLine {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  recipeId  String @map("recipe_id") @db.Uuid
+  itemId    String @map("item_id") @db.Uuid
+
+  /// En la UNIDAD DE USO del item. La unidad no se repite aqui: repetirla
+  /// permitiria que dijera otra cosa que la del item, y entonces habria dos
+  /// verdades sobre la misma cantidad.
+  cantidad Decimal @db.Decimal(24, 12)
+  base     String
+  estado   String
+  orden    Int     @default(0)
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  receta   Recipe           @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  item     Item             @relation(fields: [itemId, companyId], references: [id, companyId], onDelete: Restrict)
+  laBase   RecipeLineBase   @relation(fields: [base], references: [code])
+  elEstado RecipeLineStatus @relation(fields: [estado], references: [code])
+
+  @@unique([recipeId, itemId])
+  @@index([companyId, recipeId])
+  @@map("recipe_line")
+}
+
+/// Registro de una propagacion — R11, SPEC §9.
+///
+/// «Registro de quien propago que, con reversion por local». Es append-only en
+/// la practica: revertir no borra la propagacion, le pone fecha de reversion y
+/// crea versiones nuevas en cada ubicacion.
+model RecipePropagation {
+  id             String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId      String @map("company_id") @db.Uuid
+  productId      String @map("product_id") @db.Uuid
+  sourceRecipeId String @map("source_recipe_id") @db.Uuid
+
+  propagatedBy String    @map("propagated_by") @db.Uuid
+  propagatedAt DateTime  @default(now()) @map("propagated_at") @db.Timestamptz(6)
+  revertedBy   String?   @map("reverted_by") @db.Uuid
+  revertedAt   DateTime? @map("reverted_at") @db.Timestamptz(6)
+
+  company  Company                   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  producto Product                   @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+  destinos RecipePropagationTarget[]
+
+  @@index([companyId, productId, propagatedAt(sort: Desc)])
+  @@map("recipe_propagation")
+}
+
+/// Que le paso a CADA ubicacion en una propagacion.
+///
+/// `previousRecipeId` es lo que hace la reversion posible sin reescribir nada:
+/// guarda cual era la version vigente antes. `null` significa que esa ubicacion
+/// no tenia receta, y revertir le deja una version `VOID` — que es distinto de
+/// una receta vacia, porque una receta vacia cuesta cero.
+model RecipePropagationTarget {
+  propagationId    String  @map("propagation_id") @db.Uuid
+  locationId       String  @map("location_id") @db.Uuid
+  previousRecipeId String? @map("previous_recipe_id") @db.Uuid
+  createdRecipeId  String  @map("created_recipe_id") @db.Uuid
+
+  propagacion RecipePropagation @relation(fields: [propagationId], references: [id], onDelete: Cascade)
+  location    Location          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  anterior    Recipe?           @relation("anterior", fields: [previousRecipeId], references: [id], onDelete: Restrict)
+  creada      Recipe            @relation("creada", fields: [createdRecipeId], references: [id], onDelete: Restrict)
+
+  @@id([propagationId, locationId])
+  @@map("recipe_propagation_target")
 }
