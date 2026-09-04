@@ -9,7 +9,7 @@
  *
  *   1. verificar que no hay migraciones pendientes
  *   2. generar el down.sql  <- ANTES de crear la migracion de subida
- *   3. crear la migracion con --create-only
+ *   3. generar la subida con `migrate diff` (NO con `migrate dev`: ver el paso)
  *   4. mover el down.sql a su carpeta
  *   5. insertar los marcadores de bloque manual
  *   6. anadir el DELETE de la fila del historial
@@ -26,7 +26,7 @@
  * artefacto revisable y uno que depende de que tenia cada quien en su Docker.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { APP, MIGRACIONES, TEMPORAL } from './lib/entorno.mjs';
@@ -128,25 +128,72 @@ if (diff.status !== 0) {
 }
 
 // --- 3. Crear la migracion de subida ---------------------------------------
+//
+// SE USA `migrate diff` Y NO `migrate dev --create-only`, y la razon costo dos
+// intentos en P3.
+//
+// `migrate dev` es un comando INTERACTIVO. Ante cualquier aviso —«se anadira una
+// restriccion unica», «se anade una columna NOT NULL y hay filas»— pide
+// confirmacion por teclado, y en un entorno no interactivo se planta con
+// «Prisma Migrate has detected that the environment is non-interactive». No
+// tiene bandera para responder que si. En P3 lo dispararon dos avisos, y los dos
+// eran espurios: la restriccion unica era `(id, item_id)` sobre una tabla cuyo
+// `id` YA es clave primaria, y la columna NOT NULL se rellenaba en el bloque
+// manual tres lineas mas abajo.
+//
+// El fondo del problema es peor que la molestia: `migrate dev` mira los DATOS de
+// la base de desarrollo para decidir si avisa. Eso hace que crear una migracion
+// dependa de lo que cada quien tenga en su Docker — exactamente lo que el paso 2
+// evita usando `--to-migrations` en vez de la base local.
+//
+// `migrate diff` produce el MISMO SQL, no es interactivo y no mira los datos de
+// nadie: compara el estado de `prisma/migrations` con el modelo. El nombre de la
+// carpeta lo ponemos aqui, con el mismo formato de marca de tiempo que usa
+// Prisma.
+const marcaDeTiempo = new Date()
+  .toISOString()
+  .replace(/[-:T]/g, '')
+  .slice(0, 14);
+const carpeta = `${marcaDeTiempo}_${nombre}`;
+const rutaCarpeta = join(MIGRACIONES, carpeta);
+
 console.log(`[migrate:new] creando la migracion "${nombre}"`);
-const creada = prisma(['migrate', 'dev', '--name', nombre, '--create-only']);
-if (creada.status !== 0) {
-  console.error(creada.stderr ?? creada.stdout ?? '');
+
+// LA CARPETA SE CREA DESPUES DEL DIFF, no antes. `--from-migrations` lee el
+// directorio entero y falla con P3015 en cuanto encuentra una carpeta sin
+// `migration.sql` — que es justo lo que seria la recien creada. El SQL se
+// genera en el temporal y se mueve al final, igual que el down.
+const upTemporal = join(TEMPORAL, 'migration.sql');
+const subida = prisma([
+  'migrate', 'diff',
+  ...(hayMigracionesPrevias ? ['--from-migrations', 'prisma/migrations'] : ['--from-empty']),
+  '--to-schema', 'prisma/schema.prisma',
+  '--script',
+  '--output', upTemporal,
+]);
+
+if (subida.status !== 0) {
+  console.error(subida.stderr ?? subida.stdout ?? '');
+  console.error('\n[migrate:new] `migrate diff` fallo al generar la subida. Ver docs/incidencias/INC-004.');
   process.exit(1);
 }
 
-const carpetas = readdirSync(MIGRACIONES).filter((d) => d.endsWith(`_${nombre}`)).sort();
-const carpeta = carpetas.at(-1);
-if (carpeta === undefined) {
-  console.error('[migrate:new] no se encontro la carpeta de la migracion recien creada.');
+if (!existsSync(upTemporal) || readFileSync(upTemporal, 'utf8').trim() === '') {
+  console.error(
+    `\n[migrate:new] la migracion salio VACIA. No hay cambios en schema.prisma respecto de ` +
+      'prisma/migrations, o el diff no vio lo que esperabas. Ver docs/incidencias/INC-004.',
+  );
   process.exit(1);
 }
 
 // --- 4, 5 y 6 ---------------------------------------------------------------
-const destinoDown = join(MIGRACIONES, carpeta, 'down.sql');
+mkdirSync(rutaCarpeta, { recursive: true });
+
+const destinoDown = join(rutaCarpeta, 'down.sql');
 renameSync(downTemporal, destinoDown);
 
-const rutaUp = join(MIGRACIONES, carpeta, 'migration.sql');
+const rutaUp = join(rutaCarpeta, 'migration.sql');
+renameSync(upTemporal, rutaUp);
 writeFileSync(rutaUp, `${readFileSync(rutaUp, 'utf8').trimEnd()}\n${MARCADOR_MANUAL}`);
 
 const down = readFileSync(destinoDown, 'utf8').trimEnd();

@@ -147,6 +147,7 @@ model Company {
   grupos    ItemGroup[]
   items     Item[]
   articulos PurchaseArticle[]
+  precios   ReferencePrice[]
 
   @@map("company")
 }
@@ -171,6 +172,10 @@ model CompanySettings {
 
   ivaVenta             Decimal @map("iva_venta") @db.Decimal(24, 12)
   ivaCompraRecuperable Boolean @map("iva_compra_recuperable")
+  /// Tasa de IVA de compra por DEFECTO, la que se propone al capturar un
+  /// precio. La que manda es la de cada `reference_price`: la factura dice cual
+  /// aplico, y en Ecuador el alimento sin procesar es 0 % y el detergente 15 %.
+  ivaCompra            Decimal @map("iva_compra") @db.Decimal(24, 12)
   provisionMerma       Decimal @map("provision_merma") @db.Decimal(24, 12)
   foodCostObjetivo     Decimal @map("food_cost_objetivo") @db.Decimal(24, 12)
   foodCostMaximo       Decimal @map("food_cost_maximo") @db.Decimal(24, 12)
@@ -250,10 +255,11 @@ model AppUser {
   invitationTokenHash String?   @unique @map("invitation_token_hash")
   invitationExpiresAt DateTime? @map("invitation_expires_at") @db.Timestamptz(6)
 
-  company  Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  estado   UserStatus @relation(fields: [status], references: [code])
-  roles    UserRole[]
-  sesiones Session[]
+  company        Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  estado         UserStatus       @relation(fields: [status], references: [code])
+  roles          UserRole[]
+  sesiones       Session[]
+  preciosCreados ReferencePrice[] @relation("precios_creados")
 
   @@index([companyId, status])
   @@map("app_user")
@@ -507,6 +513,7 @@ model Item {
   estado    ItemStatus        @relation(fields: [status], references: [code])
   confianza PriceConfidence   @relation(fields: [priceConfidence], references: [code])
   articulos PurchaseArticle[]
+  precios   ReferencePrice[]
 
   @@unique([companyId, name])
   @@index([companyId, status])
@@ -543,12 +550,117 @@ model PurchaseArticle {
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  company Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  item    Item       @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  unidad  Unit       @relation(fields: [presentationUnit], references: [code])
-  estado  ItemStatus @relation(fields: [status], references: [code])
+  company Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  item    Item             @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  unidad  Unit             @relation(fields: [presentationUnit], references: [code])
+  estado  ItemStatus       @relation(fields: [status], references: [code])
+  precios ReferencePrice[]
 
   @@unique([companyId, name])
+  /// Clave candidata para la FK COMPUESTA de `reference_price`: sostiene que el
+  /// articulo al que apunta un precio pertenezca al item de ese mismo precio.
+  @@unique([id, itemId])
   @@index([companyId, itemId])
   @@map("purchase_article")
+}
+
+// ---------------------------------------------------------------------------
+// P3 — Precios de referencia con vigencia.
+//
+// R5: NINGUN PRECIO SE MUEVE SOLO. Todos se sugieren; el usuario confirma.
+// Fila con vigencia, jamas campo sobrescrito (SPEC §6).
+// ---------------------------------------------------------------------------
+
+/// MANUAL · ULTIMA_COMPRA · EXTERNO (SPEC §6).
+///
+/// `EXTERNO` existe y no se usa: deja la puerta abierta a una fuente externa de
+/// precios sin acoplar nada. D8 la deja fuera de alcance, y el catalogo es lo
+/// unico que cuesta cero mantener mientras tanto.
+model ReferencePriceOrigin {
+  code String @id
+
+  precios ReferencePrice[]
+
+  @@map("reference_price_origin")
+}
+
+/// SUGGESTED · CONFIRMED · REJECTED.
+///
+/// El estado ES la regla R5: un precio sugerido no es vigente por mucho que su
+/// `valid_from` haya pasado. Solo cuenta lo confirmado.
+model ReferencePriceStatus {
+  code String @id
+
+  precios ReferencePrice[]
+
+  @@map("reference_price_status")
+}
+
+/// Un precio con vigencia. NUNCA se actualiza el importe de una fila existente:
+/// un precio nuevo es una fila nueva.
+///
+/// Lo unico que cambia en una fila es su ESTADO, y solo hacia adelante:
+/// `SUGGESTED` -> `CONFIRMED` o `REJECTED`. Un trigger lo hace cumplir, porque
+/// «solo el estado» no lo puede expresar un GRANT.
+model ReferencePrice {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  itemId    String @map("item_id") @db.Uuid
+
+  /// EL ARTICULO AL QUE PERTENECE ESTE PRECIO.
+  ///
+  /// Obligatorio para un item COMPRADO y prohibido para uno PRODUCIDO, con un
+  /// trigger que lo hace cumplir. La razon es que un precio sin presentacion no
+  /// significa nada: «2.30» solo es un dato junto a «el saco de 2 kg». De ahi
+  /// sale ademas el factor de conversion que la formula de SPEC 12 necesita.
+  ///
+  /// Una preparacion PRODUCIDA no se compra: su precio es el **costo estandar**
+  /// por unidad de uso que fija el usuario (SPEC 6, R10), y por eso no lleva
+  /// articulo. Que el plato no cambie de costo segun cuanto se produjo ese dia
+  /// es justamente el punto.
+  purchaseArticleId String? @map("purchase_article_id") @db.Uuid
+
+  /// El precio TAL COMO SE PAGA, con IVA incluido si lo lleva. La formula de
+  /// SPEC §12 lo convierte a neto: `precio_neto = precio / (1 + iva_compra)`.
+  price Decimal @db.Decimal(24, 12)
+
+  /// LA TASA DE IVA QUE APLICO A ESTE PRECIO, no la de la company.
+  ///
+  /// El SPEC nombra `iva_compra` en la formula pero no dice donde vive, y §11
+  /// solo trae «IVA de compra recuperable SI/NO». Vive aqui porque en Ecuador
+  /// el alimento sin procesar es 0 % y el detergente 15 %: una unica tasa por
+  /// company estaria equivocada para uno de los dos, y el error entra
+  /// directamente en el costo de cada plato. La factura dice la tasa; esta
+  /// columna la guarda. `company_settings.iva_compra` es solo el valor por
+  /// defecto que se propone al capturar.
+  ivaCompra Decimal @map("iva_compra") @db.Decimal(24, 12)
+
+  origin    String
+  status    String
+  validFrom DateTime @map("valid_from") @db.Timestamptz(6)
+
+  createdBy   String    @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Quien confirmo. NULL mientras siga sugerido: R5 en una columna.
+  confirmedBy String?   @map("confirmed_by") @db.Uuid
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+
+  /// Por que se sugirio. Para `ULTIMA_COMPRA`, cuanto se desvio la compra real.
+  note String?
+
+  company  Company              @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  item     Item                 @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  fuente   ReferencePriceOrigin @relation(fields: [origin], references: [code])
+  estado   ReferencePriceStatus @relation(fields: [status], references: [code])
+  autor    AppUser              @relation("precios_creados", fields: [createdBy], references: [id], onDelete: Restrict)
+  /// Relacion COMPUESTA: el articulo tiene que ser del mismo item. Sin esto, un
+  /// precio podria apuntar al saco de harina y al item «cebolla».
+  articulo PurchaseArticle?     @relation(fields: [purchaseArticleId, itemId], references: [id, itemId], onDelete: Restrict)
+
+  /// El indice de CLAUDE.md §5: precio de referencia vigente de un item.
+  /// Igualdad antes que rango, y el rango descendente porque «vigente» es
+  /// «el mas reciente que ya empezo».
+  @@index([companyId, itemId, validFrom(sort: Desc)])
+  @@index([companyId, status])
+  @@map("reference_price")
 }

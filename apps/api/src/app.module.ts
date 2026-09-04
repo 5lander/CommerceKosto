@@ -31,6 +31,7 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { IamModule } from './modules/iam/iam.module';
+import { PricingModule } from './modules/pricing/pricing.module';
 import type { Configuration } from './shared/infrastructure/config/environment';
 import { DatabaseHealthIndicator } from './shared/infrastructure/health/database.health';
 import { HealthController } from './shared/infrastructure/health/health.controller';
@@ -56,6 +57,7 @@ export class AppModule {
         SharedModule.forRoot(config),
         IamModule,
         CatalogModule,
+        PricingModule,
       ],
       controllers: [HealthController],
       providers: [

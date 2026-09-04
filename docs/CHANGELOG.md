@@ -4,6 +4,44 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P3 — Precios de referencia con vigencia · 2026-09-04
+
+**Objetivo:** ningún precio se mueve solo.
+
+### Entregado
+
+- **`reference_price` con vigencia**, nunca sobrescritura (R5). El precio cuelga del **artículo de compra**, porque «2.30» no significa nada sin «el saco de 2 kg»
+- **La cadena de costo del insumo de SPEC §12, completa y como dominio puro** — precio neto, costo bruto de uso, costo neto de uso y sobrecosto de merma, con las dos guardas de cero del SPEC. **P5 la puede usar tal cual**
+- **Los parámetros de costeo de D3**, sembrados por un trigger al nacer la company. Ninguno está en el código
+- **R5 hecha cumplir en cuatro capas**: el estado, dos permisos separados, un trigger que impide reescribir el importe, y la condición en el `WHERE` que cierra la carrera entre dos confirmaciones simultáneas
+- **408 pruebas**: 277 unitarias con la base apagada, 131 de integración
+
+### Los tres criterios, probados
+
+**E8** — se confirma un precio de enero, se lee el costo de febrero, se confirma uno de marzo, y el costo de febrero es el mismo. **E9** — un precio sugerido existe, se ve, y el costo devuelve 404 hasta que alguien lo confirma. **E20/R13** — sin IVA recuperable el costo sube exactamente 1.15 veces, ni un dígito más.
+
+### Lo que se descubrió por el camino
+
+**`migrate:new` dependía de la base de desarrollo de cada quien.** `prisma migrate dev` es interactivo y se planta ante cualquier aviso —dos de ellos espurios en este paquete—, y peor: mira los **datos** de la base local para decidir si avisa. Se cambió a `migrate diff`, que produce el mismo SQL, no es interactivo y compara `prisma/migrations` con el modelo. La misma técnica que el paso del `down` ya usaba por la misma razón.
+
+**Una prueba de la base pasaba sin tocar nada.** «Un precio confirmado no se puede reescribir» lanzaba el `UPDATE` sin tenant: RLS filtraba, cero filas, y `UPDATE 0` es un éxito — el trigger nunca se disparaba. Es INC-007 en otra forma. Ahora la escritura va por `TenantTransaction` y la afirmación es sobre el importe guardado, no sobre el mensaje que Prisma envuelve.
+
+**La regla del catálogo escrita en P2 hizo su trabajo en P3.** `pricing` necesitaba el rendimiento del ítem y el primer intento consultó `tx.item` a mano; `tablas-de-catalogo-solo-en-catalog` lo marcó, y se resolvió como manda CLAUDE.md §2 — `catalog` exporta `LeerItem`.
+
+### Una decisión que merece confirmación
+
+**La tasa de IVA de compra se modeló en el PRECIO, no en la company.** El SPEC la nombra en la fórmula de §12 pero no dice dónde vive, y §11 solo trae «recuperable SI/NO». En Ecuador el alimento sin procesar es 0 % y el detergente 15 %: una única tasa por company estaría equivocada para uno de los dos. Se eligió el superconjunto — si la intención era una sola tasa, este modelo la expresa; al revés habría que migrar cada precio.
+
+### Pendiente
+
+| Qué | Cuándo |
+|---|---|
+| Sugerencia automática desde la compra real (`ULTIMA_COMPRA`) | P6, cuando exista el movimiento que la dispara |
+| El rendimiento con vigencia | Sin paquete: hoy el costo histórico usa el rendimiento actual del ítem |
+| Lista blanca de knip para `shared/domain/**` | P5, y P5 no cierra con ella puesta |
+
+---
+
 ## P2 — Catálogo: ítems, artículos de compra, unidades · 2026-09-04
 
 **Objetivo:** la fuente única de verdad del proyecto.

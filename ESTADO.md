@@ -8,56 +8,55 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P2 cerrado**. El siguiente es P3 (precios de referencia)
-**Fase del protocolo:** CIERRE de P2
-**Último commit:** `P2: Catálogo · ítems · artículos · unidades` (P1 fue `3555c9c`)
+**Paquete en curso:** ninguno — **P3 cerrado**. El siguiente es P4 (recetas, productos y combos)
+**Fase del protocolo:** CIERRE de P3
+**Último commit:** `P3: Precios de referencia con vigencia` (P2 fue `1cd10a5`, P1 `3555c9c`)
 **Fecha de última actualización:** 2026-09-04
 
 ### Dónde se retoma exactamente
 
-**P0, P1 y P2 están cerrados y commiteados.** El aislamiento funciona y está probado contra PostgreSQL y contra PgBouncer reales; el catálogo existe y es la fuente única de verdad, hecha cumplir por dos checks distintos. Lo siguiente es **P3 — precios de referencia con vigencia**.
+**P0, P1, P2 y P3 están cerrados y commiteados.** Lo siguiente es **P4 — recetas, productos y combos**, el último de esta corrida autónoma.
 
-**Lo que P3 hereda y no tiene que volver a construir**
+**Lo que P4 hereda y no tiene que volver a construir**
 
-- `TenantTransaction.run(company, …)`. Todo acceso a datos va por ahí; usar `rawClient` fuera rompe el build.
-- `SesionActiva` con `companyId`, `permisos` y `alcance`.
-- El catálogo: `CatalogModule` **exporta `ListarItems` y `ListarArticulos`**, que es lo que P3 necesita. No exporta el repositorio, y dos reglas impiden escribir en sus tablas desde fuera.
+- `TenantTransaction.run(company, …)` — todo acceso a datos va por ahí.
+- `SesionActiva` con `companyId`, `permisos` y `alcance` (la receta **sí** es por ubicación: `alcance` importa).
+- `CatalogModule` exporta `LeerItem`, `ListarItems` y `ListarArticulos`. **P4 lee ítems por ahí, nunca por sus tablas.**
+- `PricingModule` exporta `CostoDeItem`: el costo por unidad de uso a una fecha, con la cadena de SPEC §12 ya aplicada.
 - `Money`, `Ratio`, `Count`, `Quantity` y la aritmética decimal exacta.
-- El patrón de esquema `.strict()` y el `Record` exhaustivo de códigos de dominio: añadir uno sin mapearlo no compila.
-- El factor de conversión ya calculado y guardado en `purchase_article`: el motor de costeo no tendrá que leer el catálogo de unidades.
+- El patrón `.strict()` y el `Record` exhaustivo de códigos de dominio.
 
-**Lo que P3 tiene que acordarse de hacer**
+**Lo que P4 tiene que acordarse de hacer**
 
 | # | Qué | Por qué |
 |---|---|---|
-| 1 | **Volver a forzar el fallo de los checks afectados** al añadir tablas o reglas | INC-007, siete recurrencias |
-| 2 | **R5: ningún precio se mueve solo.** Versionado por vigencia, confirmación explícita, jamás sobrescritura | CLAUDE.md §6 |
-| 3 | **Índice `(company_id, item_id, valid_from DESC)`** — con su consulta delante | CLAUDE.md §5 |
-| 4 | **La cadena de costo del ítem (SPEC §12) va en `domain` puro**, con los guardas de división por cero del SPEC | Es la antesala de P5 |
-| 5 | `company_settings` sembrado con los parámetros de D3 | R13: el IVA recuperable es configuración de la company |
-| 6 | **`createMany` y no `create`** en tablas con política de `SELECT` restrictiva | INC-010 |
-| 7 | **El `down.sql` no borra filas referenciadas** por tablas que no se vacían | INC-011; M10 lo hace cumplir |
+| 1 | **R9: ciclos rechazados AL GUARDAR, no al calcular** | CLAUDE.md §6. Presupuesto p95 de 150 ms |
+| 2 | **La base AP/EP se modela ya**, aunque el cálculo llegue en P5 | R4 |
+| 3 | **R11: propagación con previsualización, permiso de company y registro reversible** | Y su ADR-007 |
+| 4 | **La receta es por par (producto, ubicación)** y versionada por vigencia | SPEC §9 |
+| 5 | **Volver a forzar el fallo de los checks afectados** al añadir tablas o reglas | INC-007, siete recurrencias |
+| 6 | `createMany` en tablas con `SELECT` restrictivo · el `down` no borra filas referenciadas | INC-010 · INC-011 |
 
-**Hecho en P2 — completo**
+**Hecho en P3 — completo**
 
 | # | Entregable | Estado |
 |---|---|---|
-| 1 | **Migración `p2_catalogo`**: 8 tablas, RLS `ENABLE` + `FORCE` en todas, reversible y verificada | ✅ |
-| 2 | **Catálogo global de unidades**, de solo lectura para la aplicación y con `factor_to_base` como constante física | ✅ |
-| 3 | **`item`** con tipo, unidad de uso, rendimiento acotado a [0,1], grupo, estado y confianza de precio | ✅ |
-| 4 | **`purchase_article`** con presentación y factor de conversión **derivado por el dominio** | ✅ |
-| 5 | **El criterio de aceptación**: kg → unidades sin factor se rechaza en el dominio, con la base apagada | ✅ |
-| 6 | **Fuente única de verdad por dos vías**: `audit:arch` y `audit:forbidden`, las dos con guardián | ✅ |
-| 7 | **Índice GIN + `pg_trgm`** sobre `lower(name)` para la deduplicación de P10 | ✅ |
-| 8 | **M10 afinada** para leer claves foráneas, sin abrir lista de excepciones | ✅ |
-| 9 | **Deuda pagada**: `enmiendasAutorizadas` retirada, lista vacía, regla verificada | ✅ |
-| 10 | **371 pruebas**: 253 unitarias con la base apagada + 118 de integración | ✅ |
+| 1 | **Migración `p3_precios`**: 3 tablas, 2 triggers, RLS completo, reversible y verificada | ✅ |
+| 2 | **`reference_price` con vigencia**, colgando del artículo de compra | ✅ |
+| 3 | **La cadena de costo de SPEC §12**, dominio puro, 13 pruebas | ✅ |
+| 4 | **`precioVigenteA`**: R5 y E8 en una función, 11 pruebas | ✅ |
+| 5 | **Los parámetros de D3** sembrados por trigger; ninguno en el código | ✅ |
+| 6 | **R5 en cuatro capas**: estado, dos permisos, trigger, condición en el `WHERE` | ✅ |
+| 7 | **E8, E9 y E20** probados de punta a punta | ✅ |
+| 8 | **`migrate:new` ya no depende de la base de nadie**: usa `migrate diff` | ✅ |
+| 9 | **408 pruebas**: 277 unitarias con la base apagada + 131 de integración | ✅ |
 
 ### Lo que conviene que el usuario mire
 
-1. **No existe la tabla `unit_conversion`** que los entregables de P2 listaban. Entre unidades de la misma dimensión sus filas serían derivables; entre dimensiones distintas la conversión es **del ítem**, no universal, y vive en `purchase_article`. Si prefiere la tabla, es una migración y un puerto.
-2. **Umbral de bloqueo por IP en 25 en vez de 5** (de P1). Reversible: dos constantes.
-3. **Refresh rotativo aplazado a P12** (de P1), con el riesgo residual escrito en ADR-006.
+1. **La tasa de IVA de compra vive en el PRECIO, no en la company** (P3). El SPEC no dice dónde va. Se eligió el superconjunto porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %. **Merece confirmación.**
+2. **No existe la tabla `unit_conversion`** que los entregables de P2 listaban. Razonado en `docs/pasos/P2/CONSTRUCCION.md`.
+3. **Umbral de bloqueo por IP en 25 en vez de 5** (P1). Reversible: dos constantes.
+4. **Refresh rotativo aplazado a P12** (P1), con el riesgo residual en ADR-006.
 
 **Hecho y verificado**
 

@@ -23,6 +23,7 @@ declare const MARCA_SESSION: unique symbol;
 declare const MARCA_ITEM: unique symbol;
 declare const MARCA_ARTICLE: unique symbol;
 declare const MARCA_GROUP: unique symbol;
+declare const MARCA_PRICE: unique symbol;
 
 export type CompanyId = string & { readonly [MARCA_COMPANY]: 'company' };
 export type LocationId = string & { readonly [MARCA_LOCATION]: 'location' };
@@ -31,6 +32,7 @@ export type SessionId = string & { readonly [MARCA_SESSION]: 'session' };
 export type ItemId = string & { readonly [MARCA_ITEM]: 'item' };
 export type PurchaseArticleId = string & { readonly [MARCA_ARTICLE]: 'purchase-article' };
 export type ItemGroupId = string & { readonly [MARCA_GROUP]: 'item-group' };
+export type ReferencePriceId = string & { readonly [MARCA_PRICE]: 'reference-price' };
 
 export class IdentificadorInvalidoError extends Error {
   public override readonly name = 'IdentificadorInvalidoError';
@@ -93,4 +95,9 @@ export function purchaseArticleId(valor: string): PurchaseArticleId {
 /** @throws {IdentificadorInvalidoError} */
 export function itemGroupId(valor: string): ItemGroupId {
   return exigirUuid('ItemGroupId', valor) as ItemGroupId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function referencePriceId(valor: string): ReferencePriceId {
+  return exigirUuid('ReferencePriceId', valor) as ReferencePriceId;
 }

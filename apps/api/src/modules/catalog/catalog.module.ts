@@ -14,7 +14,14 @@
 import { Module } from '@nestjs/common';
 
 import { CrearArticulo, ListarArticulos } from './application/casos-de-uso/articulos';
-import { ActualizarItem, CrearGrupo, CrearItem, ListarGrupos, ListarItems } from './application/casos-de-uso/items';
+import {
+  ActualizarItem,
+  CrearGrupo,
+  CrearItem,
+  LeerItem,
+  ListarGrupos,
+  ListarItems,
+} from './application/casos-de-uso/items';
 import { REPOSITORIO_DE_CATALOGO } from './application/ports/repositorio-de-catalogo.port';
 import { ArticulosController } from './infrastructure/http/articulos.controller';
 import { GestionDeGrupos } from './infrastructure/http/gestion-de-grupos';
@@ -39,6 +46,11 @@ import { DependenciasDeCatalogoNest } from './infrastructure/dependencias-de-cat
       useFactory: (deps: DependenciasDeCatalogoNest): ActualizarItem => new ActualizarItem(deps),
     },
     {
+      provide: LeerItem,
+      inject: [DependenciasDeCatalogoNest],
+      useFactory: (deps: DependenciasDeCatalogoNest): LeerItem => new LeerItem(deps),
+    },
+    {
       provide: ListarItems,
       inject: [DependenciasDeCatalogoNest],
       useFactory: (deps: DependenciasDeCatalogoNest): ListarItems => new ListarItems(deps),
@@ -60,6 +72,6 @@ import { DependenciasDeCatalogoNest } from './infrastructure/dependencias-de-cat
         new GestionDeGrupos(new CrearGrupo(deps), new ListarGrupos(deps)),
     },
   ],
-  exports: [ListarItems, ListarArticulos],
+  exports: [LeerItem, ListarItems, ListarArticulos],
 })
 export class CatalogModule {}

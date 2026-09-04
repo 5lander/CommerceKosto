@@ -141,6 +141,25 @@ export class ActualizarItem {
   }
 }
 
+/**
+ * Un item por su identificador.
+ *
+ * EXISTE PARA QUE OTROS MODULOS NO TOQUEN LAS TABLAS DEL CATALOGO. CLAUDE.md §2
+ * dice que los demas «referencian por ID y leen a traves de sus puertos», y
+ * este es el puerto. `pricing` lo usa para el rendimiento del item, que es un
+ * factor de la cadena de costo de SPEC §12; sin esto tendria que consultar
+ * `item` a mano, que es justo lo que la regla `tablas-de-catalogo-solo-en-catalog`
+ * impide.
+ */
+export class LeerItem {
+  public constructor(private readonly deps: DependenciasDeCatalogo) {}
+
+  /** `null` si no existe en esa company. */
+  public async ejecutar(sesion: SesionActiva, itemId: ItemId): Promise<ItemLeido | null> {
+    return this.deps.repositorio.buscarItem({ companyId: sesion.companyId, itemId });
+  }
+}
+
 export class ListarItems {
   public constructor(private readonly deps: DependenciasDeCatalogo) {}
 
