@@ -31,8 +31,10 @@ import type {
   RepositorioDePrecios,
   ResultadoDeResolucion,
 } from '../application/ports/repositorio-de-precios.port';
+import { ESTADO_CONFIRMADO } from '../domain/vigencia';
 
 const SUGERIDO = 'SUGGESTED';
+const CONFIRMADO = ESTADO_CONFIRMADO;
 
 interface Decimal {
   toFixed: () => string;
@@ -163,6 +165,28 @@ export class PrismaPreciosRepositorio implements RepositorioDePrecios {
     });
   }
 
+  public async confirmadosHasta(entrada: {
+    readonly companyId: CompanyId;
+    readonly hasta: Date;
+  }): Promise<readonly PrecioLeido[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.referencePrice.findMany({
+        // El filtro por estado va en el WHERE y no en memoria: los sugeridos y
+        // los rechazados no tienen por que viajar. Aun asi, cual de los
+        // confirmados esta vigente lo decide el dominio (R5).
+        where: {
+          companyId: entrada.companyId,
+          status: CONFIRMADO,
+          validFrom: { lte: entrada.hasta },
+        },
+        select: CAMPOS_DE_PRECIO,
+        // Sirve al indice `(company_id, item_id, valid_from DESC)` de §5.
+        orderBy: [{ itemId: 'asc' }, { validFrom: 'desc' }, { createdAt: 'desc' }],
+      });
+
+      return filas.map(comoPrecio);
+    });
+  }
 }
 
 function comoPrecio(fila: {

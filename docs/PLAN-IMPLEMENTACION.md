@@ -267,9 +267,9 @@ Cargar 48 productos en la grilla de ventas se hace **sin tocar el mouse** · el 
 
 ## P14 — Capa visual
 
-**Objetivo.** Aplicar la identidad de marca cuando exista.
+**Objetivo.** Aplicar la identidad de marca definida en **`docs/Manual de Marca/platise-brand-book.pdf`** — la fuente única, ver `CLAUDE.md` §10.
 
-**Entregables.** Reemplazo de `tokens.css` y de `components/ui` · sin tocar hooks, servicios ni dominio
+**Entregables.** Reemplazo de `tokens.css` y de `components/ui` con los valores del manual · sin tocar hooks, servicios ni dominio
 
 **Criterio de aceptación.** El diff no toca ni un archivo de `src/modules/*/domain` ni de `application` · todas las pruebas siguen en verde sin modificarse
 

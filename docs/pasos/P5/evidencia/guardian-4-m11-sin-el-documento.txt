@@ -1,0 +1,16 @@
+
+> costeo-saas@0.0.0 audit:migrations
+> node tools/audit/migrations.mjs
+
+
+  20260827081537_p0_audit_log
+     [M11] falta docs\sistema\guardas-de-dominio.md, que M11 exige para toda migracion con CHECK o trigger. Ver docs/incidencias/INC-012
+
+  20260904171128_p3_precios
+     [M11] falta docs\sistema\guardas-de-dominio.md, que M11 exige para toda migracion con CHECK o trigger. Ver docs/incidencias/INC-012
+
+  20260904174016_p4_recetas
+     [M11] falta docs\sistema\guardas-de-dominio.md, que M11 exige para toda migracion con CHECK o trigger. Ver docs/incidencias/INC-012
+
+audit:migrations  FALLO — 3 problema(s) en 6 migracion(es)
+

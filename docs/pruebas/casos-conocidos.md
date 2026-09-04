@@ -249,21 +249,242 @@ DIFERENCIA_CONCILIACION = ROUND(costo_ventas_teorico − costo_ventas_v_costeo, 
 
 ---
 
-## Cobertura restante antes de implementar P5
+## CC-004 — El mismo ítem en base AP y en base EP
 
-CC-001 a CC-003 cubren ya los casos base, la condicional AP/EP por el lado EP, el rendimiento < 1, la línea excluida, el rendimiento por lote y el IVA recuperable. Faltan estos, que se escriben **antes** de tocar el motor:
+**Qué prueba:** R4, la condicional que SPEC §13 llama «la más frágil del modelo». Los dos casos con **resultados distintos y ambos correctos**.
+**Origen:** construido. `T3_RECETAS` tiene sus 293 líneas **todas en base `EP`**, así que la mitad AP no se puede extraer del Excel: se deriva de `INS-113` (CC-002) aplicando la fórmula de SPEC §13 a mano.
 
-| Caso | Qué debe cubrir | Estado |
+**Por qué se parte de CC-002 y no de un ítem inventado.** La mitad `EP` de este caso **ya está verificada por el Excel** —`V_COSTEO` da `0.4615384615` para esa línea— así que lo único calculado a mano es la mitad `AP`, que es una multiplicación. Un ítem inventado habría dejado las dos mitades sin corroborar.
+
+**Entradas** — el ítem, leído del Excel
+
+| Campo | Valor | Procedencia |
 |---|---|---|
-| CC-001 | Producto simple, un solo ítem, base EP, rendimiento 1.0 | ✅ `PRD-001` |
-| CC-002 | Rendimiento < 1 (el costo neto **sube**) + línea `EXCLUIDA` + subpreparación | ✅ `PRD-006` |
-| CC-003 | Rendimiento por lote > 1 porción + IVA de compra recuperable | ✅ `PRD-018` |
-| CC-004 | **El mismo ítem en base AP y en base EP** — resultados distintos, ambos correctos (R4) | ⬜ P5. **Ojo: el Excel no tiene ni una línea en base AP**; hay que construirlo derivando de CC-002 y calcular el valor esperado a mano desde la fórmula del SPEC §13 |
-| CC-005 | **Subpreparación anidada**: un ítem `PRODUCIDO` con receta propia dentro de otra receta, costeado en cascada | ⬜ P5. Parte de `INS-131` de CC-002, que hoy tiene costo escrito a mano |
-| CC-006 | **Combo**: dos productos simples con porciones reducidas | ⬜ P5. Candidatos reales en el Excel: `PRD-038`, `PRD-039`, `PRD-040`, `PRD-048` |
-| CC-007 | `iva_recuperable = false`: el costo sube exactamente el porcentaje del IVA | ⬜ P5. Se deriva de CC-003, que ya tiene ítems con IVA `0.15` |
-| CC-008 | Cuadrante de menu engineering con índice de popularidad **exactamente 1** | ⬜ P8 |
-| CC-009 | Producto con rendimiento 0: no debe dividir por cero | ⬜ P5. Borde, no hay caso real en el Excel |
-| CC-R7 | Conciliación = 0 con dataset completo | 🟡 versión reducida en P0; completa en P8 |
+| Ítem | `INS-113` Plátano maduro | `T1_INSUMOS` |
+| Precio de compra | `0.20` | `T1_INSUMOS` |
+| % IVA compra | `0.00` | `T1_INSUMOS` |
+| Factor de conversión | `1.0` | `T1_INSUMOS` |
+| **Rendimiento** | **`0.65`** | `T1_INSUMOS` |
+| `costo_bruto_uso` | `0.20` | `T1_INSUMOS` |
+| `costo_neto_uso` | `0.3076923077` | `T1_INSUMOS` |
 
-> **Advertencia sobre CC-004.** Es el caso que cubre la regla R4, la condicional más frágil del modelo, y **no se puede extraer del Excel**: las 293 líneas de `T3_RECETAS` están todas en base `EP`. Hay que construirlo y calcular su valor esperado a mano desde `docs/SPEC.md` §13, antes de escribir el motor. Es el ítem B2 de `docs/FASE0-CHECKLIST.md` y no debe hacerlo quien escriba después la aritmética que lo verifica.
+**Entradas** — la línea, la misma cantidad en las dos bases
+
+| Cantidad | Base | Estado |
+|---|---|---|
+| `1.5` | `EP` | `ACTIVA` |
+| `1.5` | `AP` | `ACTIVA` |
+
+**Resultado esperado**
+
+| Base | Fórmula (SPEC §13) | Valor esperado | Procedencia |
+|---|---|---|---|
+| `EP` | `1.5 × costo_neto_uso` = `1.5 × 0.307692307692…` | **`0.461538461538`** | **`V_COSTEO` lo tiene: `0.4615384615`** |
+| `AP` | `1.5 × costo_bruto_uso` = `1.5 × 0.20` | **`0.30`** | Calculado a mano desde SPEC §13 |
+| — | diferencia entre las dos | **`0.161538461538`** | |
+
+> **Qué pasa si R4 se implementa al revés.** La línea cuesta `0.30` en vez de `0.4615…`: un **35 % menos**. Nada se rompe, nada avisa, y el food cost del plato sale casi cuatro puntos por debajo del real. Por eso este caso existe y por eso el motor lo corre siempre.
+
+> **La trampa que este caso evita.** Con rendimiento `1.00` los dos números coinciden y **pasa cualquier implementación, incluida la invertida**. `INS-113` se eligió justamente por tener rendimiento `0.65`.
+
+---
+
+## CC-005 — Subpreparación anidada, costeada en cascada
+
+**Qué prueba:** que un ítem `PRODUCIDO` con receta propia produce **el mismo número** que el costo escrito a mano del Excel, y que al subir un insumo ese número **se mueve**. Es el problema que el LEEME declara como deuda conocida (SPEC §5): *«tienen costo escrito a mano y no se recalculan si sube un insumo»*.
+**Origen:** parte de `INS-131` (Salsa de queso), la subpreparación de CC-002, que en el Excel tiene costo `0.20` escrito a mano. La receta es **construida**: el Excel no tiene ninguna.
+
+**El destino: `INS-131`** — `SUB` en el Excel, ítem `PRODUCIDO` en el SaaS. Unidad de uso `unid`, rendimiento `1.00`.
+
+**La receta de la subpreparación** — se expresa **por unidad de uso**, no por lote
+
+| Ítem | Precio | % IVA | Rend. | `costo_neto_uso` | Cantidad | Base | Estado | Costo de la línea |
+|---|---|---|---|---|---|---|---|---|
+| `INS-122` Queso mozzarella | `5.50` /kg | `0.00` | `1.00` | `5.50` | `0.032` | `EP` | `ACTIVA` | `0.176` |
+| `INS-057` Huevo | `0.12` /unid | `0.00` | `1.00` | `0.12` | `0.2` | `EP` | `ACTIVA` | `0.024` |
+
+**Parte A — la cascada reproduce el número del Excel**
+
+| Campo | Valor esperado |
+|---|---|
+| `costo_neto_uso` de `INS-131` derivado | **`0.200000`** |
+| El costo escrito a mano en `T1_INSUMOS` | `0.20` |
+| CC-002 recalculado con la cascada | **idéntico**: `costo_neto_lote` `1.098548462` y todo lo demás |
+
+> **Ésta es la aserción fuerte del caso.** La cascada no se compara contra un número que yo haya calculado: se compara contra el `0.20` que el Excel ya tenía, y contra el `1.098548462` que `V_COSTEO` ya tenía. Si la cascada estuviera mal, CC-002 dejaría de cuadrar.
+
+**Parte B — sube un insumo y el plato se mueve**
+
+El queso mozzarella pasa de `5.50` a `6.00` el kilo. Precio nuevo, fila nueva, confirmado (R5).
+
+| Campo | Antes | Después | Cómo se obtiene |
+|---|---|---|---|
+| Línea del queso en la salsa | `0.176` | `0.192` | `6.00 × 0.032` |
+| `costo_neto_uso` de `INS-131` | `0.200000` | **`0.216000`** | `0.192 + 0.024` |
+| Línea de `INS-131` en CC-002 | `0.20` | **`0.216`** | cantidad `1.0` |
+| `costo_bruto_lote` de CC-002 | `0.93701` | **`0.95301`** | `0.93701 − 0.20 + 0.216` |
+| `costo_neto_lote` de CC-002 | `1.098548462` | **`1.114548462`** | `1.098548462 − 0.20 + 0.216` |
+| `costo_con_merma` | `1.120519431` | **`1.136839431`** | `1.114548462 × 1.02` |
+| **`COSTO_TOTAL_UNIDAD`** | `1.163997692` | **`1.180317692`** | `+ 0.04347826087` |
+
+> **En el modelo del Excel este movimiento no habría ocurrido.** El costo de la salsa seguiría siendo `0.20` hasta que alguien lo cambiara a mano, y el plato seguiría pareciendo más barato de lo que es. La cascada es la que convierte una subida de precio en un margen actualizado.
+
+**Sobre `PRODUCIDO` y el precio de referencia.** `INS-131` puede tener las dos cosas: una receta propia y un precio de referencia confirmado. **Cuando hay receta, manda la receta**; el precio de referencia es el costo estándar de una preparación que todavía no la tiene —que es exactamente cómo llegan las 24 filas `SUB` en la migración del Excel. El razonamiento completo está en `docs/decisiones/ADR-008`.
+
+---
+
+## CC-006 — Combo de dos productos simples
+
+**Qué prueba:** SPEC §8, «el combo usa las porciones reducidas, no los productos de carta», y que el costo del combo es la **suma de sus componentes ya costeados**, sin volver a cobrar la merma y sin prorratear el descuento.
+**Origen:** construido. Los dos componentes son productos reales y sus costos están **leídos de `V_COSTEO`**; lo único calculado aquí es la suma. Candidatos reales del Excel para el mismo patrón: `PRD-038`, `PRD-039`, `PRD-040`, `PRD-048`.
+
+**Entradas**
+
+| Campo | Valor |
+|---|---|
+| Combo | `PRD-C01` — Tamal + Empanada |
+| Tipo | `COMBO` |
+| PVP c/IVA | `4.00` |
+| Empaque propio | ninguno |
+
+| Componente | Cantidad | `COSTO_TOTAL_UNIDAD` | Procedencia |
+|---|---|---|---|
+| `PRD-001` Tamal de pollo | `1` | `0.5636782609` | `V_COSTEO` fila 6 (CC-001) |
+| `PRD-018` Empanada de Verde con Pollo | `1` | `0.5138083124` | `V_COSTEO` fila 23 (CC-003) |
+
+**Resultado esperado**
+
+| Campo | Valor esperado | Cómo se obtiene |
+|---|---|---|
+| **`COSTO_TOTAL_UNIDAD`** | **`1.0774865733`** | `0.5636782609 + 0.5138083124` — suma exacta de dos valores del Excel |
+| `venta_neta` | `3.478260869565` | `4.00 / 1.15` |
+| `iva_en_precio` | `0.521739130435` | `4.00 − venta_neta` |
+| **`MARGEN_CONTRIBUCION`** | **`2.400774296265`** | `venta_neta − costo_total_unidad` |
+| `mc_pct` (2 dec.) | `0.69` | |
+| **`FOOD_COST_PCT`** (2 dec.) | **`0.31`** | |
+| `suma_control` | **`1`** | R6 |
+| `multiplicador` (2 dec.) | `3.23` | |
+
+**Las tres reglas que este caso fija, y que el SPEC no escribe:**
+
+1. **El combo no vuelve a aplicar la provisión de merma.** Cada componente ya la lleva dentro de su `COSTO_TOTAL_UNIDAD`. Aplicarla otra vez sería cobrar la merma dos veces, que es justo lo que R12 prohíbe.
+2. **El combo no divide por `rendimiento_porciones`.** Un combo es una unidad; sus componentes ya vienen costeados por porción.
+3. **El combo suma el empaque de sus componentes y añade el suyo si lo tiene.** Aquí no tiene, así que el total es la suma limpia. Un combo servido en bandeja añadiría la bandeja **una vez**.
+
+> **El descuento no se prorratea** (SPEC §8). El combo compite en menu engineering como ítem propio: su PVP de `4.00` es menor que la suma de los PVP sueltos (`1.80 + 2.50 = 4.30`), y esa diferencia es del combo, no de los componentes. En P8 se verá como un cuadrante propio.
+
+---
+
+## CC-007 — `iva_recuperable = false`: el costo sube exactamente el IVA de cada precio
+
+**Qué prueba:** R13 y el criterio E20. Y una segunda cosa que ninguna otra prueba cubre: que **la tasa de IVA es la de cada precio, no una de la company**.
+**Origen:** los once ítems de CC-003 (`PRD-018`), que traen **tres tasas distintas conviviendo**: `0.15` en tres ítems y `0.00` en los otros ocho.
+
+**Entradas.** Las mismas de CC-003, cambiando un único parámetro de la company: `iva_compra_recuperable` de `SI` a `NO`.
+
+**Resultado esperado — la identidad, ítem por ítem**
+
+Para cada uno de los once ítems, con la fórmula de SPEC §12:
+
+```
+costo_neto_uso(no recuperable) = costo_neto_uso(recuperable) × (1 + iva_compra DE ESE PRECIO)
+```
+
+| Ítem | % IVA de su precio | `costo_neto_uso` recuperable | `costo_neto_uso` NO recuperable | ¿Cambia? |
+|---|---|---|---|---|
+| `INS-072` Manteca | **`0.15`** | `3.47826087` | **`4.00`** | **sí** |
+| `INS-004` Achiote | **`0.15`** | `3.843478261` | **`4.42`** | **sí** |
+| `INS-046` Cubos maggi | **`0.15`** | `7.286956522` | **`8.38`** | **sí** |
+| `INS-112` Plátano dominico | `0.00` | `0.9705882353` | `0.9705882353` | no |
+| `INS-100` Pechuga de pollo | `0.00` | `4.782608696` | `4.782608696` | no |
+| `INS-125` Sal | `0.00` | `0.39` | `0.39` | no |
+| `INS-029` Cebolla paiteña | `0.00` | `1.091954023` | `1.091954023` | no |
+| `INS-109` Pimientos | `0.00` | `3.048780488` | `3.048780488` | no |
+| `INS-063` Laurel | `0.00` | `12.88` | `12.88` | no |
+| `INS-043` Comino | `0.00` | `8.32` | `8.32` | no |
+| `INS-081` Orégano | `0.00` | `12.00` | `12.00` | no |
+
+**Y el empaque cambia igual que los ítems** (R13: «afecta el costo de ítems y empaques por igual»):
+
+| | recuperable | NO recuperable |
+|---|---|---|
+| `EMP-E` Bolsa kraft (`0.05`, IVA `0.15`) | `0.04347826087` | **`0.05`** |
+
+**Las dos aserciones que discriminan**
+
+| # | Aserción | Qué implementación mata |
+|---|---|---|
+| 1 | **Cambian exactamente 3 de los 11 ítems** | La que usa una tasa única de company: movería los once |
+| 2 | El delta del lote es `0.79854782608699`, que a la escala 12 del motor es `0.798547826087` | `(3.60 − 3.130434783) + (1.768 − 1.537391304) + (0.7542 − 0.655826087)`, y **nada más** |
+
+> **Corrección a CC-003.** Su nota decía «los cuatro ítems con `% IVA compra = 0.15`» y a continuación nombraba **tres**. Son tres: manteca, achiote y cubos maggi. El error estaba en la prosa, no en la tabla, que siempre listó los once ítems con su tasa correcta.
+
+---
+
+## CC-009 — Los bordes que no pueden dividir por cero
+
+**Qué prueba:** que ningún borde produce `NaN`, `Infinity` ni un cero que parezca un resultado. El SPEC escribe dos guardas explícitas; la tercera no la escribe y hace falta igual.
+**Origen:** construido. No hay caso real en el Excel, y ése es justamente el motivo de escribirlo.
+
+**Borde 1 — `rendimiento_porciones = 0`** (guarda de SPEC §14)
+
+Un producto con receta y sin rendimiento capturado. Es el estado normal de un producto a medio configurar.
+
+| Campo | Valor esperado |
+|---|---|
+| `costo_por_porcion` | **`0`** — la guarda del SPEC, no una excepción |
+| `costo_con_merma` | `0` |
+| `COSTO_TOTAL_UNIDAD` | `0.04347826087` — solo el empaque |
+| Excepción lanzada | **ninguna** |
+
+**Borde 2 — `factor_conversion = 0` y `rendimiento = 0`** (guardas de SPEC §12)
+
+| Entrada | `costo_bruto_uso` | `costo_neto_uso` |
+|---|---|---|
+| `factor_conversion = 0` | **`0`** | `0` |
+| `rendimiento = 0` | `0.51` | **`0`** |
+
+**Borde 3 — sin PVP: la guarda que el SPEC no escribe**
+
+`product_location.pvp` es anulable, y un producto sin PVP es lo normal antes de fijar precio. Pero `venta_neta = 0` haría que `mc_pct = margen / 0` y `multiplicador = venta_neta / costo`.
+
+| Campo | Valor esperado |
+|---|---|
+| Los costos (`costo_por_porcion`, `costo_con_merma`, `COSTO_TOTAL_UNIDAD`) | **se calculan igual**: no dependen del PVP |
+| `venta_neta`, `mc_pct`, `FOOD_COST_PCT`, `suma_control`, `multiplicador` | **ausentes**, con el motivo dentro |
+| Excepción lanzada | **ninguna** |
+
+> **Ausentes, no cero.** Un `food_cost_pct = 0` se lee como «este plato no cuesta nada», que es lo contrario de lo que pasa. El motor devuelve una unión: o el bloque de venta entero, o el motivo por el que no hay. R6 (`mc% + food_cost% = 1`) se exige **solo** cuando hay bloque de venta, porque sin venta neta la suma de control no significa nada.
+
+**Borde 4 — `costo_bruto_lote = 0`** (guarda de SPEC §14)
+
+| Campo | Valor esperado |
+|---|---|
+| `impacto_merma` | **`null`**, tal como el SPEC lo escribe. No `0`, que se leería como «esta receta no tiene merma» |
+
+---
+
+## Cobertura — estado tras P5
+
+Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se redactaron en la fase PLAN de P5, antes de tocar el motor**, y el motor se implementó contra ellos.
+
+| Caso | Qué cubre | Estado | Procedencia del número esperado |
+|---|---|---|---|
+| CC-001 | Producto simple, un ítem, base EP, rendimiento 1.0 | ✅ | `V_COSTEO` fila 6 |
+| CC-002 | Rendimiento < 1 (el costo neto **sube**) + línea `EXCLUIDA` + subpreparación | ✅ | `V_COSTEO` fila 11 |
+| CC-003 | Rendimiento por lote > 1 porción + IVA de compra recuperable | ✅ | `V_COSTEO` fila 23 |
+| CC-004 | **El mismo ítem en base AP y en base EP** — resultados distintos, ambos correctos (R4) | ✅ P5 | Mitad `EP` del Excel; mitad `AP` a mano desde SPEC §13 |
+| CC-005 | **Subpreparación anidada** costeada en cascada | ✅ P5 | Reproduce el `0.20` escrito a mano del Excel y el `1.098548462` de `V_COSTEO` |
+| CC-006 | **Combo** de dos productos simples | ✅ P5 | Suma de dos `COSTO_TOTAL_UNIDAD` de `V_COSTEO` |
+| CC-007 | `iva_recuperable = false`: sube exactamente el IVA **de cada precio** | ✅ P5 | Los once ítems de CC-003 con sus tres tasas |
+| CC-008 | Cuadrante de menu engineering con índice de popularidad **exactamente 1** | ⬜ P8 | Menu engineering es SPEC §15, y llega con las vistas |
+| CC-009 | Los cuatro bordes que no pueden dividir por cero | ✅ P5 | Guardas de SPEC §12 y §14, más la del PVP ausente |
+| CC-R7 | Conciliación = 0 | 🟡 P0 con aritmética · **P5 a través del motor** · dataset completo en P8 |
+
+### Qué cambió en P5 respecto de lo que esta tabla decía antes
+
+**CC-004 ya no depende de un número que nadie más haya calculado.** Se pensó como un caso íntegramente construido; se escribió partiendo de `INS-113`, cuya mitad `EP` **el Excel ya tiene calculada** (`0.4615384615`). Lo único a mano es la mitad `AP`, que es una multiplicación por `0.20`. La advertencia del ítem B2 de `FASE0-CHECKLIST` —«no debe calcularlo quien escriba después la aritmética que lo verifica»— queda cubierta por esa mitad corroborada, y no por confiar en mi cuenta.
+
+**CC-R7 subió de nivel.** En P0 corría con aritmética suelta sobre valores de `V_COSTEO`. En P5 **corre a través del motor**: los `costo_por_porcion`, `venta_neta` y `margen_contribucion` ya no se transcriben, los produce `costearProducto` a partir de los ítems y las líneas. La versión con el dataset completo y el inventario real sigue siendo de P8, que es donde existen las compras y el conteo físico.
+
+**CC-002 dejó de tener un valor escrito a mano.** Su línea `INS-131` valía `0.20` porque el Excel lo tenía así. Con CC-005, esa `0.20` la produce la cascada desde una receta, y el resto de CC-002 no se mueve ni un decimal. Es la prueba de que la cascada no cambió la respuesta, solo su origen.

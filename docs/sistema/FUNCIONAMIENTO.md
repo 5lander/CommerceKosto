@@ -78,6 +78,35 @@ graph LR
 
 Las fórmulas exactas están en `docs/SPEC.md` §12 a §18.
 
+### Cómo se alimenta el motor (desde P5)
+
+**El motor no consulta nada.** Recibe valores y devuelve valores, y por eso las 45 pruebas que lo cubren corren con PostgreSQL apagado — que es el criterio arquitectónico de CLAUDE.md §2 aplicado al componente que lo motivaba.
+
+```mermaid
+graph TD
+    HTTP["GET /costeo?locationId&fecha"] --> CC[CostearCarta]
+
+    CC --> LC["LeerCarta · recipes"]
+    CC --> CI["CostosDeItems · pricing"]
+    CC --> LI["ListarItems · catalog"]
+    CC --> LA["LeerAjustes · pricing"]
+
+    LC -->|"productos, config, recetas vigentes, combos"| CAT[catálogo costeable]
+    CI -->|"cadena de SPEC §12 por ítem"| CAT
+    LI --> CAT
+
+    CAT --> CAS["resolverCostos · cascada memorizada"]
+    CAS --> MOT["costearProducto · SPEC §14"]
+    LA -->|"iva_venta, provisión de merma"| MOT
+    MOT --> DTO["dos escalas por importe: mostrar y exacto"]
+```
+
+**Ocho consultas, fijas.** No importa si la carta tiene 3 productos o 200: `LeerCarta` trae cuatro cosas de `recipes` en cuatro consultas y `CostosDeItems` resuelve el costo de **todos** los ítems en cuatro más. Pedir la receta de cada producto por separado serían 200 consultas antes de empezar a calcular, y el presupuesto de 400 ms de §5 no lo aguanta.
+
+**Ninguno de los dos duplica una regla.** `CostosDeItems` llama a la misma `costoDelItem` de SPEC §12 que usa la consulta de un solo ítem, y cuál precio está vigente lo sigue decidiendo el dominio (R5), no un `DISTINCT ON`. El día que hubiera dos implementaciones, el costo de un plato dependería de por dónde se preguntó.
+
+**Costear uno pasa por costear todos.** Pedir un solo producto carga la carta entera y se queda con uno. Es deliberado: dos rutas distintas para el mismo número son dos oportunidades de que den respuestas distintas, y en este sistema eso no se ve en pantalla.
+
 
 ---
 

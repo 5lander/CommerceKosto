@@ -34,15 +34,19 @@ import { TenantTransaction } from '../../../shared/infrastructure/persistence/te
 import type { GrafoDeItems } from '../domain/ciclos';
 import type { BaseDeLinea, EstadoDeLinea } from '../domain/linea-de-receta';
 import type {
+  ComponenteDeCombo,
+  ConfiguracionEnUbicacion,
   DatosDePropagacionRegistrada,
   DatosDeVersion,
   DestinoDePropagacion,
   DestinoDeReceta,
   LineaLeida,
+  ProductoConUbicacion,
   ProductoEnUbicacion,
   ProductoLeido,
   PropagacionLeida,
   RecetaLeida,
+  RecetaVigenteLeida,
   RepositorioDeRecetas,
   ResultadoDeAltaDeProducto,
   TipoDeProducto,
@@ -62,6 +66,40 @@ function esDuplicado(error: unknown): boolean {
 /** El filtro que distingue una receta de producto de una de subpreparación. */
 function porDestino(destino: DestinoDeReceta): { productId: string } | { itemId: string } {
   return destino.clase === 'producto' ? { productId: destino.productId } : { itemId: destino.itemId };
+}
+
+const CAMPOS_DE_CONFIGURACION = {
+  activo: true,
+  pvp: true,
+  rendimientoPorciones: true,
+} as const;
+
+const CAMPOS_DE_PRODUCTO = {
+  id: true,
+  name: true,
+  type: true,
+  category: true,
+  status: true,
+  packagingItemId: true,
+} as const;
+
+/** Lo que devuelve un `select: CAMPOS_DE_RECETA`. */
+/** Lo que devuelve un `select` de las columnas de una linea. */
+interface FilaDeLinea {
+  itemId: string;
+  cantidad: Decimal;
+  base: string;
+  estado: string;
+  orden: number;
+}
+
+interface FilaDeReceta {
+  id: string;
+  locationId: string;
+  status: string;
+  validFrom: Date;
+  note: string | null;
+  lineas: readonly FilaDeLinea[];
 }
 
 const CAMPOS_DE_RECETA = {
@@ -112,7 +150,7 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     return this.transaccion.run(companyId, async (tx) => {
       const filas = await tx.product.findMany({
         where: { companyId },
-        select: { id: true, name: true, type: true, category: true, status: true },
+        select: CAMPOS_DE_PRODUCTO,
         orderBy: { name: 'asc' },
       });
 
@@ -127,7 +165,7 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       const fila = await tx.product.findFirst({
         where: { id: entrada.productId, companyId: entrada.companyId },
-        select: { id: true, name: true, type: true, category: true, status: true },
+        select: CAMPOS_DE_PRODUCTO,
       });
 
       return fila === null ? null : comoProducto(fila);
@@ -171,15 +209,10 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       const filas = await tx.productLocation.findMany({
         where: { companyId: entrada.companyId, productId: entrada.productId },
-        select: { locationId: true, activo: true, pvp: true, rendimientoPorciones: true },
+        select: { locationId: true, ...CAMPOS_DE_CONFIGURACION },
       });
 
-      return filas.map((f) => ({
-        locationId: aLocationId(f.locationId),
-        activo: f.activo,
-        pvp: f.pvp === null ? null : f.pvp.toFixed(),
-        rendimientoPorciones: f.rendimientoPorciones === null ? null : f.rendimientoPorciones.toFixed(),
-      }));
+      return filas.map((f) => ({ locationId: aLocationId(f.locationId), ...comoConfiguracion(f) }));
     });
   }
 
@@ -463,6 +496,149 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
       return filas.map(comoLinea);
     });
   }
+
+  public async asignarEmpaque(entrada: {
+    readonly companyId: CompanyId;
+    readonly productId: ProductId;
+    readonly empaqueItemId: ItemId | null;
+  }): Promise<boolean> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      // `updateMany` y no `update`: bajo RLS, `update` con `RETURNING` exige la
+      // politica de SELECT y ademas lanza si no encuentra la fila. Aqui «no
+      // existe» es una respuesta, no una excepcion (INC-010).
+      const resultado = await tx.product.updateMany({
+        where: { id: entrada.productId, companyId: entrada.companyId },
+        data: { packagingItemId: entrada.empaqueItemId },
+      });
+
+      return resultado.count > 0;
+    });
+  }
+
+  public async recetasVigentesDeUbicacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly fecha: Date;
+  }): Promise<readonly RecetaVigenteLeida[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.recipe.findMany({
+        where: {
+          companyId: entrada.companyId,
+          locationId: entrada.locationId,
+          validFrom: { lte: entrada.fecha },
+        },
+        select: { ...CAMPOS_DE_RECETA, productId: true, itemId: true },
+        // El orden ES la seleccion: la primera fila de cada destino es la
+        // vigente. Lo sirve el indice `recipe_por_ubicacion_y_vigencia` de P5.
+        orderBy: [{ validFrom: 'desc' }, { createdAt: 'desc' }],
+      });
+
+      return vigentesPorDestino(filas);
+    });
+  }
+
+  public async productosEnUbicacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+  }): Promise<readonly ProductoConUbicacion[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.productLocation.findMany({
+        where: { companyId: entrada.companyId, locationId: entrada.locationId },
+        select: { productId: true, ...CAMPOS_DE_CONFIGURACION },
+      });
+
+      return filas.map((f) => ({ productId: aProductId(f.productId), ...comoConfiguracion(f) }));
+    });
+  }
+
+  public async componentesDeCombos(
+    companyId: CompanyId,
+  ): Promise<readonly ComponenteDeCombo[]> {
+    return this.transaccion.run(companyId, async (tx) => {
+      const filas = await tx.comboComponent.findMany({
+        where: { companyId },
+        select: { comboProductId: true, componentProductId: true, cantidad: true },
+      });
+
+      return filas.map((f) => ({
+        comboProductId: aProductId(f.comboProductId),
+        componentProductId: aProductId(f.componentProductId),
+        cantidad: f.cantidad.toFixed(),
+      }));
+    });
+  }
+}
+
+/**
+ * De todas las versiones ordenadas por vigencia, la primera de cada destino.
+ *
+ * UNA VERSION `VOID` GANA IGUAL QUE CUALQUIER OTRA si es la mas reciente, y
+ * entonces ese destino NO aparece en el resultado. Es la respuesta «aqui no hay
+ * receta», que es distinta de una receta vacia: una receta vacia cuesta cero, y
+ * cero es un numero plausible y equivocado.
+ */
+function vigentesPorDestino(
+  filas: readonly (FilaDeReceta & { productId: string | null; itemId: string | null })[],
+): readonly RecetaVigenteLeida[] {
+  const vistos = new Set<string>();
+  const vigentes: RecetaVigenteLeida[] = [];
+
+  for (const fila of filas) {
+    const destino = destinoDe(fila);
+    if (destino === null) {
+      continue;
+    }
+
+    const clave = destino.clase === 'producto' ? `p:${destino.productId}` : `i:${destino.itemId}`;
+    if (vistos.has(clave)) {
+      continue;
+    }
+    vistos.add(clave);
+
+    if (fila.status === ACTIVA) {
+      vigentes.push({ ...comoReceta(fila), destino });
+    }
+  }
+
+  return vigentes;
+}
+
+function destinoDe(fila: {
+  productId: string | null;
+  itemId: string | null;
+}): DestinoDeReceta | null {
+  if (fila.productId !== null) {
+    return { clase: 'producto', productId: aProductId(fila.productId) };
+  }
+  if (fila.itemId !== null) {
+    return { clase: 'item', itemId: aItemId(fila.itemId) };
+  }
+  // Un `CHECK` de la migracion lo hace imposible. Si llegara, se salta en vez
+  // de reventar el costeo entero de la carta.
+  return null;
+}
+
+
+/**
+ * La configuracion de un producto en una ubicacion, sin decir de cual de los
+ * dos lados se mira.
+ *
+ * `ubicacionesDe` la ve desde el producto y `productosEnUbicacion` desde la
+ * ubicacion; el resto es identico, y `audit:duplication` lo marco. La forma
+ * tiene un nombre en el puerto —`ConfiguracionEnUbicacion`— y aqui una sola
+ * traduccion.
+ */
+function comoConfiguracion(fila: {
+  activo: boolean;
+  pvp: Decimal | null;
+  rendimientoPorciones: Decimal | null;
+}): ConfiguracionEnUbicacion {
+  return {
+    activo: fila.activo,
+    pvp: fila.pvp === null ? null : fila.pvp.toFixed(),
+    rendimientoPorciones:
+      fila.rendimientoPorciones === null ? null : fila.rendimientoPorciones.toFixed(),
+  };
 }
 
 function comoProducto(fila: {
@@ -471,6 +647,7 @@ function comoProducto(fila: {
   type: string;
   category: string | null;
   status: string;
+  packagingItemId: string | null;
 }): ProductoLeido {
   return {
     id: aProductId(fila.id),
@@ -478,16 +655,11 @@ function comoProducto(fila: {
     tipo: fila.type,
     categoria: fila.category,
     estado: fila.status,
+    empaqueItemId: fila.packagingItemId === null ? null : aItemId(fila.packagingItemId),
   };
 }
 
-function comoLinea(fila: {
-  itemId: string;
-  cantidad: Decimal;
-  base: string;
-  estado: string;
-  orden: number;
-}): LineaLeida {
+function comoLinea(fila: FilaDeLinea): LineaLeida {
   return {
     itemId: aItemId(fila.itemId),
     cantidad: fila.cantidad.toFixed(),
@@ -497,14 +669,7 @@ function comoLinea(fila: {
   };
 }
 
-function comoReceta(fila: {
-  id: string;
-  locationId: string;
-  status: string;
-  validFrom: Date;
-  note: string | null;
-  lineas: readonly { itemId: string; cantidad: Decimal; base: string; estado: string; orden: number }[];
-}): RecetaLeida {
+function comoReceta(fila: FilaDeReceta): RecetaLeida {
   return {
     id: aRecipeId(fila.id),
     locationId: aLocationId(fila.locationId),

@@ -89,4 +89,22 @@ export interface RepositorioDePrecios {
     readonly companyId: CompanyId;
     readonly itemId: ItemId;
   }): Promise<readonly PrecioLeido[]>;
+
+  /**
+   * Todos los precios CONFIRMADOS de la company con vigencia hasta una fecha.
+   *
+   * EXISTE PARA QUE COSTEAR UNA CARTA NO SEA UN N+1. Con `historial` por item,
+   * costear 200 productos con 300 insumos son 300 consultas; el presupuesto de
+   * 400 ms de CLAUDE.md §5 no lo aguanta.
+   *
+   * **DEVUELVE FILAS, NO EL VIGENTE.** Elegir cual esta vigente es R5 y vive en
+   * `domain/vigencia.ts`, con su desempate por `created_at`. Un `DISTINCT ON`
+   * en SQL seria mas rapido y pondria la regla de negocio en dos sitios; el dia
+   * que uno de los dos cambiara, el costo del mes pasado dejaria de coincidir
+   * consigo mismo.
+   */
+  confirmadosHasta(entrada: {
+    readonly companyId: CompanyId;
+    readonly hasta: Date;
+  }): Promise<readonly PrecioLeido[]>;
 }

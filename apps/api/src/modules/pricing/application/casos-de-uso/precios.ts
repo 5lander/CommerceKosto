@@ -22,7 +22,7 @@ import type {
 } from '../../../../shared/domain/identity/identificadores';
 import { Money, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import type { LeerItem } from '../../../catalog/application/casos-de-uso/items';
+import type { LeerItem, ListarItems } from '../../../catalog/application/casos-de-uso/items';
 import type { ListarArticulos } from '../../../catalog/application/casos-de-uso/articulos';
 import { costoDelItem, type CostoDelItem } from '../../domain/cadena-de-costo';
 import {
@@ -55,6 +55,12 @@ export interface DependenciasDePrecios {
    */
   readonly leerItem: LeerItem;
   readonly listarArticulos: ListarArticulos;
+  /**
+   * El catalogo ENTERO de items, para costear una carta sin un N+1. Lo usa
+   * `CostosDeItems`; `CostoDeItem` sigue leyendo de uno en uno porque resuelve
+   * uno solo.
+   */
+  readonly listarItems: ListarItems;
 }
 
 export interface DatosDeSugerencia {
@@ -75,6 +81,8 @@ export class SugerirPrecio {
     // `Money` y `Ratio` lanzan en el borde y no seis capas más abajo con un
     // valor ya redondeado.
     Money.fromDecimalString(datos.precio);
+
+    await this.exigirArticuloCoherente(sesion, datos);
 
     const ivaCompra = datos.ivaCompra ?? (await this.ivaPorDefecto(sesion));
     Ratio.fromDecimalString(ivaCompra);
@@ -103,6 +111,37 @@ export class SugerirPrecio {
     });
 
     return id;
+  }
+
+  /**
+   * Un precio sin presentación no significa nada: «2.30» solo es un dato junto
+   * a «el saco de 2 kg». Y una preparación PRODUCIDA no se compra: su precio es
+   * el costo estándar por unidad de uso (R10), y no lleva artículo.
+   *
+   * **UN TRIGGER YA LO IMPIDE EN LA BASE.** Esto lo EXPLICA: un `P0001` del
+   * driver sale por el filtro como INTERNAL_ERROR 500 —un fallo del servidor—
+   * cuando lo que hay es un formulario mal llenado. Lo destapó la prueba de
+   * integración de P5.
+   */
+  private async exigirArticuloCoherente(
+    sesion: SesionActiva,
+    datos: DatosDeSugerencia,
+  ): Promise<void> {
+    const item = await this.deps.leerItem.ejecutar(sesion, datos.itemId);
+    if (item === null) {
+      throw new PrecioNoEncontradoError();
+    }
+
+    if (item.tipo === 'COMPRADO' && datos.purchaseArticleId === null) {
+      throw new ItemSinPrecioError(
+        'El precio de un ítem comprado necesita su artículo: un importe sin presentación no dice cuánto cuesta la unidad de uso.',
+      );
+    }
+    if (item.tipo === 'PRODUCIDO' && datos.purchaseArticleId !== null) {
+      throw new ItemSinPrecioError(
+        'Una preparación producida no se compra: su precio es el costo estándar por unidad de uso, sin artículo (R10).',
+      );
+    }
   }
 
   /**

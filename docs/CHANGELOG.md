@@ -4,6 +4,43 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P5 — Motor de costeo · 2026-09-04
+
+**Objetivo:** el cálculo correcto, demostrable y sin base de datos.
+
+### Entregado
+
+- **El motor, en `costing/domain`**: costeo del producto (SPEC §14 entero), cascada de subpreparaciones y costo de combos. **45 pruebas con PostgreSQL apagado**
+- **`docs/pruebas/casos-conocidos.md` completo**: CC-004 (AP frente a EP), CC-005 (cascada), CC-006 (combo), CC-007 (IVA no recuperable) y CC-009 (los cuatro bordes) — **escritos antes de tocar el motor**, como el plan exige
+- **R6 cierta por construcción**: se divide una vez y el margen es el complemento, así `mc% + food_cost% = 1` no depende de que dos redondeos no caigan a la vez en un empate
+- **R10, R12 y R14 activas** · **R4 aplicada** con los dos casos dando números distintos
+- **R7 a través del motor**, no con valores transcritos: `0.00` con canario a `1e-6`
+- **`GET /costeo`** y **`GET /costeo/:productId`**, con permiso `costing.read` que **`BODEGA` no tiene** (§4.3, comprobado sobre la respuesta cruda)
+- **El empaque es un ítem** (`product.packaging_item_id`), no una tabla propia — **ADR-008**
+- **El presupuesto de rendimiento, medido**: p95 **136,8 ms** sobre 200 productos y 1.600 líneas, contra 400 de presupuesto, con los planes de ejecución verificados
+- **505 pruebas**: 343 unitarias con la base apagada, 162 de integración
+
+### Lo que se descubrió por el camino
+
+**R7 no detecta un costo equivocado.** Al invertir R4 fallan 12 pruebas y **ninguna es CC-R7**: la conciliación es una identidad algebraica y el costo aparece en sus dos lados. Detecta deriva y términos que faltan; no detecta un número mal calculado. Lo que caza eso son los casos conocidos, y por eso sus valores salen del Excel.
+
+**Dos restricciones de la base salían como 500** — un producto activo sin PVP y un precio sin artículo. La base garantizaba; el dominio no explicaba. **INC-012**, con las dos guardas añadidas y **M11** en `audit:migrations` para que no vuelva.
+
+**Octava recurrencia de INC-007, con el mismo carácter que la séptima.** La regla nueva marcaba 3 migraciones de 5 porque su `` era un retroceso literal. La destapó preguntarse **cuántas** deberían fallar, no si fallaba. Prevención: `sin-caracteres-de-control` en `audit:forbidden` — la primera de INC-007 que impide que el fallo se escriba.
+
+**La documentación de API y del modelo de datos se había quedado en P2.** P3 y P4 dieron H4 por bueno sin estarlo. Los tres tramos se escribieron en este commit.
+
+### Pendiente
+
+| Qué | Cuándo |
+|---|---|
+| El rendimiento por lote de una subpreparación: hoy la receta va por unidad de uso | **P6.** Merece confirmarse antes |
+| Menu engineering y las demás vistas (SPEC §15–§18) | P8 |
+| R7 con dataset completo: compras reales y conteo físico | P8 |
+| Previsualizar qué platos se mueven al confirmar un precio | P8 |
+
+---
+
 ## P4 — Recetas, productos y combos · 2026-09-04
 
 **Objetivo:** que un ciclo se rechace al guardar y que propagar entre locales sea una decisión con marcha atrás.

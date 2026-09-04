@@ -16,6 +16,28 @@ import { matchesAny, normalizePath } from '../lib/glob.mjs';
 /** @typedef {{ruta: string, linea: number, extracto: string}} Hallazgo */
 
 const CR = String.fromCharCode(13);
+
+/** Tabulador, salto de linea y retorno de carro: los tres unicos legitimos. */
+const TABULADOR = 9;
+const SALTO_DE_LINEA = 10;
+const RETORNO_DE_CARRO = 13;
+const ULTIMO_DE_CONTROL = 31;
+
+/**
+ * Se comprueba por CODIGO y no con una expresion regular a proposito: una regex
+ * que contenga el rango de control es ella misma una infraccion, y
+ * `no-control-regex` de ESLint la rechaza — con razon. La ironia de que la
+ * regla que busca caracteres de control no pueda escribirlos merece quedar
+ * anotada aqui.
+ * @param {number} codigo
+ * @returns {boolean}
+ */
+function esCaracterDeControl(codigo) {
+  if (codigo === TABULADOR || codigo === SALTO_DE_LINEA || codigo === RETORNO_DE_CARRO) {
+    return false;
+  }
+  return codigo <= ULTIMO_DE_CONTROL;
+}
 const DOLAR = String.fromCharCode(36);
 
 /** Archivos que un interprete POSIX va a ejecutar: no toleran CRLF. */
@@ -264,6 +286,54 @@ export const repoRules = [
         .filter(existiaEnHead)
         .filter((ruta) => !autorizada(ruta))
         .map((ruta) => ({ ruta, linea: 0, extracto: 'ya existia en HEAD y cambio' }));
+    },
+  },
+  {
+    id: 'sin-caracteres-de-control',
+    descripcion: 'Un caracter de control literal dentro de un archivo de codigo',
+    porQue:
+      'OCTAVA RECURRENCIA DE INC-007, y la SEGUNDA con esta causa exacta. Al generar codigo desde ' +
+      'una cadena de otro lenguaje, "\\b" no siempre significa «limite de palabra»: en Python y en ' +
+      'muchos generadores es el caracter de RETROCESO (0x08). La regex resultante compila, no ' +
+      'lanza, no avisa, y solo casa si delante hay un retroceso — o sea nunca. El check pasa en ' +
+      'verde sin examinar nada. Paso en M10 y volvio a pasar en M11. Un caracter de control ' +
+      'jamas tiene sitio legitimo en un archivo de codigo, asi que la regla no necesita ' +
+      'excepciones: escribase el escape doble en el generador, o String.fromCharCode si de ' +
+      'verdad hace falta el caracter.',
+    referencia: 'docs/incidencias/INC-007',
+    incluye: [
+      'apps/*/src/**/*.ts',
+      'apps/*/test/**/*.ts',
+      'tools/**/*.mjs',
+      'scripts/**/*.mjs',
+      '*.mjs',
+      '*.cjs',
+    ],
+    /**
+     * @param {{archivos: string[], leer: (ruta: string) => string}} contexto
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      /** @type {Hallazgo[]} */
+      const hallazgos = [];
+
+      for (const ruta of archivos.filter((a) => matchesAny(a, this.incluye ?? []))) {
+        leer(ruta)
+          .split('\n')
+          .forEach((linea, indice) => {
+            const posicion = [...linea].findIndex((c) => esCaracterDeControl(c.charCodeAt(0)));
+            if (posicion === -1) return;
+
+            const codigo = linea.charCodeAt(posicion);
+            hallazgos.push({
+              ruta,
+              linea: indice + 1,
+              extracto: `caracter de control 0x${codigo.toString(16).padStart(2, '0')} en la columna ${String(posicion + 1)}`,
+            });
+          });
+      }
+
+      return hallazgos;
     },
   },
 ];

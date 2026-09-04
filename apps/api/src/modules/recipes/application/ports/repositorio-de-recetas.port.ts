@@ -46,13 +46,29 @@ export interface ProductoLeido {
   readonly tipo: string;
   readonly categoria: string | null;
   readonly estado: string;
+  /**
+   * El ítem que hace de empaque (SPEC §14, ADR-008). `null` = no lleva.
+   *
+   * Es un ítem y no una tabla propia: se compra, tiene artículo, tiene precio
+   * con vigencia. `empaque_neto` es su `costo_neto_uso`, sin fórmula nueva.
+   */
+  readonly empaqueItemId: ItemId | null;
 }
 
-export interface ProductoEnUbicacion {
-  readonly locationId: LocationId;
+/**
+ * Lo que cambia de un local a otro: si el producto se vende ahí, a qué precio y
+ * cuántas porciones salen de su lote (SPEC §8).
+ */
+export interface ConfiguracionEnUbicacion {
   readonly activo: boolean;
+  /** PVP CON IVA (R14). `null` = todavía sin precio fijado. */
   readonly pvp: string | null;
   readonly rendimientoPorciones: string | null;
+}
+
+/** La configuración vista desde el producto: en qué ubicaciones está. */
+export interface ProductoEnUbicacion extends ConfiguracionEnUbicacion {
+  readonly locationId: LocationId;
 }
 
 export interface LineaLeida {
@@ -63,6 +79,17 @@ export interface LineaLeida {
   readonly orden: number;
 }
 
+/** La misma configuración vista desde la ubicación: qué productos tiene. */
+export interface ProductoConUbicacion extends ConfiguracionEnUbicacion {
+  readonly productId: ProductId;
+}
+
+export interface ComponenteDeCombo {
+  readonly comboProductId: ProductId;
+  readonly componentProductId: ProductId;
+  readonly cantidad: string;
+}
+
 export interface RecetaLeida {
   readonly id: RecipeId;
   readonly locationId: LocationId;
@@ -70,6 +97,11 @@ export interface RecetaLeida {
   readonly validFrom: Date;
   readonly nota: string | null;
   readonly lineas: readonly LineaLeida[];
+}
+
+/** Una receta vigente con su destino dentro: es lo que devuelve la carga en lote. */
+export interface RecetaVigenteLeida extends RecetaLeida {
+  readonly destino: DestinoDeReceta;
 }
 
 export interface LineaParaGuardar {
@@ -208,4 +240,40 @@ export interface RepositorioDeRecetas {
     readonly companyId: CompanyId;
     readonly recipeId: RecipeId;
   }): Promise<readonly LineaLeida[]>;
+
+  /** Fija o quita el ítem que hace de empaque. `false` si el producto no existe. */
+  asignarEmpaque(entrada: {
+    readonly companyId: CompanyId;
+    readonly productId: ProductId;
+    readonly empaqueItemId: ItemId | null;
+  }): Promise<boolean>;
+
+  // --- Carga en lote, para costear una carta entera -------------------------
+  //
+  // LAS TRES EXISTEN POR EL PRESUPUESTO DE CLAUDE.md §5: 400 ms para 200
+  // productos con 1.500 líneas. Pedir la receta de cada producto por separado
+  // son 200 consultas antes de empezar a calcular.
+
+  /**
+   * TODAS las recetas vigentes de una ubicación a una fecha, de productos y de
+   * subpreparaciones, con sus líneas.
+   *
+   * La versión `VOID` se descarta aquí igual que en `recetaVigente`: es la
+   * respuesta «aquí no hay receta», y no una receta vacía —que costaría cero,
+   * que es un número plausible y equivocado.
+   */
+  recetasVigentesDeUbicacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly fecha: Date;
+  }): Promise<readonly RecetaVigenteLeida[]>;
+
+  /** Activación, PVP y rendimiento de TODOS los productos en una ubicación. */
+  productosEnUbicacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+  }): Promise<readonly ProductoConUbicacion[]>;
+
+  /** Los componentes de todos los combos de la company. */
+  componentesDeCombos(companyId: CompanyId): Promise<readonly ComponenteDeCombo[]>;
 }

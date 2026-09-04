@@ -14,6 +14,7 @@ import { CatalogModule } from '../catalog/catalog.module';
 import { RELOJ } from '../../shared/application/ports/reloj.port';
 import { RelojDelSistema } from '../../shared/infrastructure/time/reloj-del-sistema';
 import { ActualizarAjustes, LeerAjustes } from './application/casos-de-uso/ajustes';
+import { CostosDeItems } from './application/casos-de-uso/costos-de-items';
 import {
   CostoDeItem,
   HistorialDePrecios,
@@ -62,6 +63,11 @@ import { PrismaPreciosRepositorio } from './infrastructure/prisma-precios.reposi
         new ResolucionYCosto(new ResolverPrecio(deps), new CostoDeItem(deps)),
     },
     {
+      provide: CostosDeItems,
+      inject: [DependenciasDePreciosNest],
+      useFactory: (deps: DependenciasDePreciosNest): CostosDeItems => new CostosDeItems(deps),
+    },
+    {
       provide: LeerAjustes,
       inject: [DependenciasDePreciosNest],
       useFactory: (deps: DependenciasDePreciosNest): LeerAjustes => new LeerAjustes(deps),
@@ -73,6 +79,6 @@ import { PrismaPreciosRepositorio } from './infrastructure/prisma-precios.reposi
         new ActualizarAjustes(deps),
     },
   ],
-  exports: [CostoDeItem, LeerAjustes],
+  exports: [CostoDeItem, CostosDeItems, LeerAjustes],
 })
 export class PricingModule {}

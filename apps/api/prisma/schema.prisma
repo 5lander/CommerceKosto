@@ -525,6 +525,7 @@ model Item {
   precios        ReferencePrice[]
   recetas        Recipe[]
   lineasDeReceta RecipeLine[]
+  empaqueDe      Product[]         @relation("empaque")
 
   @@unique([companyId, name])
   /// Clave candidata para las FK COMPUESTAS de receta y linea: atan el item a
@@ -756,9 +757,23 @@ model Product {
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// EL EMPAQUE ES UN ITEM, no una tabla propia (P5, ADR-008).
+  ///
+  /// `T4_EMPAQUES` del Excel es una tabla aparte con su precio y su IVA. Aqui
+  /// no: un empaque se compra, tiene articulo, tiene precio con vigencia y un
+  /// dia se cuenta en el inventario. Darle tabla propia habria duplicado la
+  /// cadena de costo entera —un segundo sitio donde viven precios— y R13 («el
+  /// IVA recuperable afecta a items y empaques por igual») habria que
+  /// implementarla dos veces.
+  ///
+  /// Con esto, `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso`
+  /// del item: la misma formula, sin una linea nueva.
+  packagingItemId String? @map("packaging_item_id") @db.Uuid
+
   company       Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   tipo          ProductType         @relation(fields: [type], references: [code])
   estado        ProductStatus       @relation(fields: [status], references: [code])
+  empaque       Item?               @relation("empaque", fields: [packagingItemId, companyId], references: [id, companyId], onDelete: Restrict)
   ubicaciones   ProductLocation[]
   recetas       Recipe[]
   componentes   ComboComponent[]    @relation("combo")
@@ -853,6 +868,11 @@ model Recipe {
 
   /// El indice de CLAUDE.md §5: receta vigente de un producto en una ubicacion.
   @@index([companyId, productId, locationId, validFrom(sort: Desc)])
+  /// P5: costear una carta entera pide TODAS las recetas vigentes de una
+  /// ubicacion de una vez, y esa consulta no lleva `product_id`. Sin este
+  /// indice es un Seq Scan sobre `recipe`, y el presupuesto de 400 ms de
+  /// CLAUDE.md §5 no lo aguanta con volumen real.
+  @@index([companyId, locationId, validFrom(sort: Desc)], map: "recipe_por_ubicacion_y_vigencia")
   @@index([companyId, itemId, locationId, validFrom(sort: Desc)])
   @@map("recipe")
 }

@@ -1,0 +1,67 @@
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 12 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-002 — rendimiento < 1 y línea EXCLUIDA[2m > [22mel costo NETO del lote es MAYOR que el bruto
+[31m[1mAssertionError[22m: expected '0.93701' to be '1.098548462' // Object.is equality[39m
+
+Expected: [32m"1.098548462"[39m
+Received: [31m"0.93701"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m
+    [90m 98| [39m
+    [90m 99| [39m[35mfunction[39m [34mesperarValor[39m(actual[33m:[39m [33mMoney[39m [33m|[39m [33mRatio[39m[33m,[39m esperado[33m:[39m string)[33m:[39m [35mvoid[39m {
+    [90m100| [39m  expect(alaPrecisionDelExcel(actual, esperado)).toBe(comoElExcel(espe…
+    [90m   | [39m                                                 [31m^[39m
+    [90m101| [39m}
+    [90m102| [39m
+[90m [2m❯[22m src/modules/costing/domain/casos-conocidos.spec.ts:[2m224:5[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-002 — rendimiento < 1 y línea EXCLUIDA[2m > [22mreproduce el resto de V_COSTEO fila 11
+[31m[1mAssertionError[22m: expected '0.9557502' to be '1.120519431' // Object.is equality[39m
+
+Expected: [32m"1.120519431"[39m
+Received: [31m"0.9557502"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m
+    [90m 98| [39m
+    [90m 99| [39m[35mfunction[39m [34mesperarValor[39m(actual[33m:[39m [33mMoney[39m [33m|[39m [33mRatio[39m[33m,[39m esperado[33m:[39m string)[33m:[39m [35mvoid[39m {
+    [90m100| [39m  expect(alaPrecisionDelExcel(actual, esperado)).toBe(comoElExcel(espe…
+    [90m   | [39m                                                 [31m^[39m
+    [90m101| [39m}
+    [90m102| [39m
+[90m [2m❯[22m src/modules/costing/domain/casos-conocidos.spec.ts:[2m232:5[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/12]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-002 — rendimiento < 1 y línea EXCLUIDA[2m > [22mimpacto_merma: el plato cuesta 17,24 % más de lo que el modelo anterior creía
+[31m[1mAssertionError[22m: expected '0' to be '0.1723977989' // Object.is equality[39m
+
+Expected: [32m"0[7m.1723977989[27m"[39m
+Received: [31m"0"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m
+    [90m 98| [39m
+    [90m 99| [39m[35mfunction[39m [34mesperarValor[39m(actual[33m:[39m [33mMoney[39m [33m|[39m [33mRatio[39m[33m,[39m esperado[33m:[39m string)[33m:[39m [35mvoid[39m {
+    [90m100| [39m  expect(alaPrecisionDelExcel(actual, esperado)).toBe(comoElExcel(espe…
+    [90m   | [39m                                                 [31m^[39m
+    [90m101| [39m}
+    [90m102| [39m
+[90m [2m❯[22m src/modules/costing/domain/casos-conocidos.spec.ts:[2m242:5[22m[39m
+
+================================================================================
+LO QUE ESTE GUARDIAN DESTAPA, Y NO ES LO QUE SE BUSCABA
+
+Con R4 invertida fallan 12 pruebas. NINGUNA de ellas es CC-R7.
+
+La conciliacion R7 sigue dando 0.00 con el motor calculando MAL el costo de
+cada linea. No es un fallo de la prueba: es lo que R7 es. Su identidad
+algebraica —costo_ventas_teorico == venta_neta_mes - mc_mes— se sostiene
+cualquiera que sea el costo, porque el costo aparece en los dos lados.
+
+R7 detecta DERIVA ARITMETICA y TERMINOS QUE FALTAN (los guardianes 3 lo
+confirman: quitar la provision de merma la rompe con 6.23). No detecta un
+costo equivocado.
+
+Lo que caza un costo equivocado son los CASOS CONOCIDOS, y por eso sus valores
+esperados tienen que salir del Excel y no de este codigo.

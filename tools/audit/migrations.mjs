@@ -16,10 +16,11 @@
 
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MIGRACIONES = join(RAIZ, 'apps', 'api', 'prisma', 'migrations');
+const GUARDAS = join(RAIZ, 'docs', 'sistema', 'guardas-de-dominio.md');
 
 const MARCA_MANUAL_INICIO = 'MANUAL: BEGIN';
 const MARCA_MANUAL_FIN = 'MANUAL: END';
@@ -350,6 +351,60 @@ function comprobarBorradoDeFilas({ downSql, tablasSoltadas }) {
   return fallos;
 }
 
+/**
+ * M11 — una restriccion que puede rechazar una peticion tiene su guarda de
+ * dominio, y esta escrito donde.
+ *
+ * NACE DE UN FALLO REAL (INC-012), que aparecio DOS VECES en el mismo paquete.
+ * Un `CHECK` de P4 —«un producto activo tiene PVP»— y un trigger de P3 —«el
+ * precio de un item comprado exige articulo»— hacian su trabajo, pero su error
+ * llegaba al cliente como `INTERNAL_ERROR 500`: el filtro solo traduce lo que
+ * hereda de `ErrorDeDominio`, y un `23514` del driver no lo hace. Un 500
+ * dispara alertas de operacion, cuenta como caida y no dice que corregir.
+ *
+ * LO QUE ESTA REGLA COMPRUEBA, dicho sin adornos: que alguien SE HAYA HECHO LA
+ * PREGUNTA. No verifica que la guarda exista ni que sea correcta —eso no es
+ * automatizable—; verifica que la migracion que anade restricciones tenga su
+ * seccion en `docs/sistema/guardas-de-dominio.md`, donde se dice cual de ellas
+ * es alcanzable desde la API y donde esta su mensaje.
+ *
+ * POR QUE UN DOCUMENTO Y NO UN COMENTARIO EN EL SQL. Prisma guarda el checksum
+ * de cada `migration.sql` aplicado: editarlas para anotarlas rompe
+ * `migrate deploy` en toda base donde ya corrieron. El documento se puede
+ * completar hacia atras sin tocar historia.
+ * @param {Migracion} m
+ * @returns {Fallo[]}
+ */
+function comprobarGuardasDeDominio({ nombre, upSql }) {
+  const anadeRestricciones = /\bCHECK\s*\(/i.test(upSql) || /RAISE\s+EXCEPTION/i.test(upSql);
+  if (!anadeRestricciones) return [];
+
+  if (!existsSync(GUARDAS)) {
+    return [
+      {
+        check: 'M11',
+        mensaje:
+          `falta ${relative(RAIZ, GUARDAS)}, que M11 exige para toda migracion con CHECK o ` +
+          'trigger. Ver docs/incidencias/INC-012',
+      },
+    ];
+  }
+
+  const documento = readFileSync(GUARDAS, 'utf8');
+  if (documento.includes(nombre)) return [];
+
+  return [
+    {
+      check: 'M11',
+      mensaje:
+        `anade restricciones (CHECK o RAISE) y no tiene seccion en ` +
+        `${relative(RAIZ, GUARDAS)}. Cada restriccion alcanzable desde la API necesita una ` +
+        'guarda de dominio que la explique, o el error sale como INTERNAL_ERROR 500 en vez de ' +
+        '400. Ver docs/incidencias/INC-012',
+    },
+  ];
+}
+
 const COMPROBACIONES = [
   comprobarBloquesManuales,
   comprobarPoliticas,
@@ -359,6 +414,7 @@ const COMPROBACIONES = [
   comprobarEscalaDecimal,
   comprobarBorradoDelHistorial,
   comprobarBorradoDeFilas,
+  comprobarGuardasDeDominio,
 ];
 
 // --- Recorrido -----------------------------------------------------------

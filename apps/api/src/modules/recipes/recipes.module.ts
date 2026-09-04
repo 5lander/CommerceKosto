@@ -20,6 +20,7 @@ import {
   PropagarReceta,
   RevertirPropagacion,
 } from './application/casos-de-uso/propagacion';
+import { AsignarEmpaque, LeerCarta } from './application/casos-de-uso/carta';
 import {
   ConfigurarProductoEnUbicacion,
   CrearProducto,
@@ -30,6 +31,7 @@ import {
 } from './application/casos-de-uso/recetas';
 import { REPOSITORIO_DE_RECETAS } from './application/ports/repositorio-de-recetas.port';
 import { DependenciasDeRecetasNest } from './infrastructure/dependencias-de-recetas';
+import { EmpaqueController } from './infrastructure/http/empaque.controller';
 import { Propagacion } from './infrastructure/http/propagacion';
 import { ProductosController } from './infrastructure/http/productos.controller';
 import { RecetasController } from './infrastructure/http/recetas.controller';
@@ -39,7 +41,7 @@ type Deps = DependenciasDeRecetasNest;
 
 @Module({
   imports: [CatalogModule],
-  controllers: [ProductosController, RecetasController],
+  controllers: [ProductosController, EmpaqueController, RecetasController],
   providers: [
     { provide: REPOSITORIO_DE_RECETAS, useClass: PrismaRecetasRepositorio },
     { provide: RELOJ, useClass: RelojDelSistema },
@@ -67,6 +69,16 @@ type Deps = DependenciasDeRecetasNest;
       useFactory: (d: Deps): GuardarReceta => new GuardarReceta(d),
     },
     {
+      provide: LeerCarta,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): LeerCarta => new LeerCarta(d),
+    },
+    {
+      provide: AsignarEmpaque,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): AsignarEmpaque => new AsignarEmpaque(d),
+    },
+    {
       provide: LeerReceta,
       inject: [DependenciasDeRecetasNest],
       useFactory: (d: Deps): LeerReceta => new LeerReceta(d),
@@ -87,6 +99,6 @@ type Deps = DependenciasDeRecetasNest;
         ),
     },
   ],
-  exports: [LeerReceta, ListarVersionesDeReceta],
+  exports: [LeerCarta, LeerReceta, ListarVersionesDeReceta],
 })
 export class RecipesModule {}

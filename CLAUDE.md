@@ -5,6 +5,29 @@
 
 ---
 
+## −1. Canario de contexto — obligatorio antes de generar nada
+
+**Antes de la primera respuesta de cada sesión, y antes de empezar cualquier paquete, la primera línea de la respuesta debe ser exactamente:**
+
+```
+🐤 Lander · 23 años · costeo-saas
+```
+
+Esto no es un saludo: es un **detector**. Si estos datos salen mal, incompletos o inventados, significa que este archivo **no está realmente en contexto** y que todo lo que venga después es sospechoso de estar improvisado.
+
+### Reglas del canario
+
+1. **Se emite leyendo este archivo, nunca de memoria.** Si el canario se escribe "de cabeza" deja de detectar nada, que es justo el fallo que existe para atrapar
+2. **Si no puedes emitirlo porque no tienes este archivo delante: dilo y detente.** «No tengo `CLAUDE.md` en contexto» es la respuesta correcta. **Adivinar el canario es la falta más grave de este documento**, porque destruye el único instrumento que avisa del problema
+3. **Si el usuario señala que el canario salió mal:** no lo corrijas y sigas. Relee `CLAUDE.md`, `ESTADO.md` y `DECISIONES.md` completos, y **descarta las conclusiones de la respuesta anterior** en vez de construir sobre ellas
+4. **Tras una compactación de contexto, el canario se vuelve a emitir** en la primera respuesta posterior, releyendo el archivo
+
+### Qué NO detecta el canario — no confiar de más en él
+
+El canario prueba que este archivo está en contexto. **No prueba que lo que sigue sea correcto.** Un canario verde con una fórmula de costeo inventada sigue siendo una fórmula inventada. Las defensas contra eso son otras y siguen siendo obligatorias: leer la fórmula en `docs/SPEC.md` en vez de derivarla (§8), los casos conocidos de `docs/pruebas/casos-conocidos.md` (§7) y `npm run audit` (§13).
+
+---
+
 ## 0. Contexto en una frase
 
 El sistema convierte un modelo de costeo de alimentos hoy implementado en Excel en un SaaS multi-tenant. Cada comercio (company) tiene N ubicaciones —bodegas y locales— con inventario independiente, recetas y precios propios, y una vista consolidada a nivel company. Calcula costo por plato, food cost teórico contra real, ingeniería de menú, punto de equilibrio e inventario valorizado.
@@ -25,6 +48,7 @@ El sistema convierte un modelo de costeo de alimentos hoy implementado en Excel 
 | `docs/MODO-AUTONOMO.md` | Reglas para corridas largas sin confirmación | Cuando el usuario active "modo autónomo" |
 | `docs/PLAN-IMPLEMENTACION.md` | Los paquetes P0–P15 en orden | La sección del paquete actual |
 | `docs/SPEC.md` | La especificación funcional y **todas las fórmulas** | Las secciones que el paquete referencia |
+| `docs/Manual de Marca/platise-brand-book.pdf` | **La identidad visual: color, tipografía, logo, tono** | En P14 (capa visual) y en todo paquete que defina o toque `tokens.css` |
 | `docs/incidencias/README.md` | Problemas ya resueltos, buscables por síntoma | **Al inicio de cada paquete y antes de diagnosticar cualquier error** |
 
 > **Si el contexto se compactó y no recuerdas el detalle: relee. No supongas.**
@@ -85,7 +109,7 @@ Los seis puntos que exigía esta sección se confirmaron en fuente oficial el **
 
 ### Frontend
 
-Se construye en este proyecto, **funcional sin estilizar**, con tokens desde el primer componente (§10). La identidad visual está pendiente y llega en el paquete de capa visual.
+Se construye en este proyecto, **funcional sin estilizar**, con tokens desde el primer componente (§10). La identidad visual **ya existe** — `docs/Manual de Marca/platise-brand-book.pdf` — pero se aplica en P14, no antes: los tokens arrancan neutros a propósito, para probar que la capa visual es reemplazable sin tocar lógica (§10).
 
 ## 2. Clean Architecture — regla de dependencia
 
@@ -383,6 +407,19 @@ Usa los valores 🟡 sin preguntar; impleméntalos **siempre como configuración
 
 ### Regla de oro: cero estilos literales
 **Prohibido escribir un color, tamaño, radio, sombra o fuente dentro de un componente.** Todo vive en `src/styles/tokens.css` mapeado en la config del framework de estilos. Valores iniciales neutros y sobrios.
+
+### La marca: `docs/Manual de Marca/platise-brand-book.pdf`
+
+**El manual de marca es la fuente única de la identidad visual.** Ningún color, tipografía, logo ni tratamiento gráfico se inventa, se "aproxima" ni se saca de otra referencia: sale del manual.
+
+| | |
+|---|---|
+| **Dónde entra** | En `tokens.css` y en `components/ui`. **En ningún otro sitio** |
+| **Cuándo** | En **P14**. Antes de P14 los tokens son neutros a propósito — es lo que prueba que la capa visual se reemplaza sin tocar lógica |
+| **Cómo** | Leyendo el PDF. Si un valor no está en el manual, **pregunta**; no lo deduzcas del resto de la paleta |
+| **Qué no cambia** | Hooks, servicios, dominio y `application`. El diff de P14 no los toca (criterio de aceptación de P14) |
+
+⚠️ **Antes de P14, si una tarea pide "aplicar la marca" o "ponerlo bonito": detente y pregunta.** Adelantar la identidad visual invalida el criterio de aceptación de P14 y es una violación de §10, no un favor.
 
 ### Separación lógica / presentación
 | Capa | Contiene | Se reemplaza después |

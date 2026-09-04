@@ -226,6 +226,175 @@ Entre unidades de la **misma dimensión** el factor es el cociente de sus `facto
 
 Es **el único índice del proyecto sin consulta que lo use hoy**. Su consumidor es P10.
 
+## Lo que añade P3 — precios con vigencia y parámetros de costeo
+
+```mermaid
+erDiagram
+    company               ||--|| company_settings : "los diez numeros de SPEC 11"
+    company               ||--o{ reference_price : "tiene"
+    item                  ||--o{ reference_price : "cuesta"
+    purchase_article      ||--o{ reference_price : "en esta presentacion"
+    reference_price_origin||--o{ reference_price : "de donde vino"
+    reference_price_status||--o{ reference_price : "SUGGESTED CONFIRMED REJECTED"
+
+    company_settings {
+        uuid    company_id PK "1 a 1 con company"
+        numeric iva_venta "CHECK fraccion"
+        boolean iva_compra_recuperable "R13"
+        numeric iva_compra "solo el DEFECTO al capturar"
+        numeric provision_merma "R12: solo lo que ningun rendimiento explica"
+        numeric food_cost_objetivo "CHECK objetivo <= verde <= maximo"
+        numeric food_cost_umbral_verde
+        numeric food_cost_maximo
+        numeric prime_cost_maximo
+        numeric regla_popularidad "Kasavana-Smith"
+        integer dias_operativos_mes
+        integer dias_cobertura
+    }
+    reference_price {
+        uuid      id PK
+        uuid      company_id FK
+        uuid      item_id FK
+        uuid      purchase_article_id FK "obligatorio si COMPRADO, prohibido si PRODUCIDO"
+        numeric   price "CON IVA si lo lleva"
+        numeric   iva_compra "LA TASA DE ESTE PRECIO, no la de la company"
+        text      origin FK "MANUAL ULTIMA_COMPRA EXTERNO"
+        text      status FK
+        timestamp valid_from "la vigencia. NUNCA se sobrescribe el importe"
+        uuid      created_by FK
+        uuid      confirmed_by FK "NULL mientras siga sugerido: R5 en una columna"
+        timestamp confirmed_at
+    }
+```
+
+### La tasa de IVA vive en el precio, no en la company
+
+El SPEC nombra `iva_compra` en la fórmula de §12 y **no dice dónde vive**; §11 solo trae «IVA de compra recuperable SI/NO». Se eligió el superconjunto: en Ecuador el alimento sin procesar es 0 % y el detergente 15 %, así que una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. `company_settings.iva_compra` es solo el valor que se **propone** al capturar.
+
+**Es una decisión que merece confirmación del usuario** y está anotada como tal en `ESTADO.md`.
+
+### Un precio no se actualiza: se añade
+
+Lo único que cambia de una fila es su **estado**, y solo hacia adelante: `SUGGESTED` → `CONFIRMED` o `REJECTED`. Dos triggers lo hacen cumplir, porque el `GRANT UPDATE` que hace falta para confirmar no sabe distinguir «cambiar el estado» de «cambiar el importe».
+
+De ahí sale **E8** —cambiar el precio de hoy no altera el costo del mes pasado— sin escribir nada más: la consulta de vigencia nunca mira una fila cuyo `valid_from` sea posterior a la fecha preguntada.
+
+### La clave foránea del artículo es compuesta
+
+`(purchase_article_id, item_id)` contra `purchase_article(id, item_id)`. Sin la segunda columna, un precio podría apuntar al saco de harina y al ítem «cebolla», y el costo por gramo saldría de una presentación que no es la suya.
+
+---
+
+## Lo que añade P4 — productos, recetas versionadas y propagación
+
+```mermaid
+erDiagram
+    company            ||--o{ product : "maestro de la company"
+    product            ||--o{ product_location : "activacion, PVP y porciones POR LOCAL"
+    location           ||--o{ product_location : "en"
+    product            ||--o{ combo_component : "un combo tiene"
+    product            ||--o{ recipe : "destino: producto"
+    item               ||--o{ recipe : "destino: subpreparacion"
+    recipe             ||--o{ recipe_line : "lleva"
+    item               ||--o{ recipe_line : "de este item"
+    product            ||--o{ recipe_propagation : "se propago"
+    recipe_propagation ||--o{ recipe_propagation_target : "a cada ubicacion"
+
+    product {
+        uuid id PK
+        uuid company_id FK
+        text name "UNIQUE por company"
+        text type FK "SIMPLE o COMBO"
+        text category "etiqueta simple, NO jerarquia"
+        text status FK
+        uuid packaging_item_id FK "P5: el empaque es un ITEM"
+    }
+    product_location {
+        uuid    product_id PK
+        uuid    location_id PK
+        uuid    company_id FK
+        boolean activo
+        numeric pvp "CON IVA (R14). CHECK: activo exige PVP"
+        numeric rendimiento_porciones "divide el costo del lote"
+    }
+    recipe {
+        uuid      id PK
+        uuid      company_id FK
+        uuid      location_id FK
+        uuid      product_id FK "CHECK: producto O item, exactamente uno"
+        uuid      item_id FK
+        text      status FK "ACTIVE o VOID"
+        timestamp valid_from "una VERSION, no una edicion"
+        uuid      created_by FK
+        text      note "de donde vino: captura, propagacion o reversion"
+    }
+    recipe_line {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    recipe_id FK
+        uuid    item_id FK
+        numeric cantidad "en la unidad de uso del item"
+        text    base FK "AP o EP - R4, la condicional mas fragil"
+        text    estado FK "ACTIVA o INACTIVA: una inactiva cuesta CERO"
+        integer orden
+    }
+    recipe_propagation_target {
+        uuid propagation_id PK
+        uuid location_id PK
+        uuid previous_recipe_id FK "lo que hace la reversion posible"
+        uuid created_recipe_id FK
+    }
+```
+
+### El destino de una receta es un producto O un ítem, exactamente uno
+
+Un producto de venta tiene receta; una subpreparación —ítem `PRODUCIDO`— también, y ahí está la recursión que **R9** corta. Un `CHECK` con `<>` sobre dos `IS NOT NULL` lo hace imposible de violar: sin él cabría una receta sin destino, que no significa nada, y una con dos, que significa dos cosas contradictorias.
+
+### `recipe_status` incluye `VOID`, y hace falta
+
+Es la versión que dice «aquí no hay receta». Sin ella, revertir una propagación sobre una ubicación que no tenía receta obligaría a **borrar** la versión creada —reescribiendo la historia— o a dejar una receta vacía. **Una receta vacía cuesta cero**, que es un número plausible y equivocado.
+
+### Una receta no se puede editar, y lo impide un trigger
+
+`recipe` no necesita `UPDATE` para nada, pero un `GRANT` olvidado en el futuro lo abriría en silencio. Con el trigger, «una receta se versiona, no se edita» es cierto por construcción.
+
+### `recipe_propagation_target` no tiene `company_id` propio
+
+Cuelga de la propagación, que sí lo tiene, y su política de RLS se apoya en esa fila con un `EXISTS`. Una columna repetida sería un segundo sitio donde el tenant podría discrepar.
+
+### Todas las claves foráneas de P4 son compuestas
+
+Contra `product(id, company_id)` e `item(id, company_id)`. Todo lo que una receta referencia es de la misma company — y eso lo garantiza la clave, no una comprobación de aplicación que alguien puede olvidar. **RLS filtra lo que se lee, no lo que se referencia.**
+
+---
+
+## Lo que añade P5 — el empaque y el índice del costeo
+
+**P5 no crea ninguna tabla.** El motor de costeo es dominio puro y no persiste nada. Lo que la base necesita es lo único que el motor no puede inventarse.
+
+| Cambio | Qué es |
+|---|---|
+| `product.packaging_item_id` | El ítem que hace de empaque. Anulable: `NULL` = el producto no lleva envase |
+| Índice `recipe_por_ubicacion_y_vigencia` | `(company_id, location_id, valid_from DESC)` |
+| Permiso `costing.read` | Para `OWNER`, `ADMIN`, `GERENTE_LOCAL` y `LECTURA`. **`BODEGA` no aparece** |
+
+### El empaque es un ítem, no una tabla propia
+
+`T4_EMPAQUES` del Excel es una tabla aparte con su precio y su IVA. Aquí no: un empaque se compra, tiene artículo, tiene precio con vigencia y un día se cuenta en el inventario. Darle tabla propia habría duplicado la cadena de costo entera —un segundo sitio donde viven precios— y **R13** habría que implementarla dos veces.
+
+Con esto, `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso` del ítem: la misma fórmula, sin una línea nueva. El razonamiento completo, con lo que cuesta, está en **ADR-008**.
+
+La clave foránea es **compuesta** contra `item(id, company_id)`: el empaque de un producto tiene que ser de la misma company.
+
+### El índice nuevo tiene su consulta delante
+
+Los índices de P4 empiezan por `(company_id, product_id, …)` y sirven para «la receta de **este** producto». Costear una carta entera pide **todas** las recetas vigentes de una ubicación de una vez, y esa consulta no lleva `product_id`. Sin el índice es un `Seq Scan` sobre `recipe`.
+
+Medido con 200 productos y 1.600 líneas: `Bitmap Index Scan` con 5 buffers y 0,34 ms. El plan está en `docs/pasos/P5/evidencia/explain-analyze.txt`, y hay una prueba de integración que **falla si aparece un `Seq Scan`** — el tiempo depende de la máquina, el plan no.
+
+
+---
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -233,8 +402,9 @@ Es **el único índice del proyecto sin consulta que lo use hoy**. Su consumidor
 | **P0** | `audit_log`, `audit_event_type`, `audit_outcome`, `audit_actor_type` | ✅ |
 | **P1** | `company`, `company_settings`, `location`, `app_user`, `role`, `permission`, `role_permission`, `user_role`, `session`, `login_attempt` + 4 catálogos | ✅ |
 | **P2** | `item`, `purchase_article`, `item_group` + `unit`, `unit_dimension`, `item_type`, `item_status`, `price_confidence` | ✅ |
-| P3 | `reference_price` | ⬜ |
-| P4 | `product`, `product_location`, `recipe`, `recipe_line`, `combo_component`, `recipe_propagation_log` | ⬜ |
+| **P3** | `reference_price` + `reference_price_origin`, `reference_price_status`. **`company_settings` se adelantó a P1** | ✅ |
+| **P4** | `product`, `product_location`, `combo_component`, `recipe`, `recipe_line`, `recipe_propagation`, `recipe_propagation_target` + 5 catálogos | ✅ |
+| **P5** | **Ninguna tabla nueva.** El motor es dominio puro: añade `product.packaging_item_id`, un índice y el permiso `costing.read` | ✅ |
 | P6 | `inventory_movement`, `inventory_balance` (proyección), `production_batch` | ⬜ |
 | P7 | `period`, `physical_count`, `physical_count_line` | ⬜ |
 | P8 | vistas materializadas de período cerrado | ⬜ |
@@ -265,3 +435,12 @@ Los de P1, todos con su consulta delante:
 | `purchase_article(company_id, name)` único | Nombre de artículo único por company |
 | `item_group(company_id, name)` único | Nombre de grupo único por company |
 | `item_name_similitud` (GIN, trigrama) | **Sin consulta hoy.** Deduplicación de P10 |
+| `reference_price(company_id, item_id, valid_from DESC)` | El índice de §5: precio vigente de un ítem. Igualdad antes que rango |
+| `reference_price(company_id, status)` | Los precios pendientes de confirmar, y la carga en lote del costeo |
+| `product(company_id, name)` único · `(company_id, status)` | Nombre único y listado de productos activos |
+| `product_location(company_id, location_id)` | La carta de una ubicación |
+| `recipe(company_id, product_id, location_id, valid_from DESC)` | El índice de §5: receta vigente de un producto en una ubicación |
+| `recipe(company_id, item_id, location_id, valid_from DESC)` | Lo mismo para una subpreparación |
+| **`recipe(company_id, location_id, valid_from DESC)`** | **P5:** TODAS las recetas vigentes de una ubicación, para costear la carta de una vez. Sin él, `Seq Scan` |
+| `recipe_line(company_id, recipe_id)` · `(recipe_id, item_id)` único | Las líneas de una receta; un ítem no se repite en la misma |
+| `recipe_propagation(company_id, product_id, propagated_at DESC)` | Las propagaciones de un producto, de la más reciente |

@@ -11,7 +11,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
 import { RELOJ, type Reloj } from '../../../shared/application/ports/reloj.port';
 import { ListarArticulos } from '../../catalog/application/casos-de-uso/articulos';
-import { LeerItem } from '../../catalog/application/casos-de-uso/items';
+import { LeerItem, ListarItems } from '../../catalog/application/casos-de-uso/items';
 import {
   REPOSITORIO_DE_PRECIOS,
   type RepositorioDePrecios,
@@ -37,4 +37,7 @@ export class DependenciasDePreciosNest {
 
   @Inject(ListarArticulos)
   public readonly listarArticulos!: ListarArticulos;
+
+  @Inject(ListarItems)
+  public readonly listarItems!: ListarItems;
 }

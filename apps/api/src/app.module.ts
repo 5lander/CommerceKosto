@@ -30,6 +30,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
 import { CatalogModule } from './modules/catalog/catalog.module';
+import { CostingModule } from './modules/costing/costing.module';
 import { IamModule } from './modules/iam/iam.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { RecipesModule } from './modules/recipes/recipes.module';
@@ -60,6 +61,7 @@ export class AppModule {
         CatalogModule,
         PricingModule,
         RecipesModule,
+        CostingModule,
       ],
       controllers: [HealthController],
       providers: [

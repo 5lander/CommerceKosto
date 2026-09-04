@@ -15,10 +15,11 @@ Plantilla en `docs/plantillas/ADR.md`.
 | [ADR-005](ADR-005-hooks-con-core-hookspath.md) | Hooks de git con `core.hooksPath` en vez de husky | ✅ aceptado | P0 |
 | [ADR-006](ADR-006-las-tres-barreras-del-aislamiento.md) | Las tres barreras del aislamiento multi-tenant, las cuatro condiciones de D12 y las decisiones de sesión | ✅ aceptado | P1 |
 | [ADR-007](ADR-007-propagacion-de-recetas-por-copia.md) | Propagación de recetas por copia, no por herencia | ✅ aceptado | P4 |
+| [ADR-008](ADR-008-las-tres-decisiones-que-el-spec-no-escribe.md) | Las tres decisiones de costeo que el SPEC no escribe: el empaque, la precedencia de la cascada y el combo | ✅ aceptado | P5 |
 
 ## ADRs esperados por el plan
 
 > La numeración es por **orden de creación**, no por tema. P0 consumió del 001 al 005 —dos de ellos, el del ORM y el de la aritmética, eran decisiones que había que tomar para escribir la primera línea de código—, así que lo que sigue se renumeró respecto de la previsión inicial.
 
-- **ADR-008** — Libro de inventario append-only frente a saldo mutable (P6)
-- **ADR-009** — Costo estándar frente a costo de último lote para preparaciones (P6)
+- **ADR-009** — Libro de inventario append-only frente a saldo mutable (P6)
+- **ADR-010** — Costo real de lote frente a costo estándar: dónde vive la varianza de producción (P6). Ojo: **la mitad de esta decisión ya está tomada en ADR-008** —la cascada es costo estándar y R10 sigue entera—; lo que queda es qué hacer con la diferencia contra el lote real

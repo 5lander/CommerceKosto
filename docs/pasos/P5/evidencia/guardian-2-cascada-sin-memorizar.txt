@@ -1,0 +1,10 @@
+GUARDIAN 2 - se quita la memorizacion de la cascada (el Map 'resueltos')
+Comando: timeout 120 npx vitest run --project unit src/modules/costing
+
+
+[1m[46m RUN [49m[22m [36mv3.2.7 [39m[90mC:/Projects/CommerceKosto/apps/api[39m
+
+EXIT=124
+
+EXIT=124 es el codigo de 'timeout': el proceso NO termino en 120 s.
+Con memorizacion la misma suite tarda 1,5 s. El rombo de 25 niveles son 2^25 = 33.554.432 visitas.

@@ -85,6 +85,7 @@
 | D11 | Paginación por cursor, no `OFFSET` |
 | D12 | Filtros y agregaciones en SQL, no en JavaScript |
 | D13 | Ninguna llamada externa dentro de una transacción abierta |
+| D14 | **Toda restricción o trigger nuevo tiene su guarda de dominio**, con mensaje, y una prueba de que el rechazo sale como 4xx y no como 500. Registrado en `docs/sistema/guardas-de-dominio.md`, que `audit:migrations` M11 exige. Ver INC-012 |
 
 ## E. Reglas de negocio
 

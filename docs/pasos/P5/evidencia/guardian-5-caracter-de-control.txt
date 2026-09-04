@@ -1,0 +1,10 @@
+
+audit:forbidden  FALLO — 1 infraccion(es)
+
+  [sin-caracteres-de-control]  Un caracter de control literal dentro de un archivo de codigo
+     por que: OCTAVA RECURRENCIA DE INC-007, y la SEGUNDA con esta causa exacta. Al generar codigo desde una cadena de otro lenguaje, "\b" no siempre significa «limite de palabra»: en Python y en muchos generadores es el caracter de RETROCESO (0x08). La regex resultante compila, no lanza, no avisa, y solo casa si delante hay un retroceso — o sea nunca. El check pasa en verde sin examinar nada. Paso en M10 y volvio a pasar en M11. Un caracter de control jamas tiene sitio legitimo en un archivo de codigo, asi que la regla no necesita excepciones: escribase el escape doble en el generador, o String.fromCharCode si de verdad hace falta el caracter.
+     norma:   docs/incidencias/INC-007
+     tools/audit/migrations.mjs:379  caracter de control 0x08 en la columna 31
+
+
+audit:forbidden  FALLO — 1 infraccion(es)

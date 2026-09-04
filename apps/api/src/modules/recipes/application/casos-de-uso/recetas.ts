@@ -130,6 +130,16 @@ export class ConfigurarProductoEnUbicacion {
       throw new ProductoNoEncontradoError();
     }
 
+    // La base ya lo impide con un CHECK; esto lo EXPLICA. Un `23514` del driver
+    // sale por el filtro como INTERNAL_ERROR 500 —un fallo del servidor— cuando
+    // lo que hay es un formulario a medio llenar. Lo destapó la prueba de
+    // integración de P5, montando el borde 3 de CC-009.
+    if (datos.activo && datos.pvp === null) {
+      throw new RecetaInvalidaError(
+        'Un producto activo necesita PVP: sin él se podría vender sin saber a cuánto, y su margen saldría indefinido.',
+      );
+    }
+
     await this.deps.repositorio.configurarEnUbicacion({
       companyId: sesion.companyId,
       productId: datos.productId,

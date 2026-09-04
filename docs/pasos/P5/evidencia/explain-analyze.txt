@@ -1,0 +1,71 @@
+VOLUMEN SINTETICO: 200 productos - 300 items - 1600 lineas de receta - 1 ubicacion
+p95 medido del costeo completo por HTTP: 136.8 ms   (presupuesto CLAUDE.md 5: 400 ms)
+
+=== recetas vigentes de una ubicacion ===
+                                                                                     QUERY PLAN                                                                                     
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort (actual time=0.186..0.199 rows=200.00 loops=1)
+   Sort Key: valid_from DESC, created_at DESC
+   Sort Method: quicksort  Memory: 39kB
+   Buffers: shared hit=5
+   ->  Bitmap Heap Scan on recipe (actual time=0.056..0.106 rows=200.00 loops=1)
+         Recheck Cond: ((company_id = '01a06ddf-9f0e-7968-8158-3d36ea7d96b2'::uuid) AND (location_id = '01a06ddf-9f1a-793f-bfdc-d40f1bda1b61'::uuid) AND (valid_from <= now()))
+         Heap Blocks: exact=4
+         Buffers: shared hit=5
+         ->  Bitmap Index Scan on recipe_por_ubicacion_y_vigencia (actual time=0.024..0.025 rows=200.00 loops=1)
+               Index Cond: ((company_id = '01a06ddf-9f0e-7968-8158-3d36ea7d96b2'::uuid) AND (location_id = '01a06ddf-9f1a-793f-bfdc-d40f1bda1b61'::uuid) AND (valid_from <= now()))
+               Index Searches: 1
+               Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=115
+ Planning Time: 0.577 ms
+ Execution Time: 0.253 ms
+(16 rows)
+
+
+=== precios confirmados hasta una fecha ===
+                                                        QUERY PLAN                                                        
+--------------------------------------------------------------------------------------------------------------------------
+ Sort (actual time=0.260..0.272 rows=300.00 loops=1)
+   Sort Key: item_id, valid_from DESC
+   Sort Method: quicksort  Memory: 41kB
+   Buffers: shared hit=13
+   ->  Bitmap Heap Scan on reference_price (actual time=0.073..0.145 rows=300.00 loops=1)
+         Recheck Cond: ((company_id = '01a06ddf-9f0e-7968-8158-3d36ea7d96b2'::uuid) AND (status = 'CONFIRMED'::text))
+         Filter: (valid_from <= now())
+         Heap Blocks: exact=8
+         Buffers: shared hit=10
+         ->  Bitmap Index Scan on reference_price_company_id_status_idx (actual time=0.029..0.030 rows=300.00 loops=1)
+               Index Cond: ((company_id = '01a06ddf-9f0e-7968-8158-3d36ea7d96b2'::uuid) AND (status = 'CONFIRMED'::text))
+               Index Searches: 1
+               Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=87
+ Planning Time: 0.784 ms
+ Execution Time: 0.353 ms
+(17 rows)
+
+
+=== lineas de las recetas de una ubicacion ===
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Hash Join (actual time=0.568..1.156 rows=1600.00 loops=1)
+   Hash Cond: (rl.recipe_id = r.id)
+   Buffers: shared hit=64
+   ->  Seq Scan on recipe_line rl (actual time=0.355..0.651 rows=1600.00 loops=1)
+         Filter: (company_id = '01a06ddf-9f0e-7968-8158-3d36ea7d96b2'::uuid)
+         Rows Removed by Filter: 1782
+         Buffers: shared hit=50
+   ->  Hash (actual time=0.192..0.194 rows=200.00 loops=1)
+         Buckets: 1024  Batches: 1  Memory Usage: 18kB
+         Buffers: shared hit=14
+         ->  Seq Scan on recipe r (actual time=0.113..0.141 rows=200.00 loops=1)
+               Filter: (location_id = '01a06ddf-9f1a-793f-bfdc-d40f1bda1b61'::uuid)
+               Rows Removed by Filter: 587
+               Buffers: shared hit=14
+ Planning:
+   Buffers: shared hit=128
+ Planning Time: 1.040 ms
+ Execution Time: 1.390 ms
+(18 rows)
+

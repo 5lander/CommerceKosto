@@ -1,0 +1,60 @@
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 11 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-001 — producto simple, un solo ítem, rendimiento 1[2m > [22mreproduce las siete columnas de costo de V_COSTEO fila 6
+[31m[1mAssertionError[22m: expected '0.51' to be '0.5202' // Object.is equality[39m
+
+Expected: [32m"0.5[7m202[27m"[39m
+Received: [31m"0.5[7m1[27m"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m
+    [90m 98| [39m
+    [90m 99| [39m[35mfunction[39m [34mesperarValor[39m(actual[33m:[39m [33mMoney[39m [33m|[39m [33mRatio[39m[33m,[39m esperado[33m:[39m string)[33m:[39m [35mvoid[39m {
+    [90m100| [39m  expect(alaPrecisionDelExcel(actual, esperado)).toBe(comoElExcel(espe…
+    [90m   | [39m                                                 [31m^[39m
+    [90m101| [39m}
+    [90m102| [39m
+[90m [2m❯[22m src/modules/costing/domain/casos-conocidos.spec.ts:[2m172:5[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/11]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-001 — producto simple, un solo ítem, rendimiento 1[2m > [22mreproduce las columnas de venta y margen
+[31m[1mAssertionError[22m: expected '1.01173913' to be '1.00153913' // Object.is equality[39m
+
+Expected: [32m"1.0[7m015[27m3913"[39m
+Received: [31m"1.0[7m117[27m3913"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m
+    [90m 98| [39m
+    [90m 99| [39m[35mfunction[39m [34mesperarValor[39m(actual[33m:[39m [33mMoney[39m [33m|[39m [33mRatio[39m[33m,[39m esperado[33m:[39m string)[33m:[39m [35mvoid[39m {
+    [90m100| [39m  expect(alaPrecisionDelExcel(actual, esperado)).toBe(comoElExcel(espe…
+    [90m   | [39m                                                 [31m^[39m
+    [90m101| [39m}
+    [90m102| [39m
+[90m [2m❯[22m src/modules/costing/domain/casos-conocidos.spec.ts:[2m180:5[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/11]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-002 — rendimiento < 1 y línea EXCLUIDA[2m > [22mreproduce el resto de V_COSTEO fila 11
+[31m[1mAssertionError[22m: expected '1.098548462' to be '1.120519431' // Object.is equality[39m
+
+Expected: [32m"1.[7m120519431[27m"[39m
+Received: [31m"1.[7m098548462[27m"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m
+    [90m 98| [39m
+    [90m 99| [39m[35mfunction[39m [34mesperarValor[39m(actual[33m:[39m [33mMoney[39m [33m|[39m [33mRatio[39m[33m,[39m esperado[33m:[39m string)[33m:[39m [35mvoid[39m {
+    [90m100| [39m  expect(alaPrecisionDelExcel(actual, esperado)).toBe(comoElExcel(espe…
+    [90m   | [39m                                                 [31m^[39m
+    [90m101| [39m}
+    [90m102| [39m
+[90m [2m❯[22m src/modules/costing/domain/casos-conocidos.spec.ts:[2m232:5[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/11]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m src/modules/costing/domain/casos-conocidos.spec.ts[2m > [22mCC-003 — rendimiento por lote de 185 porciones[2m > [22mreproduce V_COSTEO fila 23 con once líneas y magnitudes de 0.008 a 59.78
+[31m[1mAssertionError[22m: expected '0.4611078936' to be '0.4703300515' // Object.is equality[39m
+
+Expected: [32m"0.4[7m703300515[27m"[39m
+Received: [31m"0.4[7m611078936[27m"[39m
+
+[36m [2m❯[22m esperarValor src/modules/costing/domain/casos-conocidos.spec.ts:[2m100:50[22m[39m

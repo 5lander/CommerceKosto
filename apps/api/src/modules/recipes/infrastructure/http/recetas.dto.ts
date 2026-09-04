@@ -96,6 +96,21 @@ export const CONSULTA_DE_RECETA = z.object({
 
 export type ConsultaDeReceta = z.infer<typeof CONSULTA_DE_RECETA>;
 
+/**
+ * El empaque de un producto (SPEC §14, ADR-008).
+ *
+ * `null` quita el empaque: el producto pasa a no llevar envase y su
+ * `empaque_neto` es cero. Es un valor legitimo, no un campo ausente, y por eso
+ * es `.nullable()` y no `.optional()`.
+ */
+export const CUERPO_DE_EMPAQUE = z
+  .object({
+    empaqueItemId: z.uuid().nullable(),
+  })
+  .strict();
+
+export type CuerpoDeEmpaque = z.infer<typeof CUERPO_DE_EMPAQUE>;
+
 export type CuerpoDeProducto = z.infer<typeof CUERPO_DE_PRODUCTO>;
 export type CuerpoDeUbicacion = z.infer<typeof CUERPO_DE_UBICACION>;
 export type CuerpoDeReceta = z.infer<typeof CUERPO_DE_RECETA>;

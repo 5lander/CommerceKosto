@@ -5,8 +5,8 @@
 | **Fecha** | 2026-08-27 |
 | **Paquete** | P0 |
 | **Área** | build |
-| **Tiempo perdido** | ~2 h repartidas en seis apariciones |
-| **Recurrencias** | 7 |
+| **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava se cazo en un minuto, y por que se cazo esta escrito abajo |
+| **Recurrencias** | **8** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -104,6 +104,30 @@ Y un quinto arreglo que no es de ningún check en particular sino del informe: `
 - **El caso 5 no era que el umbral del 3 % fuera generoso.** El umbral nunca llegó a evaluarse porque no había nada que evaluar. De paso se descubrió que con `exitCode: 1` jscpd falla ante **cualquier** clon y no al superar el umbral: la política efectiva es cero clones, más estricta que la escrita.
 - **El caso 6 no era que el guardián estuviera desactivado.** El parche estaba puesto —`net.Socket.prototype.connect.name` devolvía `interceptar`— e interceptaba de verdad. Solo que la llamada que interceptaba es la que casi nadie escribe.
 
+## Caso 8 (P5) — el mismo caracter, la segunda vez
+
+**La regla M11 de `audit:migrations` marco 3 migraciones de 5.** Ese numero era el sintoma: P1 y P2 tienen 33 y 20 `CHECK`, y la regla no las veia. Las tres que marco eran justo las que tienen `RAISE EXCEPTION`, o sea las que casaban por la OTRA mitad de la condicion.
+
+La causa: la regex se escribio como
+
+```
+/CHECK\s*\(/i
+```
+
+pero el archivo se genero desde una cadena de otro lenguaje donde `` **no es «limite de palabra»: es el caracter de RETROCESO (0x08)**. Lo que quedo en el archivo fue una regex que solo casa si delante de `CHECK` hay un retroceso — es decir, nunca. Compila, no lanza, no avisa.
+
+**Es exactamente el caso 7**, que fue M10 y el mismo caracter. La prevencion de entonces —la prueba del guardian— no lo evito, porque el guardian se hace sobre una violacion que uno **sabe** que existe, y aqui la violacion existia: los tres `RAISE` hacian fallar la regla y daban la impresion de que medía.
+
+**Lo que si lo caza es mirar CUANTOS.** Un check que falla no basta: hay que preguntarse si falla en todos los sitios donde debería. «3 de 5» fue la pregunta que destapo el fallo.
+
+### La prevencion, esta vez automatizada
+
+`audit:forbidden` gana la regla **`sin-caracteres-de-control`**: ningun archivo de codigo puede contener un caracter de control literal (todo lo de control menos tabulador, salto de linea y retorno de carro). Un retroceso jamas tiene sitio legitimo en un `.ts` ni en un `.mjs`, asi que la regla no necesita excepciones.
+
+Tiene su prueba del guardian: se vuelve a meter el retroceso en `tools/audit/migrations.mjs`, se comprueba que el check falla senalando linea y columna, y se revierte. La salida esta en `docs/pasos/P5/evidencia/guardian-5-caracter-de-control.txt`.
+
+**Esta es la primera prevencion de INC-007 que ataca la CAUSA y no el sintoma.** Las siete anteriores enseñaban a desconfiar del verde; esta impide que el fallo se escriba.
+
 ## Prevención
 
 - [x] ¿Se puede convertir en una verificación de `npm run audit`? **No en el sentido habitual, y por eso existe la prueba del guardián.** Ningún check puede verificarse a sí mismo: por cada uno de los once se introduce a mano una violación deliberada, se captura la **salida de fallo literal**, se revierte, y esa salida vive en `docs/pasos/P0/evidencia/` y en `docs/pasos/P0/AUDITORIA-RESULTADO.md`. **Sin las once salidas capturadas, P0 no cierra** — es criterio de commit, no un extra.
@@ -117,11 +141,16 @@ Y un quinto arreglo que no es de ningún check en particular sino del informe: `
 >
 > Ampliar el alcance sin repetir el guardián deja la parte nueva sin cubrir y el check sigue en verde: es exactamente la situación de los casos 3 y 4, que aparecieron meses después de que el check se diera por bueno.
 
+**Y la que añade el caso 8, que la anterior no cubría:**
+
+> **Un check que falla no está verificado: hay que mirar en CUÁNTOS sitios falla.** Si una regla debería marcar cinco archivos y marca tres, la regla está rota aunque su salida sea roja. El verde no es el único color sospechoso.
+
 Momentos ya identificados en los que esto toca hacerse:
 
 | Cuándo | Qué cambia el alcance | Qué hay que volver a forzar |
 |---|---|---|
 | **P1** | Regla nueva de `audit:forbidden`: cliente de BD fuera de la capa de tenant | `audit:forbidden` |
+| **P5** | Reglas nuevas: M11 en `audit:migrations` y `sin-caracteres-de-control` en `audit:forbidden` | Las dos, forzadas y capturadas en `docs/pasos/P5/evidencia/` |
 | **P6** | `inventory_movement` entra en la lista de tablas append-only; migraciones nuevas | `audit:forbidden`, `audit:migrations` |
 | **P12** | Workspace `apps/web`: globs, `tsconfig`, reglas de capa y de complejidad nuevas | **Los once**, sobre el workspace nuevo |
 | Cualquiera | Se añade una carpeta que no casa con los globs existentes | Los checks cuyo glob se amplió |
