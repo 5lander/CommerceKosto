@@ -496,3 +496,15 @@ Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se r
 Lo que sí se prueba, con cifras concretas calculadas a mano en la suite de integración, es la aritmética completa de la cadena: `inicial + compras − final físico`, encadenada entre dos meses, con un conteo parcial y su cobertura. La verificación **contra el Excel** llega con P8, cuando existan las unidades vendidas y `venta_neta_mes` cierre la fórmula.
 
 **Y P7 aporta a CC-R7 lo que le faltaba después de P6.** El dataset completo necesita `inventario_inicial_valorizado` e `inventario_final_fisico`, y esos dos números no existían: son el conteo confirmado del mes anterior y el de este. Ahora existen, congelados, y encadenados.
+
+---
+
+## Lo que P8 cierra, y lo que deja abierto
+
+**CC-R7 llega al nivel que le faltaba desde P0.** Corría con aritmética suelta, luego a través del motor (P5), y ahora **a través del sistema entero**: catálogo, precios con vigencia, receta, motor de costeo, unidades vendidas del mes y libro de inventario. Los dos caminos de SPEC §16 se recorren de punta a punta y la diferencia da `0.00`.
+
+Y hay una segunda versión, que es la que importa: **la misma conciliación con un producto de rendimiento 2**. Con rendimiento 1 los dos caminos coinciden aunque el consumo esté mal —es lo que dejó pasar un fallo durante dos paquetes—, así que el caso de aceptación real es el que tiene rendimiento distinto de uno.
+
+**CC-008 se cierra**: el cuadrante de menu engineering con índice de popularidad exactamente 1. Está probado en las dos capas —dominio y HTTP— y el valor esperado no sale del código: sale de resolver `popularidad × n / regla = 1` a mano y elegir 210 unidades de 900 con tres productos activos.
+
+**Lo que P8 no puede cerrar, y conviene que quede escrito:** las seis vistas **no se contrastan contra el Excel celda a celda**, porque el Excel no tiene dimensión temporal (SPEC §3). No existe una hoja «food cost real de marzo». Lo que sí sale del Excel son los nueve casos de costeo de arriba, y P8 no toca ninguna de esas fórmulas.

@@ -192,6 +192,50 @@ Y hay una segunda razón para que exista además de la guarda: **la guarda vive 
 
 ---
 
+## `20260904235107_p8_ventas_y_costos_fijos`
+
+Solo dos tablas y un catálogo, y **ninguna restricción nueva es un trigger**. Los dos 🔴 son índices únicos, que es la forma en que INC-012 se cuela cuando ya no quedan `CHECK` alcanzables: un `23505` sube igual de sin traducir que un `23514`.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `product_sales_unidades_no_negativas` | 🟡 | Esquema: las unidades entran como magnitud sin signo. A diferencia del conteo físico, aquí «debe ser una cantidad positiva» **es** el mensaje útil: no existe el matiz de «miré y no había» |
+| `fixed_cost_classification_codigo_conocido` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él |
+| `fixed_cost_concepto_no_vacio` | 🟡 | `z.string().trim().min(1)` |
+| `fixed_cost_concepto_acotado` | 🟡 | `.max(200)` |
+| `fixed_cost_importe_no_negativo` | 🟡 | Esquema: el importe entra como decimal sin signo |
+| **único** `product_sales(period_id, product_id)` | 🔴 | **`exigirVentasValidas`** → `ProductoRepetidoEnVentasError`. Un lote con el mismo producto dos veces es una grilla mal armada, y el `23505` saldría como 500 |
+| **único** `fixed_cost(period_id, concept)` | 🔴 | **`exigirCostosValidos`** → `ConceptoRepetidoError`. Dos «Arriendo» en el mismo mes: uno de los dos sobra y nadie sabe cuál |
+
+### Lo que la base **no** comprueba aquí, y sí comprueba el dominio
+
+Escribir ventas o costos fijos en un **período cerrado** se rechaza, y no hay `CHECK` que lo haga: la restricción cruzaría dos tablas. Lo detiene `exigirPeriodoAbierto` en el caso de uso, con `PeriodoCerradoError` — el mismo error de P7, por el mismo motivo.
+
+Es coherente con lo que «cerrado es de solo lectura» significa (D6): si la cifra de ventas de un mes sellado pudiera cambiar, el food cost real de ese mes cambiaría con ella, y ese mes ya se informó. **La diferencia con el libro es que aquí no hay trigger de respaldo**, porque no hay una columna de fecha en la fila contra la que compararlo: el vínculo con el período es la clave foránea, y un `CHECK` no puede seguirla. Queda anotado: si algún día hay una segunda ruta de escritura a estas tablas, la guarda es lo único que las protege.
+
+---
+
+## `20260904235107_p8_ventas_y_costos_fijos`
+
+Dos tablas y un catálogo. **Ninguna restricción nueva es un trigger**, y los dos 🔴 son índices únicos: es la vía por la que INC-012 se cuela cuando ya no quedan `CHECK` alcanzables, porque un `23505` sube igual de sin traducir que un `23514`.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `product_sales_unidades_no_negativas` | 🟡 | Esquema: las unidades entran como magnitud sin signo |
+| `product_sales_unidades_enteras` | 🟡 | Esquema: `/^\d+$/`. El dominio las modela como `Count`, que es entero por construcción |
+| `fixed_cost_classification_codigo_conocido` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él |
+| `fixed_cost_concepto_no_vacio` · `_acotado` | 🟡 | `z.string().trim().min(1).max(200)` |
+| `fixed_cost_importe_no_negativo` | 🟡 | Esquema |
+| **único** `product_sales(period_id, product_id)` | 🔴 | **`exigirVentasValidas`** → `ProductoRepetidoEnVentasError` |
+| **único** `fixed_cost(period_id, concept)` | 🔴 | **`exigirCostosValidos`** → `ConceptoRepetidoError`. Compara **normalizado** —sin espacios de sobra y sin distinguir mayúsculas—, que es más estricto que el índice: «Arriendo» y «arriendo » son el mismo gasto, y la base los dejaría pasar |
+
+### Lo que la base **no** comprueba aquí
+
+Escribir ventas o costos en un **período cerrado** se rechaza, y no hay `CHECK` que lo haga: la restricción cruzaría dos tablas. Lo detiene `exigirAbierto` en el caso de uso, con el mismo `PeriodoCerradoError` de P7.
+
+**A diferencia del libro, aquí no hay trigger de respaldo.** El vínculo con el período es una clave foránea y un `CHECK` no puede seguirla. Si algún día hay una segunda ruta de escritura a estas dos tablas, la guarda es lo único que las protege — y conviene saberlo antes de escribirla.
+
+---
+
 ## Cómo se mantiene
 
 Al añadir una migración con `CHECK` o `RAISE EXCEPTION`:

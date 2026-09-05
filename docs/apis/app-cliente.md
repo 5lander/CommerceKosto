@@ -797,6 +797,112 @@ estimación. Sobre un conteo en **borrador** la conciliación se calcula al vuel
 —es la previsualización que un gerente quiere antes de sellar el mes—; sobre uno
 confirmado se lee lo congelado, y da el mismo número dentro de un año.
 
+## Analítica (P8)
+
+**Las seis vistas del Excel, por ubicación y por mes.** Todas se calculan sobre un contexto único: la carta costeada a la fecha del corte, las ventas del mes, el consumo teórico, los agregados del libro y el conteo confirmado.
+
+**Tres permisos separan tres audiencias**, y la línea es CLAUDE.md §4.3:
+
+| Endpoint | Permiso | Quién lo tiene |
+|---|---|---|
+| `POST`/`GET /analitica/ventas` | `sales.write` / `sales.read` | `OWNER`, `ADMIN`, `GERENTE_LOCAL` (+ `LECTURA` en lectura) |
+| `POST`/`GET /analitica/costos-fijos` | `cost.write` / `cost.read` | Ídem |
+| `GET /analitica/resumen` · `menu-engineering` · `food-cost-real` · `punto-de-equilibrio` · `inventario` | `analytics.read` | Todos **menos `BODEGA`** |
+| `GET /analitica/reposicion` | `replenishment.read` | **Todos, `BODEGA` incluido** |
+
+### `POST /analitica/ventas` — `sales.write`
+
+```json
+{ "locationId": "…", "anio": 2026, "mes": 3,
+  "ventas": [ { "productId": "…", "unidades": "320" } ] }
+```
+
+**204.** **Reemplaza la carga entera del mes**: lo que se manda es lo que queda. Es lo que hace posible la grilla de CLAUDE.md §10 —«una grilla editable con el período anterior precargado, no un formulario por producto»—, y lo que D9 pide: el caso de uso recibe un lote «sin importar si viene de digitación, importación o un sistema externo».
+
+`unidades` es un **entero**: el dominio lo modela como `Count`, y la base lo hace cumplir con `units = trunc(units)`.
+
+| Código | Cuándo |
+|---|---|
+| `400` | El mismo producto dos veces en el lote |
+| `409` | El período está cerrado (D6): si la cifra de ventas de un mes sellado cambiara, su food cost real cambiaría con ella |
+
+### `POST /analitica/costos-fijos` — `cost.write`
+
+```json
+{ "locationId": "…", "anio": 2026, "mes": 3,
+  "costos": [
+    { "concepto": "Nomina", "clasificacion": "MANO_DE_OBRA", "importe": "3000.00" },
+    { "concepto": "Arriendo", "clasificacion": "OTRO_FIJO", "importe": "1200.00" },
+    { "concepto": "Comision tarjeta", "clasificacion": "VARIABLE", "importe": "0.03" } ] }
+```
+
+**204.** T6 del Excel, con el campo que SPEC §17 pide por su nombre.
+
+**`clasificacion` es un enum, no texto libre.** El Excel identifica la mano de obra por el prefijo `"Sueldos*"` y su propia nota dice que «es frágil»: un concepto llamado «Nómina» quedaría fuera del prime cost sin que nada avisara, y el prime cost decide si un local es viable.
+
+**`importe` significa dos cosas según la clasificación:** `VARIABLE` lo trae como **fracción de la venta neta** (`0.03` es 3 %); las otras dos, como **monto mensual**. Lo declara el catálogo, no el nombre del concepto.
+
+**`400` si un concepto se repite**, comparando sin espacios de sobra y sin distinguir mayúsculas: «Arriendo» y «arriendo » son el mismo gasto, y contarlo dos veces daría una utilidad operativa plausible y equivocada.
+
+### `GET /analitica/food-cost-real` — `analytics.read`
+
+SPEC §16 entero, **con `diferenciaConciliacion` a la vista**:
+
+```json
+{ "consumoReal": "4300", "consumoTeorico": "4000",
+  "varianzaUsd": "300", "varianzaPct": "0.075",
+  "foodCostTeoricoPct": "0.266666666666", "foodCostRealPct": "0.286666666666",
+  "brechaEnPuntos": "2", "costoVentasTeorico": "4380",
+  "costoVentasSegunCosteo": "4380", "diferenciaConciliacion": "0.00" }
+```
+
+**`diferenciaConciliacion` tiene que ser `"0.00"`. Siempre.** Es R7, y se devuelve para que se pueda mirar sin abrir una consola. `brechaEnPuntos` va en **puntos porcentuales**, no en fracción: 2 significa dos puntos.
+
+Los porcentajes son `null` —no cero— cuando la venta neta del mes es cero: un food cost sobre venta cero no es «0 %», es una pregunta sin respuesta.
+
+### `GET /analitica/menu-engineering` — `analytics.read`
+
+```json
+{ "productos": [ { "productId": "…", "unidades": "210",
+    "popularidad": "0.233333333333", "indicePopularidad": "1",
+    "margenContribucion": "6.65", "cuadrante": "ESTRELLA" } ],
+  "mcPromedio": "2", "unidadesTotales": "900", "productosActivos": 3 }
+```
+
+`cuadrante` es `ESTRELLA`, `CABALLO`, `ROMPECABEZAS`, `PERRO`, `SIN_DATOS` (activo sin unidades, o sin PVP) o `INACTIVO`. **`índice ≥ 1` es popular**, y el empate exacto es determinista: el índice se calcula con una sola división para que un producto que debe dar `1` dé `1` y no `0.999999999999`.
+
+El `mcPromedio` es **ponderado por unidades**, no la media simple.
+
+### `GET /analitica/punto-de-equilibrio` — `analytics.read`
+
+SPEC §17. `unidadesEquilibrioMes`, `ventaNetaEquilibrio` y `margenDeSeguridad` son **`null` cuando el margen de contribución neto por unidad no es positivo**: cada unidad vendida pierde dinero y no hay cantidad que alcance el equilibrio. Un número negativo ahí se leería como una meta alcanzable.
+
+`manoDeObra` suma a `costosFijos` **y** a `primeCost`, y es correcto: son dos preguntas distintas sobre el mismo dinero.
+
+### `GET /analitica/inventario` — `analytics.read`
+
+SPEC §18, por ítem: `stockInicial`, `compras`, `mermasYAjustes`, `consumoTeorico`, `stockTeorico`, `valorTeorico`, `conteoFisico`, `diferencia`, `valorDeDiferencia`, `diasCobertura`, `puntoDeReorden` y `estado`.
+
+`estado` es `SIN_CONSUMO`, `FALTAN_COMPRAS`, `REPONER` u `OK`, en ese orden de evaluación — que no es intercambiable: un ítem que no se consume está siempre por debajo de su reorden, y clasificarlo como `OK` por esa vía escondería que nadie sabe si sobra o falta.
+
+**`mermasYAjustes` lleva el signo del libro**, no el del Excel: una merma llega en negativo y se **suma**. SPEC §18 la resta porque allí se capturan en positivo.
+
+### `GET /analitica/resumen` — `analytics.read`
+
+Los indicadores clave con su semáforo: `VERDE`, `AMBAR`, `ROJO` o **`SIN_DATO`**. El cuarto no es un nivel de gravedad: es la ausencia de medición, y va aparte para que ninguna interfaz lo pinte de verde. La varianza se juzga en **valor absoluto**: consumir un 8 % menos de lo teórico es tan sospechoso como un 8 % más.
+
+### `GET /analitica/reposicion` — `replenishment.read`
+
+**Lo único de P8 que `BODEGA` recibe** — SPEC §4:
+
+```json
+[ { "itemId": "…", "nombre": "Cebolla paiteña", "semaforo": "REPONER" } ]
+```
+
+Tres campos, y **ninguno es una cantidad**. `FALTAN_COMPRAS` y `REPONER` colapsan en `REPONER`; `SIN_CONSUMO` y `OK`, en `OK`: distinguirlos ya sería un dato sobre el stock teórico.
+
+Se construye desde otro caso de uso y con otro tipo, **no filtrando la vista de inventario**. Un campo que se calcula y luego se quita ya viajó por el cable alguna vez.
+
 ## Salud
 
 `GET /health` (liveness, no toca la base) y `GET /ready` (readiness, sí la toca). Públicas y fuera del limitador: las sondea el orquestador cada pocos segundos.

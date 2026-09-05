@@ -1,0 +1,62 @@
+GUARDIAN 1 — el que destapo un fallo de P6: UNA prueba de 700
+==============================================================
+
+Que se rompio: en `lotesConsumidos`, se quito la division por
+`rendimientoPorciones`. Es literalmente volver al codigo de P6.
+
+  -  return Ratio.fromDecimalString(venta.unidades).dividedBy(rendimiento, DIVISION);
+  +  return Ratio.fromDecimalString(venta.unidades);
+
+$ npx vitest run --project unit
+  Tests  442 passed (442)          <-- TODAS EN VERDE
+
+$ npx vitest run --project integration test/integracion/analitica.spec.ts
+  x la conciliacion R7 (SPEC 16) > sigue dando cero con rendimiento por lote
+    MAYOR QUE UNO
+    -> expected '200' to be '100'
+  Tests  1 failed | 13 passed (14)
+
+Y las 246 de P0-P7, tambien en verde.
+
+
+LO QUE ESTE GUARDIAN DEMUESTRA
+-------------------------------
+UNA sola prueba de las ~700 del proyecto detecta que el consumo teorico —y con
+el, lo que el libro descuenta del inventario— es EL DOBLE de lo que deberia.
+
+Y no es un caso rebuscado: es un producto que rinde 2 porciones por lote, que
+es la mitad de la carta de cualquier restaurante.
+
+POR QUE NINGUNA PRUEBA DE P6 LO VIO
+------------------------------------
+Porque `rendimiento_porciones = 1` es el UNICO valor con el que multiplicar por
+las unidades y dividir por el rendimiento dan lo mismo. Todos los productos de
+las pruebas de P6 —y de P4, y de P5— lo tenian en 1.
+
+El fallo llevaba dos paquetes en el codigo, con 596 pruebas en verde encima.
+
+QUE LO ENCONTRO
+----------------
+R7. La conciliacion de SPEC 16 es una identidad entre dos caminos:
+
+  costo_ventas_teorico   = consumo_teorico + empaque + provision
+  costo_ventas_v_costeo  = venta_neta - mc
+
+El primero pasa por la explosion de la receta; el segundo, por
+`costo_por_porcion = costo_neto_lote / rendimiento_porciones`. Con rendimiento
+1 los dos caminos coinciden aunque uno este mal. Con rendimiento 2, no: la
+conciliacion daba 98,00 sobre un caso de 102 dolares.
+
+Es exactamente para lo que R7 existe, y es la primera vez que lo demuestra
+sobre un dataset completo.
+
+CONSECUENCIA EN PRODUCCION, SI NO SE HUBIERA ENCONTRADO
+--------------------------------------------------------
+`RegistrarConsumoPorVenta` descontaba `receta x unidades` del libro. Con un
+rendimiento de 4, cada venta habria sacado del inventario cuatro veces lo que
+sale de la bodega. El stock teorico se habria vaciado cuatro veces mas rapido
+que el estante, y la diferencia habria aparecido en el conteo fisico como una
+merma enorme e inexplicable — que es justo el numero que un dueno de
+restaurante usa para sospechar de su personal.
+
+Restaurado tras la captura.

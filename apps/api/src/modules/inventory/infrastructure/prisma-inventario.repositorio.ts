@@ -21,6 +21,8 @@
 import { Injectable } from '@nestjs/common';
 
 import { ALMACENAMIENTO } from '../../../shared/domain/decimal/escalas';
+import { Quantity } from '../../../shared/domain/money/tipos-monetarios';
+import { unidadDeUso } from '../../../shared/domain/unidad/unidad-de-uso';
 
 import {
   itemId as aItemId,
@@ -39,6 +41,7 @@ import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persis
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import { DIRECCION_DE, type TipoDeMovimiento } from '../domain/movimiento';
 import type {
+  AgregadoDeItem,
   ConsultaDelLibro,
   DatosDeProduccionRegistrada,
   DatosDeTransferenciaRegistrada,
@@ -176,6 +179,84 @@ function comoFila(
 }
 
 const SIN_AGRUPAR = { transferId: null, productionId: null } as const;
+
+const CONSUMO_POR_VENTA = 'CONSUMO_POR_VENTA';
+const MERMA_O_AJUSTE: readonly string[] = ['MERMA', 'AJUSTE'];
+const COMPRA = 'COMPRA';
+
+interface FilaAgregada {
+  readonly itemId: string;
+  readonly type: string;
+  readonly _sum: { readonly quantity: Decimal | null; readonly totalCost: Decimal | null };
+}
+
+interface Acumulado {
+  compras: string;
+  mermasYAjustes: string;
+  otros: string;
+  importeDeCompras: string;
+}
+
+function vacio(): Acumulado {
+  return {
+    compras: CERO_ALMACENADO,
+    mermasYAjustes: CERO_ALMACENADO,
+    otros: CERO_ALMACENADO,
+    importeDeCompras: CERO_ALMACENADO,
+  };
+}
+
+/**
+ * Reparte cada tipo en su casilla.
+ *
+ * Se pliega en TypeScript y no en SQL porque son tres sumas condicionales
+ * sobre el MISMO grupo: en SQL serian tres `FILTER (WHERE ...)` escritos a
+ * mano, que es exactamente el `SELECT` crudo que la capa de tenant no deja
+ * pasar. Aqui la consulta devuelve como mucho `items x 6` filas.
+ */
+function plegarAgregados(filas: readonly FilaAgregada[]): readonly AgregadoDeItem[] {
+  const porItem = new Map<string, Acumulado>();
+
+  for (const fila of filas) {
+    const acumulado = porItem.get(fila.itemId) ?? vacio();
+    const cantidad = fila._sum.quantity;
+    const importe = fila._sum.totalCost;
+
+    if (fila.type === COMPRA) {
+      acumulado.compras = aEscalaDeAlmacenamiento(cantidad ?? CERO_DECIMAL);
+      acumulado.importeDeCompras = aEscalaDeAlmacenamiento(importe ?? CERO_DECIMAL);
+    } else if (MERMA_O_AJUSTE.includes(fila.type)) {
+      acumulado.mermasYAjustes = sumarCadenas(acumulado.mermasYAjustes, cantidad);
+    } else {
+      acumulado.otros = sumarCadenas(acumulado.otros, cantidad);
+    }
+    porItem.set(fila.itemId, acumulado);
+  }
+
+  return [...porItem].map(([itemId, acumulado]) => ({ itemId: aItemId(itemId), ...acumulado }));
+}
+
+/** Un decimal neutro con la forma que `toFixed` espera. */
+const CERO_DECIMAL: Decimal = { toFixed: (decimales?: number) => (0).toFixed(decimales) };
+
+/**
+ * Suma dos decimales que viajan como cadena.
+ *
+ * MERMA y AJUSTE caen en la misma casilla y llegan como dos filas del
+ * `groupBy`, asi que hay que sumarlas. Se hace con `Quantity` y no con
+ * `Number`: son cantidades de inventario, y CLAUDE.md 8 no admite punto
+ * flotante para ellas ni siquiera en un acumulador temporal. La unidad es
+ * irrelevante aqui —las dos filas son del mismo item— y por eso se usa una
+ * fija.
+ */
+function sumarCadenas(acumulado: string, cantidad: Decimal | null): string {
+  if (cantidad === null) return acumulado;
+
+  const unidad = unidadDeUso('unid');
+  return Quantity.fromDatabase(acumulado, unidad)
+    .plus(Quantity.fromDatabase(aEscalaDeAlmacenamiento(cantidad), unidad))
+    .toStorageString();
+}
 
 @Injectable()
 export class PrismaInventarioRepositorio implements RepositorioDeInventario {
@@ -350,6 +431,35 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
       // importe, y su cantidad negativa es la que la anula en el saldo.
       const suma = agregado._sum.totalCost;
       return suma === null ? CERO_ALMACENADO : aEscalaDeAlmacenamiento(suma);
+    });
+  }
+
+  /**
+   * El libro de un periodo, agrupado por item y por tipo. UNA consulta.
+   *
+   * `CONSUMO_POR_VENTA` se excluye en el `where`, no al plegar: asi ni siquiera
+   * viaja. Ver la cabecera del metodo en el puerto — es lo que evita contar el
+   * consumo dos veces en el stock teorico de SPEC 18.
+   */
+  public async agregadosDelPeriodo(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly desde: Date;
+    readonly hasta: Date;
+  }): Promise<readonly AgregadoDeItem[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.inventoryMovement.groupBy({
+        by: ['itemId', 'type'],
+        where: {
+          companyId: entrada.companyId,
+          locationId: entrada.locationId,
+          occurredAt: { gte: entrada.desde, lt: entrada.hasta },
+          type: { not: CONSUMO_POR_VENTA },
+        },
+        _sum: { quantity: true, totalCost: true },
+      });
+
+      return plegarAgregados(filas);
     });
   }
 

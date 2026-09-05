@@ -21,6 +21,7 @@
  * que P6 tomó con el costo estándar de una producción (ADR-009).
  */
 
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type {
   ItemId,
   LocationId,
@@ -626,14 +627,11 @@ interface EventoDeConteo {
 }
 
 async function registrarEventoDeConteo(evento: EventoDeConteo): Promise<void> {
-  await evento.deps.auditoria.record({
-    eventType: evento.eventType,
-    outcome: 'success',
-    actorType: 'USER',
+  await registrarEventoDeUsuario({
+    auditoria: evento.deps.auditoria,
     actorId: evento.sesion.userId,
     companyId: evento.sesion.companyId,
-    ip: null,
-    userAgent: null,
+    eventType: evento.eventType,
     detail: {
       countId: evento.id,
       ...(evento.cobertura === undefined || evento.cobertura === null

@@ -18,6 +18,7 @@ Plantilla en `docs/plantillas/ADR.md`.
 | [ADR-008](ADR-008-las-tres-decisiones-que-el-spec-no-escribe.md) | Las tres decisiones de costeo que el SPEC no escribe: el empaque, la precedencia de la cascada y el combo | ✅ aceptado | P5 |
 | [ADR-009](ADR-009-el-signo-el-costo-y-el-interruptor-de-stock.md) | El signo del movimiento, el importe del lote y la confidencialidad del saldo frente a `BODEGA` | ✅ aceptado | P6 |
 | [ADR-010](ADR-010-el-mes-el-corte-y-lo-que-no-se-conto.md) | De quién es el período, dónde vive la frontera del mes, y qué significa exactamente no haber contado un ítem | ✅ aceptado | P7 |
+| [ADR-011](ADR-011-el-consumo-teorico-y-lo-que-R7-destapo.md) | El consumo teórico, el rendimiento por lote, y el fallo de P6 que la conciliación R7 sacó a la luz | ✅ aceptado | P8 |
 
 ## ADRs esperados por el plan
 

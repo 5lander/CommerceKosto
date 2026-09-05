@@ -26,6 +26,7 @@ import type {
   MovementId,
   ProductId,
 } from '../../../../shared/domain/identity/identificadores';
+import { DIVISION } from '../../../../shared/domain/decimal/escalas';
 import { Quantity, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ItemLeido } from '../../../catalog/application/ports/repositorio-de-catalogo.port';
@@ -121,8 +122,16 @@ export class RegistrarConsumoPorVenta {
   }
 }
 
-/** Suma el consumo de todos los productos vendidos en un solo mapa. */
-function totalConsumido(
+/**
+ * Suma el consumo de todos los productos vendidos en un solo mapa.
+ *
+ * **EXPORTADA PORQUE P8 CALCULA EL MISMO NÚMERO.** El consumo teórico de SPEC
+ * §16 y §18 es exactamente esto: la receta explotada por las unidades vendidas.
+ * Si `analytics` lo reimplementara, el stock teórico de la vista de inventario
+ * y el consumo que el libro registra podrían discrepar — y serían dos respuestas
+ * a la misma pregunta.
+ */
+export function totalConsumido(
   ventas: readonly VentaDeProducto[],
   carta: CartaDeUbicacion,
   catalogo: CatalogoDeConsumo,
@@ -133,9 +142,12 @@ function totalConsumido(
     const receta = carta.recetasDeProducto.get(venta.productId);
     if (receta === undefined) continue;
 
+    const lotes = lotesConsumidos(venta, carta);
+    if (lotes === null) continue;
+
     const parcial = explotarConsumo({
       receta: receta.lineas.map(comoLineaDeConsumo),
-      unidadesVendidas: Ratio.fromDecimalString(venta.unidades),
+      unidadesVendidas: lotes,
       catalogo,
     });
 
@@ -146,6 +158,42 @@ function totalConsumido(
   }
 
   return total;
+}
+
+/**
+ * CUÁNTOS LOTES DE RECETA CONSUMEN N UNIDADES VENDIDAS.
+ *
+ * **LA RECETA ES DEL LOTE; LA VENTA, DE PORCIONES.** SPEC §14 lo dice sin
+ * ambigüedad —`costo_por_porcion = costo_neto_lote / rendimiento_porciones`—,
+ * así que vender 10 porciones de un producto que rinde 2 consume **5** lotes,
+ * no 10. Multiplicar por las unidades sin dividir sobreestima el consumo por el
+ * factor del rendimiento: con rendimiento 4, cuadruplica lo que se descuenta
+ * del inventario.
+ *
+ * **LO DESTAPÓ R7 EN P8.** La conciliación de SPEC §16 exige que
+ * `consumo_teorico_valorizado` sea `costo_por_porcion × unidades`, y eso solo
+ * es cierto si aquí se divide. Sin la división, R7 daba cero únicamente cuando
+ * todos los rendimientos valían 1 — que es el caso de los productos de prueba,
+ * y por eso P6 no lo vio.
+ *
+ * **`null` SIGNIFICA «NO CONSUME NADA», y es lo coherente**: un producto sin
+ * rendimiento capturado tiene `costo_por_porcion = 0` en el motor de costeo
+ * (SPEC §14 lo fija como guarda), así que su consumo valorizado también tiene
+ * que ser cero o R7 dejaría de cuadrar. Está a medio configurar, y el sistema
+ * ya dice que su costo es cero.
+ *
+ * OJO, NO CONFUNDIR CON EL RENDIMIENTO DEL ÍTEM. Aquel es la fracción
+ * aprovechable tras la limpieza y vive en el COSTO (SPEC §12); este es cuántas
+ * porciones salen de un lote y vive en la CANTIDAD.
+ */
+function lotesConsumidos(venta: VentaDeProducto, carta: CartaDeUbicacion): Ratio | null {
+  const porciones = carta.enUbicacion.get(venta.productId)?.rendimientoPorciones;
+  if (porciones === null || porciones === undefined) return null;
+
+  const rendimiento = Ratio.fromDecimalString(porciones);
+  if (rendimiento.isZero()) return null;
+
+  return Ratio.fromDecimalString(venta.unidades).dividedBy(rendimiento, DIVISION);
 }
 
 /**
@@ -162,7 +210,8 @@ function comoLineaDeConsumo(linea: RecetaLeida['lineas'][number]): LineaDeConsum
   };
 }
 
-function catalogoDeConsumo(
+/** Exportada por lo mismo que `totalConsumido`: P8 arma el mismo grafo. */
+export function catalogoDeConsumo(
   items: readonly ItemLeido[],
   carta: CartaDeUbicacion,
 ): CatalogoDeConsumo {

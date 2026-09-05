@@ -4,6 +4,53 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P8 — Vistas analíticas · 2026-09-04
+
+**Objetivo:** las seis vistas del Excel, por ubicación.
+
+### Entregado
+
+- **Food cost real y varianza** (SPEC §16) **con la conciliación R7**, que ahora corre sobre un **dataset completo** en cada build: catálogo, precios con vigencia, receta, motor de costeo, unidades vendidas y libro. Era el último criterio de aceptación pendiente desde P0
+- **Menu engineering Kasavana-Smith** con los cuatro cuadrantes, más `SIN_DATOS` e `INACTIVO` que el SPEC también fija. **El índice se calcula con una sola división** para que el empate exacto en 1 sea determinista
+- **Punto de equilibrio, prime cost y margen de seguridad** (SPEC §17) con **clasificación explícita** de T6 —`MANO_DE_OBRA` / `OTRO_FIJO` / `VARIABLE`—, que es lo que el propio SPEC pide en lugar del frágil prefijo «Sueldos*»
+- **Inventario valorizado** con estados, días de cobertura y punto de reorden (SPEC §18)
+- **Resumen gerencial** con semáforos por company (D3), y un cuarto estado —`SIN_DATO`— que existe para que ninguna interfaz pinte de verde la ausencia de medición
+- **`product_sales`**: las unidades vendidas, que faltaban desde P6 y de las que dependen tres de las seis vistas. En lote y por reemplazo (D9), que es lo que la grilla de P12 necesita
+- **`fixed_cost`** (T6) con su catálogo de clasificación
+- **`BODEGA` no recibe ninguna vista**, solo el semáforo `REPONER`/`OK` **sin la cantidad**, servido desde su propio caso de uso y con su propio tipo
+- **ADR-011** con las siete decisiones del paquete
+- **702 pruebas**: 442 unitarias con la base apagada, 260 de integración
+
+### Lo que se descubrió por el camino
+
+**R7 destapó un fallo que llevaba dos paquetes en el código.** La receta es del **lote** y la venta es de **porciones**: vender 100 unidades de un producto que rinde 2 consume **50** lotes, no 100. P6 multiplicaba por las unidades sin dividir, así que con un rendimiento de 4 cada venta sacaba del inventario cuatro veces lo que sale de la bodega.
+
+**Ninguna de las 596 pruebas de P0–P6 lo vio**, porque `rendimiento_porciones = 1` es el único valor con el que multiplicar y dividir dan lo mismo, y todos los productos de prueba lo tenían en 1. Lo encontró la conciliación de SPEC §16, que con rendimiento 2 daba **98,00** sobre un caso de 102 dólares.
+
+Es la primera vez que R7 demuestra para qué existe, y la corrección vive en el punto único que P6 y P8 comparten: `totalConsumido`.
+
+**El índice «exactamente 1» no salía exacto.** Escribiendo la fórmula del SPEC tal cual —tres operaciones, cada una redondeando a escala 12— el producto de la frontera daba `0.999999999999` y caía en `CABALLO` en vez de `ESTRELLA`. No es un error de presentación: es una recomendación de negocio invertida por un residuo en el decimal doce.
+
+**El consumo se podía contar dos veces.** El Excel no tiene movimientos de consumo; este sistema sí puede tenerlos (P6). Sumarlos *y* restar el consumo teórico daba 40 kg de stock donde había 70 — un número perfectamente creíble que dice que falta mercancía que está en la estantería. El invariante que lo fija es una prueba: el stock teórico da lo mismo esté o no registrado el consumo por venta.
+
+**`audit:arch` paró un ciclo real** entre `contexto.ts` y `vistas.ts`, y `audit:duplication` cazó la cuarta repetición del bloque de auditoría, que se extrajo a `shared/application`.
+
+### Lo que el guardián 1 enseña
+
+Volver al código de P6 deja **442 unitarias en verde, 246 de integración de P0–P7 en verde, y falla UNA sola** de las ~700 del proyecto. Esa prueba detecta que el consumo teórico es el doble de lo que debería.
+
+La lección no es que faltara una prueba: es que **el caso de prueba tenía que tener rendimiento distinto de uno**. Con rendimiento 1 los dos caminos de R7 coinciden aunque uno esté mal, y el invariante verde tapa el desglose roto — la misma forma de fallo de P5, P6 y P7, por cuarta vez.
+
+### Pendiente
+
+- **El rendimiento del ÍTEM sigue sin confirmarse contra el Excel**, y ahora importa más: afecta al `consumo_teorico` que P8 ya publica
+- **El coste de armar el contexto no tiene medición propia.** Es lo primero que P9 debería medir: el consolidado lo multiplica por el número de ubicaciones
+- El **estado del período** en el consolidado de P9
+- **Leer `audit_log`** — P11
+- D4 (`LNK`) sigue en 🔴
+
+---
+
 ## P7 — Períodos · conteo físico · 2026-09-04
 
 **Objetivo:** poder cerrar un mes y compararlo con el siguiente.

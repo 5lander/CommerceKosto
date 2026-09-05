@@ -1,0 +1,49 @@
+GUARDIAN 2 — el criterio de aceptacion, roto por un decimal
+============================================================
+
+Que se rompio: `indiceDe` vuelve a calcularse DESDE `popularidad`, que es la
+forma literal de la formula del SPEC:
+
+    indice_popularidad = popularidad / (1 / n_activos) / regla
+
+  -  const numerador = producto.unidades.asRatio().times(activos);
+  -  const divisor = datos.unidadesTotales.asRatio().times(contexto.reglaPopularidad);
+  -  return divisor.isZero() ? null : numerador.dividedBy(divisor, DIVISION);
+  +  const popularidad = producto.unidades.ratioTo(datos.unidadesTotales);
+  +  return popularidad.times(activos).dividedBy(contexto.reglaPopularidad, DIVISION);
+
+$ npx vitest run --project unit src/modules/analytics/domain/vistas.spec.ts
+
+  x menu engineering (SPEC 15) > un indice EXACTAMENTE 1 es popular, de forma
+    determinista
+    -> expected '0.999999999999' to be '1'
+
+  Tests  1 failed | 28 passed (29)
+
+
+DE DONDE SALE EL RESIDUO
+-------------------------
+  210 / 900          = 0.233333333333   <- redondeo a escala 12, AQUI
+  x 3 activos        = 0.699999999999
+  / 0.70             = 0.999999999999
+
+Reordenando los factores hay UNA sola division:
+
+  (210 x 3) / (900 x 0.70) = 630 / 630 = 1     exacto
+
+
+POR QUE IMPORTA UN DECIMAL DOCE
+--------------------------------
+Porque el indice se compara contra 1, y `0.999999999999 >= 1` es FALSO. Ese
+producto pasa de ESTRELLA a CABALLO: de «mantenlo tal cual, es lo que sostiene
+la carta» a «tiene poco margen, rediseñalo».
+
+No es un error de presentacion. Es una recomendacion de negocio invertida por
+un residuo que ninguna pantalla mostraria.
+
+El criterio de aceptacion de P8 pide exactamente esto: «un producto con indice
+de popularidad exactamente 1 cae en el cuadrante correcto DE FORMA
+DETERMINISTA». El determinismo lo da la aritmetica decimal exacta; el «cuadrante
+correcto» lo da no redondear por el camino.
+
+Restaurado tras la captura.

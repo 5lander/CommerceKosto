@@ -81,6 +81,25 @@ export interface SaldoLeido {
   readonly cantidad: string;
 }
 
+/**
+ * Lo que un ítem movió en un período, separado por lo que cada vista necesita.
+ *
+ * Los tres primeros llevan **el signo del libro**: una merma ya viene negativa.
+ * SPEC §18 los *resta* porque en el Excel se capturan en positivo; aquí se
+ * suman, que es la traducción correcta de la misma fórmula.
+ */
+export interface AgregadoDeItem {
+  readonly itemId: ItemId;
+  /** `Σ` cantidad de `COMPRA`. Positiva. */
+  readonly compras: string;
+  /** `Σ(MERMA) + Σ(AJUSTE)`, con signo. */
+  readonly mermasYAjustes: string;
+  /** Transferencias y producción, con signo. No existen en el Excel: son P6. */
+  readonly otros: string;
+  /** `Σ total_cost` de `COMPRA` — `compras_del_mes` de SPEC §16. */
+  readonly importeDeCompras: string;
+}
+
 export interface DatosDeTransferenciaRegistrada {
   readonly companyId: CompanyId;
   readonly userId: UserId;
@@ -175,6 +194,25 @@ export interface RepositorioDeInventario {
     readonly desde: Date;
     readonly hasta: Date;
   }): Promise<string>;
+
+  /**
+   * El libro de un período agregado **por ítem y por tipo** — SPEC §18.
+   *
+   * `CONSUMO_POR_VENTA` NO ENTRA EN NINGÚN AGREGADO, y es la decisión que evita
+   * contar el consumo dos veces: el Excel no tiene movimientos de consumo —lo
+   * calcula desde la receta— y este sistema sí puede tenerlos. Si se sumaran
+   * aquí *y* además se restara el consumo teórico, el stock teórico saldría
+   * corto por el valor entero del consumo del mes.
+   *
+   * Hay una prueba de integración que registra el consumo por venta y otra que
+   * no, y exige que el stock teórico dé lo mismo.
+   */
+  agregadosDelPeriodo(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly desde: Date;
+    readonly hasta: Date;
+  }): Promise<readonly AgregadoDeItem[]>;
 
   /** Paginación por cursor, nunca `OFFSET` (CLAUDE.md §5). */
   libro(consulta: ConsultaDelLibro): Promise<PaginaDelLibro>;

@@ -13,6 +13,7 @@
  * aplicación protege contra el usuario; el trigger protege contra nosotros.
  */
 
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import type { LocationId, PeriodId } from '../../../../shared/domain/identity/identificadores';
@@ -236,16 +237,13 @@ interface EventoDePeriodo {
 }
 
 async function registrarEventoDePeriodo(evento: EventoDePeriodo): Promise<void> {
-  const { deps, sesion, fila } = evento;
+  const { sesion, fila } = evento;
 
-  await deps.auditoria.record({
-    eventType: evento.eventType,
-    outcome: 'success',
-    actorType: 'USER',
+  await registrarEventoDeUsuario({
+    auditoria: evento.deps.auditoria,
     actorId: sesion.userId,
     companyId: sesion.companyId,
-    ip: null,
-    userAgent: null,
+    eventType: evento.eventType,
     detail: {
       periodId: fila.id,
       locationId: fila.locationId,

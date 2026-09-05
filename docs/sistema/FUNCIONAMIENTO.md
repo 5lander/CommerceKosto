@@ -332,6 +332,88 @@ Conviene tenerlos separados por nombre, porque P8 los va a usar los tres:
 | **inventario físico** | Lo contado donde se contó, **lo teórico donde no** |
 
 
+## Las seis vistas (desde P8)
+
+**No hay un segundo motor de cálculo.** Las vistas piden la carta costeada a
+`costing`, los agregados y el conteo a `inventory`, el mes a `periods` y los
+parámetros a `pricing`, y componen. El día que una fórmula de costeo cambie,
+cambia en un sitio.
+
+```mermaid
+graph TD
+    VEN["product_sales<br/>lo que se vendio"]
+    T6["fixed_cost<br/>T6, con clasificacion"]
+    CAR["costing: la carta costeada<br/>AL CORTE del mes"]
+    LIB["inventory: agregados del libro<br/>SIN consumo por venta"]
+    CON["inventory: conteo confirmado<br/>congelado"]
+
+    VEN --> CTX["contexto del periodo<br/>UNA sola pasada"]
+    T6 --> CTX
+    CAR --> CTX
+    LIB --> CTX
+    CON --> CTX
+
+    CTX --> ME["menu engineering<br/>SPEC 15"]
+    CTX --> FC["food cost real<br/>SPEC 16 + R7"]
+    CTX --> PE["punto de equilibrio<br/>SPEC 17"]
+    CTX --> INV["inventario valorizado<br/>SPEC 18"]
+    CTX --> RES["resumen gerencial"]
+
+    INV --> SEM["semaforo REPONER/OK<br/>lo unico que ve BODEGA"]
+```
+
+### R7 es lo que hace fiable a las otras cinco
+
+```
+costo_ventas_teorico  = consumo_teorico + empaque + provision
+costo_ventas_v_costeo = venta_neta - margen_de_contribucion
+DIFERENCIA = ROUND(teorico - v_costeo, 2)   ->  tiene que dar 0
+```
+
+Son **dos caminos al mismo costo de ventas**: uno pasa por la explosión de la
+receta, el otro por el margen de cada plato. Si el motor está sano coinciden.
+
+**Lo que R7 detecta es un componente que se cuenta en un lado y no en el otro**,
+y en P8 detectó uno que llevaba dos paquetes en el código: la receta es del
+**lote** y la venta es de **porciones**, así que vender 100 unidades de un
+producto que rinde 2 consume 50 lotes y no 100. Con rendimiento 1 los dos
+caminos coinciden aunque el consumo esté mal — por eso las 596 pruebas de
+P0–P6 no lo vieron.
+
+**Lo que R7 NO detecta** es un número de entrada equivocado: si el consumo
+teórico está mal en los dos lados, la diferencia sigue dando cero. Hay una
+prueba unitaria que lo enseña. La defensa contra eso son los casos conocidos,
+cuyos valores salen del Excel y no del código.
+
+### Tres traducciones del Excel que producen números plausibles si se hacen mal
+
+| | El Excel | Aquí |
+|---|---|---|
+| **El signo** | Las mermas se capturan en positivo y se **restan** | El libro lleva el signo dentro, así que se **suman** |
+| **El consumo** | No hay movimientos de consumo: se calcula | Puede haberlos (P6), así que se **excluyen** del agregado o se contaría dos veces |
+| **La receta** | Es del lote, y el costo se divide por las porciones | El consumo también se **divide**: 100 unidades de un producto que rinde 2 son 50 lotes |
+
+Las tres dan cifras creíbles si se equivocan. La tercera la cazó R7; las otras
+dos tienen su propia prueba, y la del consumo es un **invariante**: el stock
+teórico da lo mismo esté o no registrado el consumo por venta en el libro.
+
+### Quién ve qué, por tercera vez
+
+`BODEGA` no recibe **ninguna** de las seis vistas. Todas llevan consumo
+teórico, stock teórico, diferencias o costos: cuatro de los seis datos
+prohibidos de CLAUDE.md §4.3, y desde cualquiera de ellos se despeja la receta.
+
+```
+P6   escribe el libro       y NO lee el saldo
+P7   cuenta el inventario   y NO ve la conciliacion
+P8   recibe el semaforo     y NO ve ninguna vista
+```
+
+Lo que sí le corresponde —SPEC §4 lo dice con estas palabras— es un semáforo
+`REPONER`/`OK` **sin la cantidad que lo origina**, servido desde su propio caso
+de uso y con su propio tipo.
+
+
 ## El proceso de la API por dentro (desde P0)
 
 Lo que atraviesa una petición, en orden. Las cuatro protecciones globales se registran en `AppModule`/`bootstrap.ts`, de modo que **las pruebas levantan exactamente la misma aplicación que se despliega**: una defensa cableada solo en `main.ts` no existe en los tests, y entonces el test de que existe no prueba nada.

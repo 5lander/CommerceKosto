@@ -342,6 +342,19 @@ export class Ratio extends ValorDecimal {
   // inmediato: los umbrales de food cost del SPEC §11 (objetivo minimo 0.25,
   // umbral verde 0.28, maximo aceptable 0.32) son comparaciones de Ratio.
 
+  /**
+   * El valor absoluto de una razon.
+   *
+   * Lo necesita todo umbral que sea simetrico. La varianza de SPEC 16 es el
+   * caso: consumir un 8 % MENOS de lo teorico es tan sospechoso como un 8 %
+   * mas —significa que la receta, el conteo o las unidades vendidas estan
+   * mal—, y comparar el signo con el umbral dejaria la mitad de los casos sin
+   * avisar.
+   */
+  public abs(): Ratio {
+    return new Ratio(this.nucleo.abs());
+  }
+
   public round(escala: Escala): Ratio {
     return new Ratio(redondear(this.nucleo, escala));
   }
@@ -383,6 +396,33 @@ export class Count extends ValorDecimal {
     return new Count(this.nucleo.plus(otro.nucleo));
   }
 
+  /**
+   * `unidades_de_este / unidades_totales` — la popularidad de SPEC §15.
+   *
+   * Devuelve `null` ante el cero en vez de lanzar: un menu sin ninguna unidad
+   * vendida no tiene productos con popularidad infinita, tiene productos sin
+   * dato. Es la misma decision que `Money.ratioTo` NO toma, y la diferencia es
+   * deliberada: dividir dinero por cero es un error de programa; preguntar por
+   * la cuota de un mes sin ventas es una pregunta legitima sin respuesta.
+   */
+  public ratioTo(otro: Count, escala: Escala = DIVISION): Ratio | null {
+    if (otro.nucleo.isZero()) return null;
+    return Ratio.desdeNucleo(
+      dividir({ dividendo: this.nucleo, divisor: otro.nucleo, escala, contexto: 'Count.ratioTo' }),
+    );
+  }
+
+  /**
+   * El conteo como escalar puro.
+   *
+   * Es el mismo puente explicito que `Quantity.magnitude()`, y existe por lo
+   * mismo: `grep asRatio(` da la lista de sitios donde un conteo entra en una
+   * aritmetica de razones. Aqui el riesgo es menor —los dos son escalares sin
+   * unidad ni moneda—, pero el puente sigue teniendo nombre para que se vea.
+   */
+  public asRatio(): Ratio {
+    return Ratio.desdeNucleo(this.nucleo);
+  }
 
   public override valueOf(): never {
     throw new TypeError('Count no se convierte a number. Usa toExactString() o los metodos del tipo.');

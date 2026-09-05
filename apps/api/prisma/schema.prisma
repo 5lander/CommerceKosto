@@ -160,6 +160,8 @@ model Company {
   periodos              Period[]
   conteos               PhysicalCount[]
   lineasDeConteo        PhysicalCountLine[]
+  ventas                ProductSales[]
+  costosFijos           FixedCost[]
 
   @@map("company")
 }
@@ -294,6 +296,8 @@ model AppUser {
   periodosReabiertos Period[]        @relation("reabrio")
   conteosCreados     PhysicalCount[] @relation("conteos_creados")
   conteosConfirmados PhysicalCount[] @relation("conteos_confirmados")
+  ventasCargadas     ProductSales[]
+  costosCargados     FixedCost[]
 
   @@index([companyId, status])
   @@map("app_user")
@@ -808,6 +812,7 @@ model Product {
   componentes   ComboComponent[]    @relation("combo")
   usadoEn       ComboComponent[]    @relation("componente")
   propagaciones RecipePropagation[]
+  ventas        ProductSales[]
 
   @@unique([companyId, name])
   /// Clave candidata para las FK COMPUESTAS que atan todo a la misma company.
@@ -1199,7 +1204,9 @@ model Period {
   cerradoPor   AppUser?     @relation("cerro", fields: [closedBy], references: [id], onDelete: Restrict)
   reabiertoPor AppUser?     @relation("reabrio", fields: [reopenedBy], references: [id], onDelete: Restrict)
 
-  conteos PhysicalCount[]
+  conteos     PhysicalCount[]
+  ventas      ProductSales[]
+  costosFijos FixedCost[]
 
   @@unique([companyId, locationId, year, month])
   /// Clave candidata para la FK COMPUESTA del conteo: ata cada conteo a la
@@ -1315,4 +1322,101 @@ model PhysicalCountLine {
   @@unique([countId, itemId])
   @@index([companyId, countId])
   @@map("physical_count_line")
+}
+
+// ============================================================================
+// P8 - Vistas analiticas
+// ============================================================================
+
+/// Las unidades vendidas de un producto en un periodo - SPEC 10.
+///
+/// ES EL DATO DEL QUE DEPENDEN TRES DE LAS SEIS VISTAS: menu engineering,
+/// punto de equilibrio y consumo teorico. El SPEC lo marca como riesgo de
+/// producto: "digitar 48 productos por local cada mes es donde el sistema se
+/// abandona", y por eso la API recibe un LOTE y no un producto (D9) — la
+/// pantalla que lo hace tolerable es una grilla, y llega en P12.
+///
+/// VA CONTRA EL PERIODO Y NO CONTRA UNA FECHA. Una venta no es un instante en
+/// esta tabla: es la cifra del mes. El instante lo tiene el libro, que registra
+/// la CONSECUENCIA de vender sobre el stock; esto es la cifra de ventas, y son
+/// datos distintos con periodos distintos.
+model ProductSales {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  periodId  String @map("period_id") @db.Uuid
+  productId String @map("product_id") @db.Uuid
+
+  /// UNIDADES VENDIDAS: un entero no negativo, y la base lo hace cumplir con
+  /// `units = trunc(units)`. La columna es `numeric` y no `integer` por
+  /// coherencia con el resto del esquema —toda cantidad de este sistema vive en
+  /// `numeric(24,12)`— y para que el dia que se vendan medias porciones el
+  /// cambio sea soltar un CHECK y no migrar el tipo.
+  ///
+  /// El dominio lo modela como `Count`, que es lo que P5 ya asumia en
+  /// `totalesDelMes` y lo que menu engineering necesita para contar.
+  units Decimal @db.Decimal(24, 12)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+
+  company  Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  periodo  Period  @relation(fields: [periodId, companyId], references: [id, companyId], onDelete: Restrict)
+  producto Product @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+  autor    AppUser @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, productId])
+  @@index([companyId, periodId])
+  @@map("product_sales")
+}
+
+/// MANO_DE_OBRA - OTRO_FIJO - VARIABLE
+///
+/// EL SPEC PIDE ESTA TABLA POR SU NOMBRE. SPEC 17 dice que en el Excel la mano
+/// de obra se identifica con `Sueldos*` sobre el texto del conceptoy anade:
+/// "el filtro por prefijo es fragil; en el SaaS, T6 necesita un campo explicito
+/// de clasificacion". Un concepto llamado "Nomina" o "Salarios" quedaria fuera
+/// del prime cost sin que nada avisara.
+model FixedCostClassification {
+  code         String  @id
+  /// Si el importe es un MONTO mensual o una FRACCION de la venta neta.
+  esPorcentaje Boolean @map("is_percentage")
+
+  costos FixedCost[]
+
+  @@map("fixed_cost_classification")
+}
+
+/// Una linea de T6: un concepto de costo del mes - SPEC 17.
+///
+/// EL IMPORTE SIGNIFICA DOS COSAS SEGUN LA CLASIFICACION, y lo dice el propio
+/// catalogo con `is_percentage`:
+///
+///   MANO_DE_OBRA - OTRO_FIJO   monto mensual en dolares
+///   VARIABLE                   fraccion de la venta neta (0.03 = 3 %)
+///
+/// Es lo que SPEC 17 escribe: `costos_fijos = SUMA(montos fijos)` y
+/// `costos_variables_adic = venta_neta x pct_variable_total`. Modelarlo como
+/// dos columnas dejaria una siempre nula y la otra siempre llena; modelarlo
+/// como dos tablas duplicaria el CRUD entero.
+model FixedCost {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  periodId  String @map("period_id") @db.Uuid
+
+  concept        String
+  classification String
+
+  amount Decimal @db.Decimal(24, 12)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+
+  company       Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  periodo       Period                  @relation(fields: [periodId, companyId], references: [id, companyId], onDelete: Restrict)
+  clasificacion FixedCostClassification @relation(fields: [classification], references: [code])
+  autor         AppUser                 @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, concept])
+  @@index([companyId, periodId])
+  @@map("fixed_cost")
 }

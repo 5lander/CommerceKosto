@@ -8,86 +8,73 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P7 cerrado.**
-**Fase del protocolo:** CIERRE de P7
-**Último commit:** `P7: Períodos · conteo físico` (P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
+**Paquete en curso:** ninguno — **P8 cerrado.**
+**Fase del protocolo:** CIERRE de P8
+**Último commit:** `P8: Vistas analíticas` (P7 `72f0ba1`, P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
 **Fecha de última actualización:** 2026-09-04
 
 ### Dónde se retoma exactamente
 
-**Ocho paquetes cerrados: P0 a P7.** El siguiente es **P8 — Vistas analíticas**, y necesita confirmación del usuario antes de empezar.
+**Nueve paquetes cerrados: P0 a P8.** El siguiente es **P9 — Consolidado de company y comparativa entre ubicaciones**, y necesita confirmación del usuario antes de empezar.
 
-**Ya se puede cerrar un mes y compararlo con el siguiente.** El período es de una ubicación, su frontera son dos instantes resueltos al abrirlo, y un mes cerrado no admite movimientos por ninguna de las cinco rutas del libro — ni por una sexta que se salte la aplicación entera.
+**Las seis vistas del Excel existen, y R7 cierra sobre el sistema entero.** Era el último criterio de aceptación pendiente desde P0.
 
-**Hecho en P7 — completo**
+**Hecho en P8 — completo**
 
 | # | Entregable | Estado |
 |---|---|---|
-| 1 | `period` **por ubicación**, con la frontera del mes como dos `timestamptz` resueltos una sola vez | ✅ |
-| 2 | Cerrado es de solo lectura (D6): guarda en las cinco escrituras + **trigger** que cubre cualquier otra | ✅ |
-| 3 | Reapertura **solo del `OWNER`**, con motivo obligatorio y evento de auditoría | ✅ |
-| 4 | Conteo físico **parcial** (D7), con la cobertura medida sobre el **valor** | ✅ |
-| 5 | **Conteo a ciegas** (R8): dos casos de uso, dos permisos, dos DTO. `BODEGA` cuenta y no concilia | ✅ |
-| 6 | **Confirmar congela** teórico y costo por línea: la conciliación de un mes cerrado es una lectura | ✅ |
-| 7 | `CONSUMO_REAL` de SPEC §16 encadenado mes a mes, con su cobertura al lado | ✅ |
-| 8 | **ADR-010** con las nueve decisiones que el SPEC no escribe | ✅ |
-| 9 | **INC-013**, encontrada escribiendo una prueba del propio paquete | ✅ |
-| 10 | Presupuesto medido: `GET /conteos/:id` p95 **88,4 ms** contra 300, con 500 ítems | ✅ |
-| 11 | **659 pruebas**: 413 unitarias con la base apagada + 246 de integración | ✅ |
+| 1 | Food cost real y varianza (SPEC §16) **con R7 sobre dataset completo** | ✅ |
+| 2 | Menu engineering con los cuatro cuadrantes, más `SIN_DATOS` e `INACTIVO` | ✅ |
+| 3 | Punto de equilibrio con **clasificación explícita** de T6 | ✅ |
+| 4 | Inventario valorizado con estados, cobertura y punto de reorden | ✅ |
+| 5 | Resumen gerencial con semáforos, y `SIN_DATO` como cuarto estado | ✅ |
+| 6 | `BODEGA` **no recibe ninguna vista**: solo el semáforo, sin la cantidad | ✅ |
+| 7 | `product_sales` y `fixed_cost`: los dos datos que el sistema no puede deducir | ✅ |
+| 8 | **La corrección del consumo teórico**, que R7 destapó | ✅ |
+| 9 | **ADR-011** con las siete decisiones | ✅ |
+| 10 | **702 pruebas**: 442 unitarias con la base apagada + 260 de integración | ✅ |
 
-### Lo que un «tú» futuro necesita saber de P7
+### Lo que un «tú» futuro necesita saber de P8
 
-**1. Hay TRES números que se parecen y no son el mismo. Nómbralos siempre.**
+**1. R7 destapó un fallo de P6 que llevaba dos paquetes con 596 pruebas en verde encima.**
+La receta es del **lote**; la venta, de **porciones**. Vender 100 unidades de un producto que rinde 2 consume **50** lotes, no 100 (SPEC §14: `costo_por_porcion = costo_neto_lote / rendimiento_porciones`). P6 no dividía, así que con rendimiento 4 cada venta sacaba del inventario cuatro veces lo real.
 
-| | |
-|---|---|
-| **saldo del libro** | `SUM(quantity)` sobre `inventory_movement`. Lo de P6 |
-| **stock teórico del corte** | El saldo del libro **hasta `cutoff_at`** del conteo |
-| **inventario físico** | Lo contado donde se contó, **lo teórico donde no** |
+**Ninguna prueba lo vio porque todos los productos de prueba tenían rendimiento 1**, que es el único valor con el que multiplicar y dividir coinciden. La corrección vive en `totalConsumido`, el punto único que P6 y P8 comparten. **ADR-011 §1.**
 
-P8 usa los tres. Confundirlos produce un food cost real plausible y equivocado.
+**2. Cuarta vez que aparece la misma forma de fallo, y ahora con nombre.**
 
-**2. El conteo NO ajusta el libro, y eso es lo que lo hace útil.**
-Si al confirmar se emitiera un `AJUSTE` por la diferencia, `diferencia = conteo − teorico` (SPEC §18) daría **cero siempre**: el hallazgo desaparecería en el acto de registrarlo. El libro dice lo que debería haber; el conteo, lo que hay; su resta es el hallazgo.
-
-**3. Un ítem sin contar vale su TEÓRICO, no cero — y la cobertura no lo detecta.**
-Es el guardián 3 de P7, y es la tercera vez que aparece la misma forma de fallo:
-
-| | Invariante que se cumple | Desglose que no |
+| | Invariante verde | Desglose roto |
 |---|---|---|
-| **P5** | R7 da cero | el desglose del costo está mal |
-| **P6** | el saldo cuadra | el tipo del movimiento está mal |
-| **P7** | la cobertura dice 50 % | el inventario final está a la mitad |
+| P5 | R7 da cero | el desglose del costo |
+| P6 | el saldo cuadra | el tipo del movimiento |
+| P7 | la cobertura dice 50 % | el inventario final |
+| **P8** | **R7 da cero con rendimiento 1** | **el consumo, al doble** |
 
-Valorar en cero lo no contado rompe **3 pruebas de 659** y deja `consumo_real` en +17,00 en vez de −3,00. **Cuando un invariante agregado esté verde, pregúntate qué desglose está tapando** — y comprueba cifras absolutas contra casos a mano, no relaciones entre ellas.
+La lección de P8 añade algo a las anteriores: **no basta con tener la prueba, el caso de prueba tiene que ser el que distingue.** Con rendimiento 1 los dos caminos de R7 coinciden aunque uno esté mal.
 
-**4. La frontera del mes es un instante, no una fecha, y esto es INC-013.**
-Las cinco primeras horas UTC de cada día 1 pertenecen al mes anterior en Ecuador. Me lo encontré escribiendo una prueba: `2026-09-01T00:00:00Z` es el 31 de agosto a las 19:00 en Guayaquil. **Las fechas de prueba llevan `12:00Z`**, que cae en el mismo día natural en toda América. No es automatizable sin falsos positivos.
+**3. Un redondeo intermedio invierte una recomendación de negocio.**
+El índice de popularidad, escrito con la fórmula del SPEC tal cual, da `0.999999999999` donde debe dar `1`, y el producto cae en `CABALLO` en vez de `ESTRELLA`. Se arregla con **una sola división**. Vale para todo el proyecto: cuando un número se compara contra un umbral, cuenta cuántas divisiones hay antes.
 
-**5. La guarda EXPLICA, el trigger GARANTIZA.**
-Quitando `ExigirPeriodoAbierto` de las cinco escrituras, **ningún movimiento entra igualmente** —el trigger los rechaza todos—, pero salen como **500** en vez de 409. Es INC-012 en vivo. Vale para todo lo que se construya encima: la base garantiza, el dominio explica, y son dos trabajos distintos.
+**4. Tres traducciones del Excel producen números plausibles si se hacen mal.**
+El signo de las mermas (allí positivas, aquí con signo), el consumo (allí calculado, aquí además registrable) y la receta por lote frente a la venta por porción. Las tres dan cifras creíbles. **Cada fórmula que se traiga del Excel hay que traducirla, no copiarla.**
 
-**6. Nadie puede leer `audit_log`. Nadie.**
-Ni la aplicación, ni el migrator, ni el dueño de la tabla: `FORCE ROW LEVEL SECURITY` sin política de `SELECT` para ningún rol, que es lo que SEGURIDAD.md §10 pide. **Los eventos de P0 a P7 se escriben y su contenido no está verificado por ninguna prueba.** Es trabajo de P11, y quien lo haga tendrá que crear `costeo_backoffice` con su política.
+**5. `analytics` no consulta ninguna tabla ajena.**
+Pide la carta a `costing`, el libro y el conteo a `inventory` por dos casos de uso que ese módulo expone en `para-analitica.ts`, el mes a `periods` y los parámetros a `pricing`. Es lo que evita dos sitios que mantener en sincronía el día que cambie el signo de algo — y lo que hizo que la corrección del consumo fuera **una** línea.
 
-**7. M11 volvió a evitar INC-012, por segunda vez.**
-Las 20 restricciones y los tres triggers de P7 se clasificaron en `guardas-de-dominio.md` **antes del primer endpoint**, porque M11 paró la migración. Resultado: cuatro 🔴, tres de ellas triggers que una petición corriente alcanza — lo contrario de P6, donde quedaron ⚪ por inalcanzables. Ninguna produjo un 500.
+**6. Una sola pasada alimenta las seis vistas.**
+`contexto.ts` reúne todo en cinco consultas fijas más el costeo. Pedirlo por vista multiplicaría por cinco el trabajo más caro del sistema. **Su coste no está medido**, y es lo primero que P9 debería medir: el consolidado lo multiplica por el número de ubicaciones.
 
-**8. El conteo no necesitó ningún índice nuevo sobre el libro.**
-El corte (`occurred_at < cutoff_at`) entra en la misma condición del índice de P6 que el tenant y la ubicación. Es lo que se gana guardando la frontera como un instante en vez de calcularla con `date_trunc` en cada consulta: con la expresión, ese plan sería un `Seq Scan` sobre 240.000 filas.
+**7. `BODEGA`, por tercera vez.**
+P6 le negó el saldo, P7 la conciliación, P8 las seis vistas. Y las tres veces con las mismas dos consecuencias: **ninguna escritura devuelve lo que acaba de calcular**, y **la proyección reducida es un tipo propio, nunca un `Omit` de la completa**.
 
-### Lo que conviene que el usuario mire antes de P8
+### Lo que conviene que el usuario mire antes de P9
 
-1. **Falta la tabla de unidades vendidas.** P8 la necesita para `venta_neta_mes`, y sin ella el food cost real no cierra: P7 entrega la mitad física de SPEC §16 (`inicial + compras − final físico`) y la otra mitad depende de ese dato. **Es lo primero de P8.**
-2. **La explosión del consumo NO aplica el rendimiento** (pendiente desde P6). Se sigue SPEC §4.3 al pie de la letra. **Afecta al stock teórico de SPEC §18, que es P8.** Merece confirmarse contra el Excel **antes** de ese paquete.
-3. **`CONSUMO_REAL` no está contrastado contra el Excel**, y no por descuido: el Excel **no tiene dimensión temporal** (SPEC §3), así que no hay celda de «consumo real de marzo» contra la que comparar. La verificación real llega con P8.
-4. **El consolidado de P9 puede sumar meses cerrados con meses abiertos**, porque el período es por ubicación. Tendrá que decirlo en la respuesta.
-5. **El rendimiento por lote de una subpreparación: se decidió NO añadir columna** (P6). Sigue siendo aditivo si el usuario prefiere lo contrario.
-6. **La tasa de IVA de compra vive en el PRECIO, no en la company** (P3).
-7. **No existe la tabla `unit_conversion`** que los entregables de P2 listaban. Razonado en `docs/pasos/P2/CONSTRUCCION.md`.
-8. **Umbral de bloqueo por IP en 25 en vez de 5** (P1), por los NAT de un restaurante entero.
-9. **Refresh rotativo aplazado a P12** (P1), con el riesgo residual en ADR-006.
-10. **D4 (`LNK`) sigue en 🔴.** No ha bloqueado nada; bloquea la migración de datos del Excel.
+1. **El rendimiento del ÍTEM sigue sin confirmarse contra el Excel** (abierta desde P6), y ahora importa más: afecta al `consumo_teorico` que P8 publica en dos vistas. **No confundirlo con el rendimiento por lote**, que es el que P8 corrigió: aquel vive en el costo (SPEC §12), este en la cantidad (SPEC §14).
+2. **Las vistas no están contrastadas contra el Excel celda a celda**, y no se puede: el Excel no tiene dimensión temporal (SPEC §3). Lo que sí sale del Excel son los nueve casos del motor de costeo, que P8 no toca.
+3. **El coste de armar el contexto no tiene medición propia.** Presupuesto de P9: 800 ms para diez ubicaciones.
+4. **El consolidado de P9 puede sumar meses cerrados con meses abiertos**, porque el período es por ubicación (P7). Tendrá que decirlo.
+5. **D4 (`LNK`) sigue en 🔴.** No ha bloqueado nada; bloquea la migración de datos del Excel.
+6. **Nadie puede leer `audit_log`** — pendiente estructural de P11, sin cambios desde P7.
 
 ### Estado de los doce checks
 
@@ -95,16 +82,16 @@ El corte (`occurred_at < cutoff_at`) entra en la misma condición del índice de
 |---|---|---|
 | `audit:types` | ✅ | |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | 30 reglas sobre **228 archivos** (203 en P6). **P7 no añade ninguna regla**, y el porqué está razonado en su auditoría |
-| `audit:arch` | ✅ | 202 módulos, 841 dependencias, cero violaciones |
+| `audit:forbidden` | ✅ | 30 reglas sobre **251 archivos** (228 en P7) |
+| `audit:arch` | ✅ | 222 módulos, 973 dependencias. **Paró un ciclo real** en P8 |
 | `audit:deadcode` | ✅ | Sin ninguna lista blanca |
 | `audit:complexity` | ✅ | |
-| `audit:duplication` | ✅ | **0 clones** |
-| `audit:migrations` | ✅ | M1–M11. **M11 volvió a parar la primera migración de P7** |
+| `audit:duplication` | ✅ | **0 clones.** Cazó la cuarta repetición del bloque de auditoría |
+| `audit:migrations` | ✅ | M1–M11. **M11 ha parado las tres migraciones a las que se ha enfrentado** |
 | `audit:secrets` | ✅ | |
 | `audit:deps` | ✅ | |
 | `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | 413 unitarias (sin base) + 246 de integración |
+| `audit:tests` | ✅ | 442 unitarias (sin base) + 260 de integración |
 
 ## Progreso
 
@@ -117,8 +104,8 @@ El corte (`occurred_at < cutoff_at`) entra en la misma condición del índice de
 | P4 — Recetas · productos · combos | ✅ Completado | `1529f5d` | 2026-09-04 |
 | P5 — MOTOR DE COSTEO ⭐ | ✅ Completado | `e5e3f7d` | 2026-09-04 |
 | P6 — Inventario · libro mayor append-only | ✅ Completado | `16200e5` | 2026-09-04 |
-| **P7 — Períodos · conteo físico** | ✅ Completado | *(el de este paquete)* | 2026-09-04 |
-| P8 — Vistas analíticas | ⬜ Pendiente | — | — |
+| P7 — Períodos · conteo físico | ✅ Completado | `72f0ba1` | 2026-09-04 |
+| **P8 — Vistas analíticas** | ✅ Completado | *(el de este paquete)* | 2026-09-04 |
 | P9 — Consolidado y comparativa | ⬜ Pendiente | — | — |
 | P10 — Importación Excel/CSV | ⬜ Pendiente | — | — |
 | P11 — Back office | ⬜ Pendiente | — | — |
@@ -169,6 +156,13 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 | 30 | **Un solo conteo confirmado por período**, con columna anulable única en vez de índice parcial | P7 | Prisma no declara índices parciales y aparecería como deriva en `migrate:verify`. **ADR-010** |
 | 31 | **Cerrar el mes es un paso del conteo**, no un endpoint suelto | P7 | Es lo que D6 describe, y evita el ciclo `periods ↔ inventory` que `audit:arch` pararía. **ADR-010** |
 | 32 | **`BODEGA` cuenta y no concilia** | P7 | La conciliación lleva stock teórico, diferencia y valorización (§4.3). Y hace el conteo ciego, que SPEC §4 pide. **ADR-010** |
+| 33 | **El consumo teórico se DIVIDE por el rendimiento por lote** | P8 | La receta es del lote y la venta es de porciones (SPEC §14). **Corrige un fallo de P6** que R7 destapó. **ADR-011** |
+| 34 | **El índice de popularidad se calcula con UNA división**, no desde `popularidad` | P8 | Tres redondeos encadenados dan `0.999999999999` donde debe dar `1`, e invierten el cuadrante. **ADR-011** |
+| 35 | **`CONSUMO_POR_VENTA` no entra en los agregados del libro** | P8 | El Excel no tiene movimientos de consumo; este sistema sí. Sumarlos y además restar el teórico lo descuenta dos veces. **ADR-011** |
+| 36 | **El signo del libro se SUMA**, no se resta como en el Excel | P8 | Aquí una merma ya es negativa (ADR-009); restarla la sumaría. **ADR-011** |
+| 37 | **T6 lleva clasificación explícita**, no el prefijo del concepto | P8 | Lo pide el propio SPEC §17: «Nómina» quedaría fuera del prime cost sin avisar. **ADR-011** |
+| 38 | **`BODEGA` no recibe ninguna de las seis vistas**, solo el semáforo | P8 | Todas llevan consumo o stock teórico (§4.3). Tercera vez que aparece la misma asimetría. **ADR-011** |
+| 39 | **Las unidades vendidas son un entero** (`Count`), con `CHECK` en la base | P8 | Es lo que P5 ya asumía en `totalesDelMes` y lo que menu engineering necesita para contar |
 
 ---
 
@@ -178,7 +172,8 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 |---|---|---|---|
 | 1 | **La máquina de desarrollo corre Node 24.19.0; ADR-001 fija 24.20.0.** `engines` admite `>=24.19.0 <25` | P0 | Nada hoy |
 | 4 | **La explosión del consumo no aplica el rendimiento del ítem.** Se sigue SPEC §4.3, que es la única frase del SPEC sobre el asunto | P6 | Nada hoy. **Afecta al stock teórico de SPEC §18, que es P8.** Merece confirmarse contra el Excel antes de ese paquete |
-| 5 | **`CONSUMO_REAL` no se puede contrastar contra el Excel**, porque el Excel no tiene períodos (SPEC §3). La aritmética está probada con casos a mano | P7 | Nada hoy. La verificación real llega con P8 |
+| 5 | **Las seis vistas no se pueden contrastar contra el Excel celda a celda**, porque el Excel no tiene dimensión temporal (SPEC §3). La aritmética está probada con casos a mano y R7 cierra sobre el sistema entero | P7 · P8 | Nada. Es una limitación del origen, no una tarea pendiente |
+| 6 | **El coste de armar el contexto de las vistas no está medido.** Cinco consultas más el costeo de la carta, por (ubicación, mes) | P8 | Nada hoy. **P9 lo multiplica por el número de ubicaciones** y tiene presupuesto de 800 ms |
 
 ---
 

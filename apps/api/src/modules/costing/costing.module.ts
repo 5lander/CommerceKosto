@@ -39,5 +39,10 @@ type Deps = DependenciasDeCosteoNest;
       useFactory: (carta: CostearCarta): CostearUnProducto => new CostearUnProducto(carta),
     },
   ],
+  /**
+   * `CostearCarta` se exporta para P8: las seis vistas se construyen sobre la
+   * carta ya costeada, y recalcularla alli seria un segundo motor.
+   */
+  exports: [CostearCarta],
 })
 export class CostingModule {}

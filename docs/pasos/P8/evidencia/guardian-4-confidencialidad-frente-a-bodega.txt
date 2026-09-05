@@ -1,0 +1,44 @@
+GUARDIAN 4 — la frontera de §4.3, rota por los dos sitios por los que se rompe
+==============================================================================
+
+Que se rompio, a la vez:
+
+  1. `GET /analitica/inventario` pasa de `@Requiere('analytics.read')` a
+     `@Requiere('replenishment.read')`, que BODEGA si tiene. Es el cambio que
+     hace alguien pensando «si ve el semaforo, que vea de donde sale».
+  2. `comoReposicionDto` anade `consumoTeorico` a la fila del semaforo.
+
+$ npx vitest run --project integration test/integracion/analitica.spec.ts
+
+  x confidencialidad frente a BODEGA (§4.3) > la vista inventario le devuelve 403
+    -> expected 200 to be 403
+
+  x confidencialidad frente a BODEGA (§4.3) > el semaforo de reposicion SI, y su
+    respuesta cruda no lleva ninguna cantidad
+    -> expected '[{"itemid":"01a06f01-e2d1-703d-b969-7...' not to contain 'teorico'
+
+  Tests  2 failed | 12 passed (14)
+
+
+LA CADENA QUE ESTO ABRE
+------------------------
+  stock teorico  ->  consumo  ->  cantidad de la receta
+
+Es la MISMA cadena de P6 y P7, por el tercer camino. Con la vista de inventario
+en la mano, BODEGA lee `consumoTeorico` por item y `unidades vendidas` es
+publico para el: dividir uno entre otro devuelve la receta, que es el secreto
+de negocio del cliente.
+
+TRES PAQUETES, LA MISMA ASIMETRIA
+----------------------------------
+  P6   escribe el libro          y NO lee el saldo
+  P7   cuenta el inventario      y NO ve la conciliacion
+  P8   recibe el semaforo        y NO ve ninguna de las seis vistas
+
+Y en los tres, la misma consecuencia no evidente: **ninguna escritura devuelve
+lo que acaba de calcular**, y **la proyeccion reducida es un tipo propio y no
+un `Omit` de la completa**. Con un `Omit`, el campo que se anada manana a la
+vista de inventario aparece en el semaforo sin que nada avise — que es
+exactamente lo que la segunda mitad de este guardian simula.
+
+Restaurado tras la captura.

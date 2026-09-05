@@ -1,0 +1,52 @@
+GUARDIAN 3 — el consumo descontado DOS veces, y el numero sigue siendo plausible
+=================================================================================
+
+Que se rompio: en `agregadosDelPeriodo` se quito el filtro que excluye
+`CONSUMO_POR_VENTA` de los agregados del libro.
+
+  -          type: { not: CONSUMO_POR_VENTA },
+
+$ npx vitest run --project integration test/integracion/analitica.spec.ts
+
+  x inventario valorizado (SPEC 18) > el stock teorico NO cambia por registrar
+    el consumo por venta en el libro
+    -> expected '40' to be '70'
+
+  Tests  1 failed | 13 passed (14)
+
+
+LA ARITMETICA DEL FALLO
+------------------------
+  compras            100
+  consumo teorico    -30    (de la receta, calculado)
+  stock teorico       70    <- correcto
+
+Con el filtro quitado y el consumo registrado en el libro:
+
+  compras            100
+  consumo del libro  -30    (sumado desde los movimientos)
+  consumo teorico    -30    (restado otra vez, calculado)
+  stock teorico       40    <- 30 kg que estan en el estante y el sistema no ve
+
+
+POR QUE EL EXCEL NO TIENE ESTE PROBLEMA
+----------------------------------------
+Porque el Excel no tiene movimientos de consumo: SPEC 18 calcula el consumo
+teorico desde la receta y punto. Este sistema SI puede tenerlos —P6 anadio
+`POST /inventario/consumos`— y son EL MISMO consumo por el mismo camino:
+`explotarConsumo` usa la receta en los dos casos.
+
+Traducir la formula del Excel sin darse cuenta de eso descuenta dos veces.
+
+LO QUE HACE ROBUSTA LA VISTA
+------------------------------
+El invariante que la prueba fija: **el stock teorico da lo mismo este o no
+registrado el consumo por venta**. Es una propiedad, no un caso, y protege
+contra las dos configuraciones que un cliente real puede tener — el que integra
+su punto de venta y descuenta cada plato, y el que solo carga la cifra del mes.
+
+Y notese el numero que sale mal: 40 en vez de 70. No es negativo, ni cero, ni
+absurdo. Es un stock perfectamente creible que dice que falta mercancia que
+esta en la estanteria.
+
+Restaurado tras la captura.

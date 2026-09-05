@@ -51,6 +51,9 @@ La prueba **falla si no hay pooler**, no se salta: una prueba de seguridad que s
 | **Cerrar el mes** *(P7)* | ✅ | ✅ | ✅ su ubicación | ❌ | ❌ |
 | **Reabrir un mes** *(P7)* | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Estado del período** *(P7)* | ✅ | ✅ | ✅ su ubicación | ✅ | ✅ |
+| **Unidades vendidas** *(P8)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ lectura |
+| **Costos fijos (T6)** *(P8)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ lectura |
+| **Las seis vistas analíticas** *(P8)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
 | Propagar recetas | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Suscripción y eliminar company | ✅ | ❌ | ❌ | ❌ | ❌ |
 
@@ -94,6 +97,19 @@ Tres consecuencias, hermanas de las tres de P6:
 **Y el efecto colateral lo pide el propio SPEC §4:** `BODEGA` cuenta a ciegas, sin saber cuánto debería haber. Quien conoce el número esperado tiende a ajustar el conteo hacia él, así que la restricción de confidencialidad **mejora la calidad del dato de inventario**.
 
 Guardián: `docs/pasos/P7/evidencia/guardian-4-confidencialidad-frente-a-bodega.txt`, que lo rompe por los dos sitios reales —relajar el permiso, y añadir un campo a la proyección «básica»— y captura los dos fallos.
+
+### Y por tercera vez, en las vistas analíticas *(P8)*
+
+`BODEGA` no recibe **ninguna** de las seis vistas. Todas llevan consumo teórico, stock teórico, diferencias o costos: cuatro de los seis datos prohibidos de la matriz, y desde cualquiera de ellos se despeja la receta por la misma aritmética.
+
+Lo único que le corresponde —y SPEC §4 lo dice con estas palabras— es un semáforo `REPONER`/`OK` **sin la cantidad que lo origina**. Se sirve desde `GET /analitica/reposicion`, con `replenishment.read`, tres campos y ninguna cantidad.
+
+**Dos detalles que ya son patrón del proyecto y conviene no perder:**
+
+1. **La proyección reducida es un tipo propio, no un `Omit` de la completa.** Con un `Omit`, el campo que se añada mañana a la vista de inventario aparecería en el semáforo sin que nada avisara.
+2. **`FALTAN_COMPRAS` y `REPONER` colapsan**, igual que `SIN_CONSUMO` y `OK`. Que `BODEGA` pudiera distinguirlos ya sería un dato sobre el stock teórico.
+
+Guardián: `docs/pasos/P8/evidencia/guardian-4-confidencialidad-frente-a-bodega.txt`.
 
 ## Back office
 

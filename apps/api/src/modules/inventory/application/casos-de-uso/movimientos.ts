@@ -14,6 +14,7 @@
  * filtraría exactamente lo mismo que un endpoint de lectura.
  */
 
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import type {
@@ -337,16 +338,11 @@ export interface EventoDelLibro {
 }
 
 export async function registrarEvento(evento: EventoDelLibro): Promise<void> {
-  const { deps, sesion, eventType, detail } = evento;
-
-  await deps.auditoria.record({
-    eventType,
-    outcome: 'success',
-    actorType: 'USER',
-    actorId: sesion.userId,
-    companyId: sesion.companyId,
-    ip: null,
-    userAgent: null,
-    detail,
+  await registrarEventoDeUsuario({
+    auditoria: evento.deps.auditoria,
+    actorId: evento.sesion.userId,
+    companyId: evento.sesion.companyId,
+    eventType: evento.eventType,
+    detail: evento.detail,
   });
 }

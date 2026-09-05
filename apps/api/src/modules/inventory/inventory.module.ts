@@ -40,6 +40,11 @@ import {
 } from './application/casos-de-uso/movimientos';
 import { RegistrarProduccion } from './application/casos-de-uso/produccion';
 import { RegistrarTransferencia } from './application/casos-de-uso/transferencias';
+import {
+  CalcularConsumoTeorico,
+  ConsultarAgregadosDelPeriodo,
+  ConsultarConteoConfirmado,
+} from './application/casos-de-uso/para-analitica';
 import { REPOSITORIO_DE_CONTEOS } from './application/ports/repositorio-de-conteos.port';
 import { REPOSITORIO_DE_INVENTARIO } from './application/ports/repositorio-de-inventario.port';
 import { DependenciasDeInventarioNest } from './infrastructure/dependencias-de-inventario';
@@ -128,6 +133,22 @@ type Deps = DependenciasDeInventarioNest;
     },
 
     {
+      provide: CalcularConsumoTeorico,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): CalcularConsumoTeorico => new CalcularConsumoTeorico(d),
+    },
+    {
+      provide: ConsultarAgregadosDelPeriodo,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): ConsultarAgregadosDelPeriodo => new ConsultarAgregadosDelPeriodo(d),
+    },
+    {
+      provide: ConsultarConteoConfirmado,
+      inject: [DependenciasDeInventarioNest, LeerConciliacion],
+      useFactory: (d: Deps, conciliacion: LeerConciliacion): ConsultarConteoConfirmado =>
+        new ConsultarConteoConfirmado(d, conciliacion),
+    },
+    {
       provide: EscriturasDeConteo,
       inject: [DependenciasDeInventarioNest],
       useFactory: (d: Deps): EscriturasDeConteo =>
@@ -161,6 +182,13 @@ type Deps = DependenciasDeInventarioNest;
         new LecturasDelLibro(saldos, movimientos),
     },
   ],
-  exports: [ConsultarSaldos, ListarMovimientos, LeerConciliacion],
+  exports: [
+    ConsultarSaldos,
+    ListarMovimientos,
+    LeerConciliacion,
+    ConsultarAgregadosDelPeriodo,
+    ConsultarConteoConfirmado,
+    CalcularConsumoTeorico,
+  ],
 })
 export class InventoryModule {}

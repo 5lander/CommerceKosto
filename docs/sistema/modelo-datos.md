@@ -640,6 +640,77 @@ doce filas por ubicación y año, el índice completo la resuelve en 0,096 ms, y
 `docs/pasos/P7/evidencia/explain-analyze.txt`.
 
 
+## Lo que añade P8 — las ventas y los costos del mes
+
+```mermaid
+erDiagram
+    company  ||--o{ product_sales : "toda fila lleva tenant"
+    period   ||--o{ product_sales : "la cifra ES DEL MES"
+    product  ||--o{ product_sales : "de este producto"
+    company  ||--o{ fixed_cost : ""
+    period   ||--o{ fixed_cost : "T6 del mes"
+    fixed_cost_classification ||--o{ fixed_cost : "MANO_DE_OBRA OTRO_FIJO VARIABLE"
+
+    product_sales {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    period_id FK "compuesta con company_id"
+        uuid    product_id FK "compuesta con company_id"
+        numeric units "ENTERO: CHECK units = trunc(units)"
+    }
+    fixed_cost_classification {
+        text    code PK
+        boolean is_percentage "que significa el importe"
+    }
+    fixed_cost {
+        uuid    id PK
+        uuid    company_id FK
+        uuid    period_id FK
+        text    concept
+        text    classification FK
+        numeric amount "MONTO mensual, o FRACCION de la venta neta"
+    }
+```
+
+### La cifra de ventas va contra el PERÍODO, no contra una fecha
+
+Una venta no es un instante en esta tabla: es **la cifra del mes**. El instante
+lo tiene el libro, que registra la *consecuencia* de vender sobre el stock;
+esto es el dato de ventas, y son cosas distintas con períodos distintos.
+
+De aquí dependen **tres de las seis vistas** —menu engineering, punto de
+equilibrio y consumo teórico— y el SPEC lo marca como riesgo de producto:
+«digitar 48 productos por local cada mes es donde el sistema se abandona». Por
+eso la API recibe un lote y la escritura es por reemplazo (D9).
+
+### El importe de T6 significa dos cosas, y lo dice el catálogo
+
+`fixed_cost_classification.is_percentage` declara si `amount` es un **monto
+mensual** o una **fracción de la venta neta**. Es lo que SPEC §17 escribe:
+`costos_fijos = Σ(montos fijos)` y `costos_variables = venta_neta × pct_variable`.
+
+Dos columnas dejarían una siempre nula; dos tablas duplicarían el CRUD entero.
+
+**Y la clasificación es una columna con `CHECK`, no el texto del concepto.** El
+Excel filtra la mano de obra por el prefijo `"Sueldos*"` y su propia nota dice
+que es frágil: un concepto llamado «Nómina» quedaría fuera del prime cost sin
+que nada avisara.
+
+### Las dos escrituras son por REEMPLAZO, y el `GRANT` lo fija
+
+Los `DEFAULT PRIVILEGES` conceden `SELECT` + `INSERT`. P8 añade `DELETE` a las
+dos tablas y **no `UPDATE`**: lo que el usuario ve al guardar es exactamente lo
+que queda, sin averiguar qué fila cambió. Un `UPDATE` parcial abriría la puerta
+a dejar media grilla del mes pasado mezclada con la de este.
+
+### Ninguna tabla nueva para las vistas
+
+**P8 no crea una sola tabla derivada.** Las seis vistas se calculan al vuelo
+sobre un contexto único por (ubicación, mes). Las vistas materializadas que el
+plan menciona son de **períodos cerrados** y llegan con P9, cuando el
+consolidado multiplique el coste por el número de ubicaciones.
+
+
 ---
 
 ## Entidades por paquete
@@ -654,7 +725,7 @@ doce filas por ubicación y año, el índice completo la resuelve en 0,096 ms, y
 | **P5** | **Ninguna tabla nueva.** El motor es dominio puro: añade `product.packaging_item_id`, un índice y el permiso `costing.read` | ✅ |
 | **P6** | `inventory_movement`, `inventory_transfer`, `inventory_production` + `inventory_movement_type`. **No hay `inventory_balance`**, y era lo previsto: el saldo es una agregación sobre el libro, no una tabla — R3 | ✅ |
 | **P7** | `period`, `physical_count`, `physical_count_line` + `period_status`, `physical_count_status`. **El conteo no ajusta el libro**: no hay clave foránea de `inventory_movement` hacia aquí, y confirmar no escribe ni un movimiento | ✅ |
-| P8 | vistas materializadas de período cerrado | ⬜ |
+| **P8** | `product_sales`, `fixed_cost` + `fixed_cost_classification`. **Ninguna tabla derivada**: las seis vistas se calculan al vuelo sobre un contexto único por (ubicación, mes). Las materializadas de período cerrado se aplazan a P9 | ✅ |
 | P10 | `import_job`, `import_row` | ⬜ |
 | P11 | `plan`, `subscription`, `cross_tenant_access_log` | ⬜ |
 
@@ -700,6 +771,9 @@ Los de P1, todos con su consulta delante:
 | `physical_count(confirmed_period_id)` único | Es la restricción: **un solo conteo confirmado por período**, o `inventario_final_fisico` (SPEC §16) sería ambiguo |
 | `physical_count(company_id, period_id)` · `physical_count_line(company_id, count_id)` | Los conteos de un mes y la conciliación congelada: 500 filas en 0,165 ms |
 | `physical_count_line(count_id, item_id)` único | Un ítem no se cuenta dos veces en el mismo conteo |
+| `product_sales(company_id, period_id)` · `fixed_cost(company_id, period_id)` | **P8:** las ventas y los costos de un mes — las dos consultas que abren toda vista |
+| `product_sales(period_id, product_id)` único | Un producto no se vende dos veces en el mismo mes |
+| `fixed_cost(period_id, concept)` único | Un concepto no se paga dos veces en el mismo mes |
 
 **P7 no añadió ningún índice sobre `inventory_movement`**, y merece decirse: el corte del conteo (`occurred_at < cutoff_at`) entra en la misma condición del índice de P6 que el tenant y la ubicación. Es lo que se gana guardando la frontera del mes como un instante en vez de calcularla con `date_trunc` en cada consulta.
 | `inventory_transfer(company_id, occurred_at DESC)` · `inventory_production(company_id, location_id, occurred_at DESC)` | El historial de transferencias y de lotes |
