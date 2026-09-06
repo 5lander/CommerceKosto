@@ -35,7 +35,7 @@
     "build": "npm run build --workspace @costeo/api",
     "db:up": "docker compose up -d db pgbouncer",
     "db:down": "docker compose down",
-    "db:psql": "node scripts/psql-shell.mjs",
+    "db:reset": "node scripts/db-reset.mjs",
     "db:generate": "npm run db:generate --workspace @costeo/api",
     "migrate:new": "node scripts/migrate-new.mjs",
     "migrate:deploy": "npm run migrate:deploy --workspace @costeo/api",

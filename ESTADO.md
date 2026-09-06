@@ -36,10 +36,18 @@
 
 ### Lo que un «tú» futuro necesita saber de P8
 
+**−1. Si `npm run audit` falla en pruebas de integración que NO tocan lo que cambiaste, mira el tamaño de la base antes que el diff.**
+Las suites siembran y no limpian, y el libro es append-only **también para el dueño**: no se puede borrar por company. La base crece hasta que el timeout de 2 s tumba peticiones **al azar**, en suites distintas cada vez. `npm run db:reset -- --si`. Es **INC-014**.
+
+**0. El Excel se puede leer, y se leyó. Está en `C:\Users\Lander\Downloads\`.**
+No hace falta `openpyxl`: un `.xlsx` es un ZIP con XML, y `scratchpad/xlsx.py` lo lee en 60 líneas. **Cuando una fórmula del SPEC sea dudosa, míralo.** La verificación de P8 cerró una duda de dos paquetes, confirmó el hallazgo del rendimiento por lote contra la fuente y encontró dos divergencias que nadie había escrito. Sigue sin versionarse: es dato de cliente.
+
 **1. R7 destapó un fallo de P6 que llevaba dos paquetes con 596 pruebas en verde encima.**
 La receta es del **lote**; la venta, de **porciones**. Vender 100 unidades de un producto que rinde 2 consume **50** lotes, no 100 (SPEC §14: `costo_por_porcion = costo_neto_lote / rendimiento_porciones`). P6 no dividía, así que con rendimiento 4 cada venta sacaba del inventario cuatro veces lo real.
 
 **Ninguna prueba lo vio porque todos los productos de prueba tenían rendimiento 1**, que es el único valor con el que multiplicar y dividir coinciden. La corrección vive en `totalConsumido`, el punto único que P6 y P8 comparten. **ADR-011 §1.**
+
+**Verificado después contra el Excel**, que divide exactamente igual. Y el tamaño real del fallo: **11 de los 48 productos del cliente tienen rendimiento distinto de 1**, con valores de hasta **185**.
 
 **2. Cuarta vez que aparece la misma forma de fallo, y ahora con nombre.**
 
@@ -70,11 +78,40 @@ P6 le negó el saldo, P7 la conciliación, P8 las seis vistas. Y las tres veces 
 ### Lo que conviene que el usuario mire antes de P9
 
 1. **El rendimiento del ÍTEM sigue sin confirmarse contra el Excel** (abierta desde P6), y ahora importa más: afecta al `consumo_teorico` que P8 publica en dos vistas. **No confundirlo con el rendimiento por lote**, que es el que P8 corrigió: aquel vive en el costo (SPEC §12), este en la cantidad (SPEC §14).
-2. **Las vistas no están contrastadas contra el Excel celda a celda**, y no se puede: el Excel no tiene dimensión temporal (SPEC §3). Lo que sí sale del Excel son los nueve casos del motor de costeo, que P8 no toca.
-3. **El coste de armar el contexto no tiene medición propia.** Presupuesto de P9: 800 ms para diez ubicaciones.
+2. **Las vistas no están contrastadas contra el Excel celda a celda**, y ahora se sabe por qué no se puede: **el Excel no tiene ninguna unidad vendida cargada** (`T2_PRODUCTOS.H` es cero en los 48 productos). Sus tres vistas que dependen de ese dato están en cero. No hay valores esperados que extraer — pero **sus fórmulas sí se verificaron una a una**, y coinciden.
+3. **El coste de armar el contexto no tiene medición propia.** Presupuesto de P9: 800 ms para diez ubicaciones. **Y llega con un aviso:** si `/costeo` tiene un modo de 370 ms (duda 8), el consolidado de diez ubicaciones lo hereda multiplicado.
 4. **El consolidado de P9 puede sumar meses cerrados con meses abiertos**, porque el período es por ubicación (P7). Tendrá que decirlo.
 5. **D4 (`LNK`) sigue en 🔴.** No ha bloqueado nada; bloquea la migración de datos del Excel.
 6. **Nadie puede leer `audit_log`** — pendiente estructural de P11, sin cambios desde P7.
+
+### Lo que la limpieza de la base destapó — leer antes de tocar una prueba de rendimiento
+
+**La base de desarrollo se vació por primera vez desde P0.** Pasó de 3087 MB a 12 MB, y con ella cayeron tres cosas que llevaban tiempo tapadas:
+
+1. **El puerto 5432 del host llegaba a pgbouncer, no a PostgreSQL.** Es **INC-015**. Explica los `ETIMEDOUT` que INC-014 atribuía al tamaño de la base: con `DEFAULT_POOL_SIZE: 1`, dieciocho suites entrando por el pooler se atascan. `docker compose down && up` lo arregla; `restart` no. **INC-014 quedó corregida** en vez de reescrita: el diagnóstico incompleto se deja visible.
+
+2. **`db:reset` tenía dos errores, y el segundo era silencioso.** `DROP SCHEMA public CASCADE` no lo puede deshacer `costeo_migrator` —es dueño del esquema, no de la base— y además se habría llevado `pg_stat_statements` y `pg_trgm`, que viven en `public` y los crea `initdb` **como superusuario**. El script vacía ahora el esquema en vez de tirarlo.
+
+3. **Dos pruebas de plan pasaban por el residuo de corridas anteriores.** Exigían índice donde `Seq Scan` era la elección **correcta**: la company medida era la tabla entera. Pasaban porque cientos de companies viejas hacían de ruido por accidente. Corregido: `rendimiento-de-costeo.spec.ts` siembra sus propias `COMPANIES_DE_RUIDO = 9`.
+
+**La regla que queda, y vale para P9 en adelante:** una prueba de rendimiento que solo pasa sobre una base sucia no mide el sistema, mide el residuo. Si escribes una que compare planes, **siembra tú el ruido**.
+
+### Cómo se mide ahora el presupuesto de §5 — y la deuda que deja
+
+**`/costeo` está bien: p95 ≈ 85 ms contra 400 en la topología de producción.** Lo que estaba mal era dónde se medía. Las tres suites de rendimiento corren en el host y hablan con la base por el proxy de Docker Desktop, que se atasca ~300 ms cuando cruza volumen: **nunca han medido el sistema.**
+
+Lo implementado:
+
+1. **La medición se ejecuta siempre y su número se imprime siempre**, en cualquier máquina.
+2. **El presupuesto solo se exige en CI**, que corre sobre Linux con el mismo `docker-compose.yml` y sin ese proxy.
+3. Fuera de ahí la aserción se salta **con el motivo escrito en la salida**.
+4. Las aserciones de **plan** (`EXPLAIN`, uso de índice) siguen corriendo en todas partes: el plan no depende del transporte.
+
+**Se intentó antes una sonda** que midiera el transporte y decidiera sola. No funciona: el atasco va y viene por minutos, así que medirlo veinte segundos antes no predice nada. Daba falsos verdes y falsos rojos **pareciendo rigurosa**. Está contado en INC-016 para que nadie lo reintente.
+
+**Y una regla operativa que sale de ahí:** `docker compose stop api` antes de correr la suite. Con `costeo-api` levantado, el transporte del host pasa de un máximo de 20 ms a uno de **60 segundos**, y la suite de 18 en verde a cinco archivos en rojo distintos cada vez.
+
+> **Deuda técnica, con fecha de pago en P9.** El presupuesto queda guardado por CI y por nadie más. Lo que corresponde es **`npm run bench`**: un banco que levante la API en la red de compose y mida ahí. P9 lo necesita de todos modos — trae su propio presupuesto de 800 ms para el consolidado de diez ubicaciones, y medirlo a través del proxy no serviría de nada.
 
 ### Estado de los doce checks
 
@@ -82,7 +119,7 @@ P6 le negó el saldo, P7 la conciliación, P8 las seis vistas. Y las tres veces 
 |---|---|---|
 | `audit:types` | ✅ | |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | 30 reglas sobre **251 archivos** (228 en P7) |
+| `audit:forbidden` | ✅ | 30 reglas sobre **252 archivos** (228 en P7) |
 | `audit:arch` | ✅ | 222 módulos, 973 dependencias. **Paró un ciclo real** en P8 |
 | `audit:deadcode` | ✅ | Sin ninguna lista blanca |
 | `audit:complexity` | ✅ | |
@@ -91,7 +128,7 @@ P6 le negó el saldo, P7 la conciliación, P8 las seis vistas. Y las tres veces 
 | `audit:secrets` | ✅ | |
 | `audit:deps` | ✅ | |
 | `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | 442 unitarias (sin base) + 260 de integración |
+| `audit:tests` | ✅ | 442 unitarias (sin base) + **256 de 260** de integración; 4 saltadas con motivo — las de tiempo, que solo se exigen en CI (INC-016) |
 
 ## Progreso
 
@@ -171,8 +208,10 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 | # | Duda | Paquete que la levantó | Qué bloquea |
 |---|---|---|---|
 | 1 | **La máquina de desarrollo corre Node 24.19.0; ADR-001 fija 24.20.0.** `engines` admite `>=24.19.0 <25` | P0 | Nada hoy |
-| 4 | **La explosión del consumo no aplica el rendimiento del ítem.** Se sigue SPEC §4.3, que es la única frase del SPEC sobre el asunto | P6 | Nada hoy. **Afecta al stock teórico de SPEC §18, que es P8.** Merece confirmarse contra el Excel antes de ese paquete |
+| 4 | ~~La explosión del consumo no aplica el rendimiento del ítem~~ | P6 | ✅ **CERRADA: verificado contra el Excel.** `T3_RECETAS.N` usa la cantidad de la receta tal cual; el rendimiento del ítem (`T1.L`) aparece **solo** en el costo (`T1.M = K/L`). El rendimiento encarece la unidad, no aumenta lo que sale de la bodega. **ADR-011 §1** |
+| 7 | **El MC promedio de menu engineering: el SPEC y el Excel se contradicen.** El SPEC dice «no la media simple»; el Excel usa `AVERAGE(P6:P53)`, que **es** la media simple. Se implementó siguiendo el SPEC —ponderado por unidades, que es el Kasavana-Smith canónico— | P8 | **Nada bloqueado, pero decide cuadrantes.** Es la única contradicción encontrada entre el SPEC y su fuente, y merece confirmarse con quien escribió el SPEC |
 | 5 | **Las seis vistas no se pueden contrastar contra el Excel celda a celda**, porque el Excel no tiene dimensión temporal (SPEC §3). La aritmética está probada con casos a mano y R7 cierra sobre el sistema entero | P7 · P8 | Nada. Es una limitación del origen, no una tarea pendiente |
+| 8 | ✅ **RESUELTA: `/costeo` cumple §5 con holgura. La que fallaba era la medición.** En la topología de producción —API y base en la misma red— el p95 es **~85 ms contra un presupuesto de 400** (21 %). El modo de 370 ms era **el proxy de Docker Desktop en Windows**, que se atasca ~300 ms cuando cruza un resultado grande: la misma consulta de 1.600 filas tarda 2 ms dentro del contenedor y pega picos de 320 ms desde el host. **INC-016** trae las once cosas que se descartaron midiendo | P8 | **Pero deja una decisión abierta: las tres suites de rendimiento corren en el host y nunca han medido el sistema.** Ver abajo |
 | 6 | **El coste de armar el contexto de las vistas no está medido.** Cinco consultas más el costeo de la carta, por (ubicación, mes) | P8 | Nada hoy. **P9 lo multiplica por el número de ubicaciones** y tiene presupuesto de 800 ms |
 
 ---
@@ -183,7 +222,7 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 
 | # | Deuda | Paquete | Cuándo se paga |
 |---|---|---|---|
-| — | *(ninguna)* | — | — |
+| 1 | **`npm run bench`** — el presupuesto de tiempo de §5 solo se exige en CI, porque el proxy de Docker en Windows falsea la medición en local (INC-016). Falta el banco que mida en la topología de producción | P8 | **P9**, que trae su propio presupuesto de 800 ms y no se puede verificar sin él |
 
 > **Pendiente estructural, no deuda:** nadie puede leer `audit_log` porque no existe rol con `SELECT` sobre ella. Es lo que SEGURIDAD.md §10 pide, no un olvido, y se resuelve en **P11** creando `costeo_backoffice` con su política.
 
@@ -220,7 +259,7 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 ## Notas de contexto
 
 - El SPEC completo está en `docs/SPEC.md`; las reglas obligatorias en `CLAUDE.md`; el protocolo en `docs/PROTOCOLO.md`; la checklist en `docs/AUDITORIA.md`
-- **`docs/incidencias/README.md` tiene TRECE fichas.** Se lee al inicio de cada paquete y antes de diagnosticar cualquier error. **INC-007 (9 recurrencias), INC-008, INC-012 e INC-013 no son de una herramienta concreta**, y merecen leerse aunque no se esté diagnosticando nada
+- **`docs/incidencias/README.md` tiene CATORCE fichas.** Se lee al inicio de cada paquete y antes de diagnosticar cualquier error. **INC-007 (9 recurrencias), INC-008, INC-012 e INC-013 no son de una herramienta concreta**, y merecen leerse aunque no se esté diagnosticando nada
 - El Excel de referencia está en `C:\Users\Lander\Downloads\Modelo_Costeo_Auditado_SNACKLAB.xlsx`. **No está versionado y no debe estarlo**: es dato de cliente
 - **La verificación de versiones de ADR-001 se hizo el 2026-08-26.** Si pasan meses, reverificar antes de fiarse de las fechas de EOL
 - **Node 26 promueve a LTS el 2026-10-28**, dentro de dos meses. El salto es el ítem C7 de FASE0-CHECKLIST y merece su propio paquete

@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { MOTIVO_TRANSPORTE, SE_EXIGE_EL_PRESUPUESTO } from '../soporte/transporte';
 
 const OK = 200;
 const CONTRASENA = 'tres cebollas moradas';
@@ -40,6 +41,19 @@ const ITEMS = 300;
 const LINEAS_POR_PRODUCTO = 8;
 const PRESUPUESTO_MS = 400;
 const MEDICIONES = 20;
+
+/**
+ * Otras companies con carta propia, para que la company medida NO sea la tabla
+ * entera.
+ *
+ * SIN ESTO LA PRUEBA DEL PLAN NO MIDE NADA. Es INC-007 caso 8 otra vez: si las
+ * 200 recetas de la company medida son todas las que hay, PostgreSQL elige un
+ * `Seq Scan` — y ACIERTA, porque el filtro por company no descarta nada. La
+ * prueba exigia el indice y pasaba solo gracias a las companies que dejaban las
+ * corridas anteriores en la base compartida. Sobre una base recien reseteada
+ * (INC-014) falla, y hace bien.
+ */
+const COMPANIES_DE_RUIDO = 9;
 
 const URL_MIGRATOR = process.env['MIGRATION_DATABASE_URL'];
 if (URL_MIGRATOR === undefined) {
@@ -79,33 +93,21 @@ describe('rendimiento del costeo con volumen realista', () => {
     await app.init();
 
     const hash = await new Argon2Hasher().hash(CONTRASENA);
-    const { rows } = await duena.query<{ id: string }>(
-      `INSERT INTO company (name, status) VALUES ($1, 'ACTIVE') RETURNING id`,
-      [`volumen ${sufijo}`],
-    );
-    company = rows[0]?.id ?? '';
-
-    const { rows: ubicaciones } = await duena.query<{ id: string }>(
-      `INSERT INTO location (company_id, name, type, status)
-       VALUES ($1, 'Centro', 'LOCAL', 'ACTIVE') RETURNING id`,
-      [company],
-    );
-    centro = ubicaciones[0]?.id ?? '';
-
     const correo = `admin.${sufijo}@snacklab.ec`;
-    const { rows: usuarios } = await duena.query<{ id: string }>(
-      `INSERT INTO app_user (company_id, email, password_hash, status)
-       VALUES ($1, $2, $3, 'ACTIVE') RETURNING id`,
-      [company, correo, hash],
-    );
-    const usuario = usuarios[0]?.id ?? '';
+
+    const medida = await crearCompany({ nombre: `volumen ${sufijo}`, correo, hash });
+    company = medida.company;
+    centro = medida.location;
+
     await duena.query(
       `INSERT INTO user_role (company_id, user_id, role_code, has_location)
        VALUES ($1, $2, 'ADMIN', false)`,
-      [company, usuario],
+      [company, medida.usuario],
     );
 
-    await sembrarVolumen(usuario);
+    await sembrarCarta({ ...medida, conLineas: true });
+    await sembrarRuido({ sufijo, hash });
+    await duena.query('ANALYZE');
 
     const respuesta = await request(servidor())
       .post('/auth/login')
@@ -113,11 +115,68 @@ describe('rendimiento del costeo con volumen realista', () => {
     cookie = (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
   }, 180_000);
 
+  /** El armazon minimo de una company: su ubicacion y su usuario. */
+  async function crearCompany(quien: {
+    readonly nombre: string;
+    readonly correo: string;
+    readonly hash: string;
+  }): Promise<{ company: string; location: string; usuario: string }> {
+    const { rows: companies } = await duena.query<{ id: string }>(
+      `INSERT INTO company (name, status) VALUES ($1, 'ACTIVE') RETURNING id`,
+      [quien.nombre],
+    );
+    const creada = companies[0]?.id ?? '';
+
+    const { rows: ubicaciones } = await duena.query<{ id: string }>(
+      `INSERT INTO location (company_id, name, type, status)
+       VALUES ($1, 'Centro', 'LOCAL', 'ACTIVE') RETURNING id`,
+      [creada],
+    );
+
+    const { rows: usuarios } = await duena.query<{ id: string }>(
+      `INSERT INTO app_user (company_id, email, password_hash, status)
+       VALUES ($1, $2, $3, 'ACTIVE') RETURNING id`,
+      [creada, quien.correo, quien.hash],
+    );
+
+    return {
+      company: creada,
+      location: ubicaciones[0]?.id ?? '',
+      usuario: usuarios[0]?.id ?? '',
+    };
+  }
+
   /**
-   * 300 ítems con precio confirmado, 200 productos activos con PVP y 1.600
-   * líneas de receta. Con `generate_series`, en unos segundos.
+   * Las companies de ruido, con carta pero SIN lineas de receta: lo que la
+   * prueba del plan necesita de ellas es que existan sus recetas y sus precios,
+   * no lo que lleven dentro. Las lineas son la parte cara de sembrar.
    */
-  async function sembrarVolumen(usuario: string): Promise<void> {
+  async function sembrarRuido(quien: {
+    readonly sufijo: string;
+    readonly hash: string;
+  }): Promise<void> {
+    for (let n = 0; n < COMPANIES_DE_RUIDO; n += 1) {
+      const otra = await crearCompany({
+        nombre: `ruido ${quien.sufijo} ${String(n)}`,
+        correo: `ruido.${quien.sufijo}.${String(n)}@snacklab.ec`,
+        hash: quien.hash,
+      });
+      await sembrarCarta({ ...otra, conLineas: false });
+    }
+  }
+
+  /**
+   * 300 ítems con precio confirmado, 200 productos activos con PVP y —si se
+   * piden— sus 1.600 líneas de receta. Con `generate_series`, en unos segundos.
+   */
+  async function sembrarCarta(donde: {
+    readonly company: string;
+    readonly location: string;
+    readonly usuario: string;
+    readonly conLineas: boolean;
+  }): Promise<void> {
+    const { company, location, usuario } = donde;
+
     await duena.query(
       `INSERT INTO item (company_id, name, type, unit_of_use, yield, status, price_confidence)
        SELECT $1, 'Insumo ' || n, 'COMPRADO', 'g', 0.85, 'ACTIVE', 'FACTURA'
@@ -154,15 +213,19 @@ describe('rendimiento del costeo con volumen realista', () => {
       `INSERT INTO product_location (company_id, product_id, location_id, activo, pvp, rendimiento_porciones)
        SELECT $1, p.id, $2, true, 6.50, 4
        FROM product p WHERE p.company_id = $1`,
-      [company, centro],
+      [company, location],
     );
 
     await duena.query(
       `INSERT INTO recipe (company_id, location_id, product_id, status, valid_from, created_by)
        SELECT $1, $2, p.id, 'ACTIVE', TIMESTAMPTZ '2026-01-01', $3
        FROM product p WHERE p.company_id = $1`,
-      [company, centro, usuario],
+      [company, location, usuario],
     );
+
+    if (!donde.conLineas) {
+      return;
+    }
 
     // 8 líneas por producto = 1.600, repartidas sobre los 300 ítems: es el
     // reparto realista, donde los mismos insumos se repiten en muchos platos y
@@ -188,8 +251,6 @@ describe('rendimiento del costeo con volumen realista', () => {
        JOIN i ON i.ino = ((r.rn * 7 + k * 13) % $3)`,
       [company, LINEAS_POR_PRODUCTO, ITEMS],
     );
-
-    await duena.query('ANALYZE');
   }
 
   afterAll(async () => {
@@ -208,7 +269,8 @@ describe('rendimiento del costeo con volumen realista', () => {
     expect(Number(rows[0]?.lineas)).toBeGreaterThanOrEqual(1500);
   });
 
-  it('costea la carta entera por debajo de 400 ms en el p95', async () => {
+  it('costea la carta entera por debajo de 400 ms en el p95', async (contexto) => {
+
     const tiempos: number[] = [];
 
     for (let i = 0; i < MEDICIONES; i += 1) {
@@ -226,6 +288,15 @@ describe('rendimiento del costeo con volumen realista', () => {
     const medido = p95(tiempos);
     // El número sale en el informe de auditoría: un presupuesto que se cumple
     // por poco es una alarma, no un aprobado.
+    // El numero se publica SIEMPRE, se exija o no: nadie deberia perder de
+    // vista el rendimiento por trabajar en Windows. Va en el motivo del salto
+    // porque `no-console` esta prohibido, y ahi se lee igual de bien.
+    if (!SE_EXIGE_EL_PRESUPUESTO) {
+      contexto.skip(
+        `costeo de la carta p95 = ${medido.toFixed(1)} ms de ${String(PRESUPUESTO_MS)} · ${MOTIVO_TRANSPORTE}`,
+      );
+    }
+
     expect(medido, `p95 medido: ${medido.toFixed(1)} ms`).toBeLessThan(PRESUPUESTO_MS);
   }, 120_000);
 

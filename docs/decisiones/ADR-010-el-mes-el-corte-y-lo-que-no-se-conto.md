@@ -77,6 +77,8 @@ El libro dice lo que *debería* haber. El conteo dice lo que *hay*. Su resta es 
 
 **Qué se rompe con la contraria.** Todo conteo parcial —o sea, todos— produciría un food cost real inflado, y el error crecería con lo que se dejara sin contar. Nadie lo notaría: el número seguiría siendo plausible.
 
+**El Excel hace lo contrario, y se verificó leyéndolo.** Su inventario final es `SUMPRODUCT((Q<>"") * IFERROR(Q,0) * M)`: un ítem sin conteo aporta **cero**. No es un error suyo — **asume conteo completo**, que es precisamente lo que D7 dice que no pasa en la práctica. La contrapartida que este sistema añade es el indicador de cobertura, que el Excel no tiene.
+
 **Cómo se sabe cuánto fiarse.** La cobertura de D7: `valor verificado ÷ valor total`. **Viaja siempre pegada** a los números que dependen de ella. Un consumo real calculado sobre el 12 % del valor no es un consumo real; es una estimación, y quien la lea tiene derecho a saberlo sin preguntar.
 
 Se mide sobre el **valor**, no sobre el número de ítems: contar 40 ítems baratos y dejar el jamón sin contar es una cobertura mala aunque sean 40 de 41.

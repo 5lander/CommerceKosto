@@ -507,4 +507,20 @@ Y hay una segunda versión, que es la que importa: **la misma conciliación con 
 
 **CC-008 se cierra**: el cuadrante de menu engineering con índice de popularidad exactamente 1. Está probado en las dos capas —dominio y HTTP— y el valor esperado no sale del código: sale de resolver `popularidad × n / regla = 1` a mano y elegir 210 unidades de 900 con tres productos activos.
 
-**Lo que P8 no puede cerrar, y conviene que quede escrito:** las seis vistas **no se contrastan contra el Excel celda a celda**, porque el Excel no tiene dimensión temporal (SPEC §3). No existe una hoja «food cost real de marzo». Lo que sí sale del Excel son los nueve casos de costeo de arriba, y P8 no toca ninguna de esas fórmulas.
+**Lo que P8 no puede cerrar, y ahora se sabe exactamente por qué:** las seis vistas no se contrastan contra el Excel celda a celda porque **el Excel no tiene ninguna unidad vendida cargada**. `T2_PRODUCTOS.H` vale cero en los 48 productos, así que menu engineering, food cost real y punto de equilibrio están **en cero en el propio Excel**. No hay número esperado que copiar.
+
+Lo que sí se hizo, leyendo el archivo: **verificar sus fórmulas una a una.** Coinciden con lo implementado en todo salvo dos puntos, los dos documentados:
+
+| | Excel | Aquí | Por qué |
+|---|---|---|---|
+| Consumo teórico | `F × unidades / rendimiento_porciones` | igual | ✅ Confirma la corrección de P8 |
+| Rendimiento del ÍTEM en el consumo | **no lo aplica** | no lo aplica | ✅ Cierra la duda de P6 |
+| Base AP/EP en el consumo | **no la distingue** | no la distingue | ✅ |
+| `mermas_ajustes` | en positivo, se resta | con signo, se suma | ✅ equivalente |
+| Movimientos de consumo | **no existen** en T5 | se excluyen del agregado | ✅ |
+| Punto de reorden | `R/dias_operativos × dias_cobertura` | igual | ✅ |
+| Conciliación R7 | `ROUND(teorico − v_costeo, 2)` | igual | ✅ |
+| Inventario final sin conteo | **cero** | el teórico | ⚠️ divergencia deliberada, **D7** |
+| MC promedio | **`AVERAGE`, media simple** | ponderado | ⚠️ **el SPEC dice «no la media simple»** |
+
+El último es la única contradicción encontrada entre el SPEC y su fuente, y está anotado como duda para el usuario.

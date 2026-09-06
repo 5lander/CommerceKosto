@@ -23,6 +23,23 @@ costo_por_porcion = costo_neto_lote / rendimiento_porciones
 
 Si el costo del lote se divide entre las porciones, la receta describe **un lote**. Vender 100 porciones de un producto que rinde 2 consume **50** lotes, no 100.
 
+### Verificado contra el Excel, después de escribir esto
+
+La decisión se tomó razonando desde SPEC §14 y desde R7. **Después se leyó el Excel original**, y la fórmula está ahí, en la columna «Consumo mes» de `T3_RECETAS`:
+
+```excel
+N6 = IF($K6<>"ACTIVA", 0,
+        F6                                   ← cantidad de la receta
+        * INDEX(T2_PRODUCTOS!$H, MATCH(...))  ← unidades vendidas del mes
+        / INDEX(T2_PRODUCTOS!$E, MATCH(...))) ← rendimiento en PORCIONES
+```
+
+`T2_PRODUCTOS.E` es «Rendimiento (porciones)» y `T2_PRODUCTOS.H` es «Unidades vendidas mes». **El Excel divide.** No era una interpretación: era la fórmula.
+
+**Y el tamaño del fallo, medido en la carta real del cliente: 11 de sus 48 productos tienen rendimiento distinto de 1**, con valores de 8, 11, 15, 16, 18, 24, 30 y **185**. Casi una cuarta parte de la carta, y en el caso extremo cada venta habría descontado del inventario **185 veces** lo que sale de la bodega.
+
+---
+
 **Lo destapó R7, y solo pudo destaparlo R7.** La conciliación de SPEC §16 exige que
 
 ```
@@ -37,7 +54,22 @@ y eso solo se cumple si aquí se divide. Sin la división, con un rendimiento de
 
 **El caso `null` o cero.** Un producto sin rendimiento capturado **no consume nada**. Es lo coherente: SPEC §14 fija que su `costo_por_porcion` es cero, así que su consumo valorizado también tiene que serlo o R7 dejaría de cuadrar. El producto está a medio configurar y el sistema ya dice que su costo es cero.
 
-> **No confundir con el rendimiento del ÍTEM.** Aquel es la fracción aprovechable tras la limpieza y vive en el **costo** (SPEC §12); este es cuántas porciones salen de un lote y vive en la **cantidad**. La duda abierta desde P6 —«la explosión no aplica el rendimiento»— se refiere al primero y **sigue abierta**.
+> **No confundir con el rendimiento del ÍTEM.** Aquel es la fracción aprovechable tras la limpieza y vive en el **costo** (SPEC §12); este es cuántas porciones salen de un lote y vive en la **cantidad**.
+
+### Y la misma lectura del Excel cierra la duda que P6 dejó abierta
+
+Desde P6 estaba anotado que «la explosión del consumo **no** aplica el rendimiento del ítem», siguiendo SPEC §4.3, y quedó como duda a confirmar contra la fuente. **Confirmado: el Excel tampoco lo aplica.**
+
+La misma fórmula `T3_RECETAS.N` usa `F6` —la cantidad de la receta— **tal cual**. El rendimiento del ítem, que en `T1_INSUMOS` es la columna `L`, aparece **solo** en el costo:
+
+```excel
+T1!M6 = IF(L6=0, 0, K6/L6)     ← costo neto de uso: AQUÍ sí divide por el rendimiento
+T3!N6 = F6 * H / E             ← consumo del mes: aquí NO aparece L
+```
+
+**El rendimiento encarece la unidad, no aumenta la cantidad que sale de la bodega**, y es coherente: lo que se descuenta del inventario es lo que se saca del estante, y la merma de limpieza ya ocurrió dentro de ese kilo.
+
+Un detalle más de la misma fórmula: `T3!N6` **tampoco distingue la base `AP`/`EP`**. El costo sí lo hace —`M6 = F6 * IF(G6="EP", J6, I6)`— pero el consumo físico es la cantidad de la receta en los dos casos. Es exactamente lo que `explotarConsumo` hace.
 
 ---
 
@@ -112,6 +144,37 @@ stock teórico → consumo → cantidad de la receta
 **El semáforo se sirve desde otro caso de uso y con otro tipo**, no filtrando la vista de inventario. `FilaDeReposicionDto` tiene tres campos y ninguno es una cantidad; es una interfaz propia y no un `Omit` sobre `ItemDelInventarioDto`, porque con un `Omit` un campo nuevo en la vista se publicaría aquí sin que nada avisara.
 
 **`FALTAN_COMPRAS` y `REPONER` colapsan en uno**, y `SIN_CONSUMO` y `OK` en el otro. Que `BODEGA` pudiera distinguir «faltan compras» de «reponer» ya sería un dato sobre el stock teórico.
+
+---
+
+## 8. Dos sitios donde este sistema **se aparta** del Excel a propósito
+
+Leer el Excel para verificar el punto 1 sacó a la luz dos divergencias que conviene tener escritas, porque las dos son deliberadas y ninguna estaba dicha.
+
+### 8.1 El inventario final sin conteo: el Excel valora en **cero**
+
+```excel
+B8 = SUMPRODUCT((T1!$Q<>"") * IFERROR(T1!$Q,0) * T1!$M)
+```
+
+`Q` es el conteo físico. Si está vacío, el ítem aporta **cero** al inventario final — no su valor teórico.
+
+**Aquí se hace lo contrario, y lo manda D7:** «los ítems sin conteo no generan diferencia y quedan marcados como *sin verificar*». Valorar en cero equivale a declarar consumido todo lo que nadie miró, y el guardián 3 de P7 lo demuestra: el consumo real se dispara por una omisión de captura, con un número perfectamente creíble.
+
+**No es que el Excel se equivoque: es que el Excel asume conteo completo.** D7 existe justamente porque «en la práctica nadie cuenta 200 ítems y forzarlo produce números inventados», y la contrapartida —el indicador de cobertura— es lo que el Excel no tiene.
+
+### 8.2 El MC promedio: el Excel usa la media **simple**
+
+```excel
+V_COSTEO!P54 = AVERAGE(P6:P53)      ← media simple del MC unitario
+V_MENU_ENGINEERING!I6 = IF(AND(F6>=1, G6>=V_COSTEO!$P$54), "ESTRELLA", ...)
+```
+
+**El SPEC dice lo contrario, y con estas palabras:** «El MC promedio es el del total de la vista de costeo, **no la media simple**».
+
+Se implementó siguiendo el SPEC —ponderado por unidades, que es además el Kasavana-Smith canónico—, y **es la única contradicción encontrada entre el SPEC y su fuente**. La diferencia decide cuadrantes: con dos productos, uno de 99 unidades y margen 1 y otro de 1 unidad y margen 101, la media simple da 51 y la ponderada 2.
+
+> ⚠️ **Esta es una decisión abierta para el usuario**, anotada en `ESTADO.md`. El SPEC parece estar corrigiendo el Excel a propósito, pero eso hay que confirmarlo con quien lo escribió.
 
 ---
 

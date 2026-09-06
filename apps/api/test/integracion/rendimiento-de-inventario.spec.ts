@@ -29,6 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { MOTIVO_TRANSPORTE, SE_EXIGE_EL_PRESUPUESTO } from '../soporte/transporte';
 
 const OK = 200;
 const CONTRASENA = 'tres cebollas moradas';
@@ -207,7 +208,8 @@ describe('rendimiento del inventario con volumen realista', () => {
     );
   });
 
-  it('el inventario de la ubicación sale por debajo de 300 ms en el p95', async () => {
+  it('el inventario de la ubicación sale por debajo de 300 ms en el p95', async (contexto) => {
+
     const tiempos: number[] = [];
 
     for (let vuelta = 0; vuelta < MEDICIONES; vuelta += 1) {
@@ -223,6 +225,15 @@ describe('rendimiento del inventario con volumen realista', () => {
     }
 
     const medido = p95(tiempos);
+    // El numero se publica SIEMPRE, se exija o no: nadie deberia perder de
+    // vista el rendimiento por trabajar en Windows. Va en el motivo del salto
+    // porque `no-console` esta prohibido, y ahi se lee igual de bien.
+    if (!SE_EXIGE_EL_PRESUPUESTO) {
+      contexto.skip(
+        `inventario de la ubicacion p95 = ${medido.toFixed(1)} ms de ${String(PRESUPUESTO_MS)} · ${MOTIVO_TRANSPORTE}`,
+      );
+    }
+
     expect(medido, `p95 medido: ${medido.toFixed(1)} ms`).toBeLessThan(PRESUPUESTO_MS);
   });
 

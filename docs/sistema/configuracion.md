@@ -59,6 +59,18 @@ Declaradas en `.env.example`. **`.env` nunca se versiona** — lo garantiza `.gi
 
 ---
 
+## Mantenimiento de la base de desarrollo
+
+```bash
+npm run db:reset -- --si
+```
+
+Recrea el esquema `public`, restaura los `DEFAULT PRIVILEGES` de P0 y reaplica las migraciones. **Exige `--si`**, se niega con `NODE_ENV=production` y se niega si la conexión no apunta a localhost.
+
+**Hace falta porque las pruebas de integración no limpian y no pueden.** Las tres suites de rendimiento siembran cientos de miles de filas por corrida —volumen realista, que es lo que INC-007 exige— y borrarlas después es **imposible**: `inventory_movement` y `audit_log` son append-only en tres capas, y la del trigger alcanza también al dueño de la tabla. Es R3 funcionando, no un obstáculo.
+
+Cuándo usarlo, y cómo se reconoce que hace falta: **INC-014**.
+
 ## Los roles de base de datos
 
 Tres identidades, y la separación entre ellas **es** la Barrera 1 de `CLAUDE.md` §4.1. Es la única defensa que no depende de la disciplina de desarrollo.
