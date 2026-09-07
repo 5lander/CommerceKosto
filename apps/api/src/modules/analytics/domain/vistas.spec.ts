@@ -99,6 +99,46 @@ describe('menu engineering (SPEC §15)', () => {
     expect(menu.productos[0]?.cuadrante).toBe('CABALLO');
   });
 
+  /**
+   * El cliente compara con su Excel —que usa `AVERAGE`— y ve otro número. Con
+   * los dos operandos delante puede rehacer la división y ver por qué, sin
+   * llamar a nadie. Ver ADR-015.
+   */
+  it('devuelve los dos operandos del MC de referencia, y la división cuadra', () => {
+    const menu = clasificarMenu({
+      reglaPopularidad: REGLA,
+      productos: [
+        producto({ productId: P1, unidades: 99, mc: '1.00' }),
+        producto({ productId: P2, unidades: 1, mc: '101.00' }),
+      ],
+    });
+
+    expect(menu.mcTotal?.toExactString()).toBe('200');
+    expect(menu.unidadesConMargen.toExactString()).toBe('100');
+    expect(menu.metodoMcPromedio).toBe('PONDERADO_POR_UNIDADES');
+  });
+
+  /**
+   * **`unidadesConMargen` NO es `unidadesTotales`**, y esta es la prueba que lo
+   * fija. Un producto sin PVP no entra ni en el numerador ni en el denominador:
+   * dividir el total entre las unidades totales daría 100/12 en vez de 100/10, y
+   * el cliente vería que «la cuenta no cuadra» teniendo razón.
+   */
+  it('un producto sin PVP no entra en ninguno de los dos lados de la división', () => {
+    const menu = clasificarMenu({
+      reglaPopularidad: REGLA,
+      productos: [
+        producto({ productId: P1, unidades: 10, mc: '10.00' }),
+        producto({ productId: P2, unidades: 2, mc: null }),
+      ],
+    });
+
+    expect(menu.unidadesTotales.toExactString()).toBe('12');
+    expect(menu.unidadesConMargen.toExactString()).toBe('10');
+    expect(menu.mcTotal?.toExactString()).toBe('100');
+    expect(menu.mcPromedio?.toExactString()).toBe('10');
+  });
+
   it('un producto activo sin unidades es SIN_DATOS, no un PERRO', () => {
     const menu = clasificarMenu({
       reglaPopularidad: REGLA,

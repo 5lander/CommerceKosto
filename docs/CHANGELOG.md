@@ -4,6 +4,31 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P10b — El MC de referencia, visible y reproducible · 2026-09-07
+
+**Objetivo:** cerrar la única contradicción encontrada entre el SPEC y el Excel del que sale, y que
+el cliente pueda ver por qué su hoja da otro número.
+
+### Decidido
+
+**El MC promedio de menu engineering se queda PONDERADO** — `Σ(mc × unidades) / Σ(unidades)`—, como
+dice SPEC §15 y como es el Kasavana-Smith canónico. El `AVERAGE` del Excel **es** la media simple, y
+es el atajo que una hoja hace fácil: con cola larga desplaza el eje y convierte en «perros» a los
+platos que sostienen el negocio. La implementación de P8 era correcta. **ADR-015**.
+
+### Entregado
+
+- `mcTotal` y `unidadesConMargen` en la respuesta, para que `mcTotal / unidadesConMargen = mcPromedio`
+  se pueda rehacer a mano
+- **`unidadesConMargen` no es `unidadesTotales`**, y hay una prueba que lo fija: un producto sin PVP
+  no entra en ninguno de los dos lados de la división, así que dividir por el total daría otro número
+  y el cliente tendría razón al decir que no cuadra
+- `metodoMcPromedio: 'PONDERADO_POR_UNIDADES'` viajando pegado al número, no escrito en el frontend
+- **La frase explicativa la escribe el frontend**, desde sus recursos (D11): la API da números
+- Duda 7 de `ESTADO.md` cerrada
+
+---
+
 ## P10 — Importación de catálogo, acotada a una migración operada · 2026-09-07
 
 **Objetivo:** que el catálogo de un cliente entre sin digitarlo, y que entre entero o no entre.

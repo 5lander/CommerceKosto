@@ -64,6 +64,9 @@ export function comoMenuDto(menu: Menu): MenuDto {
       cuadrante: producto.cuadrante,
     })),
     mcPromedio: opcional(menu.mcPromedio),
+    mcTotal: opcional(menu.mcTotal),
+    unidadesConMargen: texto(menu.unidadesConMargen),
+    metodoMcPromedio: menu.metodoMcPromedio,
     unidadesTotales: texto(menu.unidadesTotales),
     productosActivos: menu.productosActivos,
   };

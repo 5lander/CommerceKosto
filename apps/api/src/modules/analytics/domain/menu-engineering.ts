@@ -28,6 +28,13 @@
  * empuja el promedio hacia arriba y convierte en «perros» a los que sostienen
  * el negocio.
  *
+ * **Y SE DEVUELVEN SUS DOS OPERANDOS, NO SOLO EL RESULTADO.** El Excel del que
+ * viene este modelo usa `AVERAGE`, que **es** la media simple, así que un
+ * cliente que compare las dos hojas va a ver dos números distintos y va a
+ * llamar. `mcTotal` y `unidadesConMargen` le permiten reproducir el de aquí sin
+ * llamar a nadie: `mcTotal / unidadesConMargen = mcPromedio`, exacto. Ver
+ * ADR-015.
+ *
  * ES DOMINIO PURO: entran productos con sus unidades y su margen, salen
  * cuadrantes. La regla de popularidad llega por parámetro porque es
  * configuración por company (D3).
@@ -65,13 +72,36 @@ export interface ProductoClasificado {
   readonly cuadrante: Cuadrante;
 }
 
+/**
+ * Cómo se calculó el MC de referencia.
+ *
+ * Viaja pegado al número y no escrito en el frontend: el día que cambie el
+ * método, la etiqueta cambia con él y no se queda una pantalla mintiendo.
+ */
+export type MetodoDeMcPromedio = 'PONDERADO_POR_UNIDADES';
+
 export interface Menu {
   readonly productos: readonly ProductoClasificado[];
   /** Ponderado por unidades. `null` si no se vendió nada. */
   readonly mcPromedio: Money | null;
+  /** El numerador: `Σ(mc × unidades)`. `null` cuando no hay promedio. */
+  readonly mcTotal: Money | null;
+  /**
+   * El denominador REAL del promedio, que **no es `unidadesTotales`**.
+   *
+   * Un producto sin PVP no entra ni en el numerador ni en el denominador —no
+   * tiene margen que promediar—, así que dividir el total entre las unidades
+   * totales NO reproduce `mcPromedio` cuando hay algún producto sin precio. Es
+   * exactamente la clase de diferencia que hace que un cliente crea que el
+   * número está mal.
+   */
+  readonly unidadesConMargen: Count;
+  readonly metodoMcPromedio: MetodoDeMcPromedio;
   readonly unidadesTotales: Count;
   readonly productosActivos: number;
 }
+
+const METODO: MetodoDeMcPromedio = 'PONDERADO_POR_UNIDADES';
 
 export function clasificarMenu(entrada: {
   readonly productos: readonly ProductoParaClasificar[];
@@ -92,13 +122,16 @@ interface Contexto {
 
 function construir(contexto: Contexto): Menu {
   const unidadesTotales = sumarUnidades(contexto.activos);
-  const mcPromedio = promedioPonderado(contexto.activos);
+  const referencia = mcDeReferencia(contexto.activos);
 
   return {
     productos: contexto.productos.map((producto) =>
-      clasificarUno({ producto, contexto, unidadesTotales, mcPromedio }),
+      clasificarUno({ producto, contexto, unidadesTotales, mcPromedio: referencia.promedio }),
     ),
-    mcPromedio,
+    mcPromedio: referencia.promedio,
+    mcTotal: referencia.total,
+    unidadesConMargen: referencia.unidades,
+    metodoMcPromedio: METODO,
     unidadesTotales,
     productosActivos: contexto.activos.length,
   };
@@ -108,21 +141,30 @@ function sumarUnidades(productos: readonly ProductoParaClasificar[]): Count {
   return productos.reduce((total, producto) => total.plus(producto.unidades), Count.CERO);
 }
 
+interface McDeReferencia {
+  readonly promedio: Money | null;
+  readonly total: Money | null;
+  readonly unidades: Count;
+}
+
 /**
- * `Σ(mc × unidades) / Σ(unidades)` — el MC promedio del SPEC.
+ * `Σ(mc × unidades) / Σ(unidades)` — el MC promedio del SPEC, **con sus dos
+ * operandos**.
  *
  * Un producto sin PVP no aporta ni al numerador ni al denominador: no tiene
- * margen que promediar, y contarlo como cero bajaría el promedio de todos.
+ * margen que promediar, y contarlo como cero bajaría el promedio de todos. Por
+ * eso se devuelve `unidades` y no se deja que el llamante use
+ * `unidadesTotales`: son distintas en cuanto hay un producto sin precio, y la
+ * división no daría el mismo número.
  */
-function promedioPonderado(productos: readonly ProductoParaClasificar[]): Money | null {
+function mcDeReferencia(productos: readonly ProductoParaClasificar[]): McDeReferencia {
   const conMargen = productos.filter((producto) => producto.margenContribucion !== null);
-  const unidadesConMargen = sumarUnidades(conMargen);
-  if (unidadesConMargen.isZero()) return null;
+  const unidades = sumarUnidades(conMargen);
+  if (unidades.isZero()) return { promedio: null, total: null, unidades };
 
-  const total = Money.sum(
-    conMargen.map((producto) => margenDe(producto).times(producto.unidades)),
-  );
-  return total.dividedBy(unidadesConMargen.asRatio(), DIVISION);
+  const total = Money.sum(conMargen.map((producto) => margenDe(producto).times(producto.unidades)));
+
+  return { promedio: total.dividedBy(unidades.asRatio(), DIVISION), total, unidades };
 }
 
 function margenDe(producto: ProductoParaClasificar): Money {

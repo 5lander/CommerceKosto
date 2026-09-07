@@ -200,7 +200,20 @@ export interface ProductoDelMenuDto {
 
 export interface MenuDto {
   readonly productos: readonly ProductoDelMenuDto[];
+  /**
+   * El MC de REFERENCIA contra el que se decide el cuadrante, con sus dos
+   * operandos al lado: `mcTotal / unidadesConMargen = mcPromedio`, exacto.
+   *
+   * **Van los tres a propósito.** El Excel del que viene este modelo usa
+   * `AVERAGE`, que es la media simple, así que un cliente que compare las dos
+   * hojas verá dos números y querrá saber por qué. Con estos campos lo ve sin
+   * preguntar. Y `unidadesConMargen` **no es `unidadesTotales`**: un producto
+   * sin PVP no entra en ninguno de los dos lados de la división.
+   */
   readonly mcPromedio: string | null;
+  readonly mcTotal: string | null;
+  readonly unidadesConMargen: string;
+  readonly metodoMcPromedio: string;
   readonly unidadesTotales: string;
   readonly productosActivos: number;
 }
