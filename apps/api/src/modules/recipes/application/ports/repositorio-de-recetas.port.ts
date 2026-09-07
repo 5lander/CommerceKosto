@@ -23,11 +23,14 @@ import type {
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { GrafoDeItems } from '../../domain/ciclos';
-import type { BaseDeLinea, EstadoDeLinea } from '../../domain/linea-de-receta';
+import type { ResultadoDeLote } from '../../../../shared/application/lote';
+import type { BaseDeLinea, EstadoDeLinea, TipoDeProducto } from '../../domain/linea-de-receta';
+
+// Se reexporta para que quien ya lo importaba de aqui no tenga que cambiar: el
+// tipo es de dominio, pero este puerto sigue siendo su puerta natural.
+export type { TipoDeProducto };
 
 export const REPOSITORIO_DE_RECETAS = 'REPOSITORIO_DE_RECETAS';
-
-export type TipoDeProducto = 'SIMPLE' | 'COMBO';
 
 /**
  * El destino de una receta: un producto de venta o una subpreparación.
@@ -159,6 +162,44 @@ export type ResultadoDeAltaDeProducto =
   | { readonly clase: 'creado'; readonly id: ProductId }
   | { readonly clase: 'nombre_en_uso' };
 
+/**
+ * Un producto dentro de un LOTE, con su configuracion en la ubicacion pegada.
+ *
+ * Van juntos a proposito: crear el producto y no activarlo deja un catalogo que
+ * no vende nada, y son dos escrituras que tienen que ocurrir o no ocurrir a la
+ * vez. El empaque llega ya resuelto a id — es un ITEM (ADR-008 §12), y solo
+ * `catalog` sabe traducir su nombre.
+ */
+export interface DatosDeProductoEnLote {
+  readonly nombre: string;
+  readonly tipo: TipoDeProducto;
+  readonly categoria: string | null;
+  readonly empaqueItemId: ItemId | null;
+  readonly activo: boolean;
+  readonly pvp: string | null;
+  readonly rendimientoPorciones: string | null;
+}
+
+/** Una receta dentro de un LOTE: destino ya resuelto y sus lineas. */
+export interface RecetaEnLote {
+  readonly destino: DestinoDeReceta;
+  readonly lineas: readonly LineaParaGuardar[];
+}
+
+/**
+ * Un componente de COMBO dentro de un LOTE.
+ *
+ * **P4 CREO LA TABLA Y NADIE LA HA ESCRITO NUNCA.** `componentesDeCombos` la
+ * lee y el motor de costeo la usa, pero hasta P10 no habia ninguna ruta que
+ * pusiera una fila dentro: un combo se podia crear y jamas componer, y costaba
+ * cero. Esto es esa ruta.
+ */
+export interface ComponenteEnLote {
+  readonly comboProductId: ProductId;
+  readonly componentProductId: ProductId;
+  readonly cantidad: string;
+}
+
 export interface RepositorioDeRecetas {
   crearProducto(entrada: {
     readonly companyId: CompanyId;
@@ -166,6 +207,16 @@ export interface RepositorioDeRecetas {
     readonly tipo: TipoDeProducto;
     readonly categoria: string | null;
   }): Promise<ResultadoDeAltaDeProducto>;
+
+  /**
+   * Escribe TODO el lote o nada, en **una sola transaccion**: los productos, su
+   * configuracion en la ubicacion y su empaque.
+   */
+  crearProductosEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly productos: readonly DatosDeProductoEnLote[];
+  }): Promise<ResultadoDeLote>;
 
   listarProductos(companyId: CompanyId): Promise<readonly ProductoLeido[]>;
 
@@ -199,6 +250,24 @@ export interface RepositorioDeRecetas {
   }): Promise<GrafoDeItems>;
 
   guardarVersion(datos: DatosDeVersion): Promise<RecipeId>;
+
+  /**
+   * Recetas y componentes de combo, TODO o nada, en **una sola transaccion**.
+   *
+   * Las recetas se escriben una a una dentro de esa transaccion y no con un
+   * `createMany`: cada version necesita su `id` para colgarle las lineas, y
+   * `createMany` no devuelve ids. Lo que el criterio de aceptacion exige es
+   * atomicidad, no una sola sentencia — y con 48 productos la diferencia de
+   * tiempo no se nota.
+   */
+  guardarRecetasEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly recetas: readonly RecetaEnLote[];
+    readonly combos: readonly ComponenteEnLote[];
+    readonly validFrom: Date;
+    readonly createdBy: UserId;
+  }): Promise<number>;
 
   /** La versión vigente a una fecha, o `null` si no hay ninguna activa. */
   recetaVigente(entrada: {

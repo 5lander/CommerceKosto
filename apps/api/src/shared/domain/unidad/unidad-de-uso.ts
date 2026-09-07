@@ -47,8 +47,19 @@ export class UnidadIncompatibleError extends Error {
   }
 }
 
+/**
+ * Si `codigo` es una unidad de uso bien formada.
+ *
+ * Existe para que quien valide un LOTE pueda decir «la fila 12 trae una unidad
+ * invalida» sin usar una excepcion como control de flujo ni copiarse la
+ * expresion regular a otro archivo, que es lo que `audit:duplication` caza.
+ */
+export function esUnidadDeUso(codigo: string): boolean {
+  return CODIGO_VALIDO.test(codigo);
+}
+
 export function unidadDeUso(codigo: string): UnidadDeUso {
-  if (!CODIGO_VALIDO.test(codigo)) throw new UnidadDeUsoInvalidaError(codigo);
+  if (!esUnidadDeUso(codigo)) throw new UnidadDeUsoInvalidaError(codigo);
   return codigo as UnidadDeUso;
 }
 

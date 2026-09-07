@@ -132,6 +132,29 @@ export default tseslint.config(
     },
   },
 
+  // --- El lector de hojas: JavaScript plano en un proceso aparte -----------
+  //
+  // Esta en JavaScript por una razon de EJECUCION —tiene que arrancar en un
+  // proceso hijo desde el fuente y desde `dist/`, y Node exige extension
+  // explicita para ejecutar TypeScript como ESM— no porque sus reglas sean mas
+  // laxas. Sus tipos viven en `lector.d.mts` y `tsc` comprueba a quien lo usa.
+  {
+    files: ['apps/*/parser/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: globals.node,
+    },
+    rules: {
+      // ES EL ARCHIVO QUE ABRE LA ENTRADA HOSTIL: nada de consola, que acabaria
+      // mezclada con el canal IPC por el que contesta.
+      'no-console': 'error',
+      eqeqeq: ['error', 'always'],
+      'no-var': 'error',
+      'prefer-const': 'error',
+    },
+  },
+
   // --- Tooling de auditoria y scripts: JavaScript con tipos JSDoc -----------
   {
     files: ['tools/**/*.mjs', 'scripts/**/*.mjs', '*.config.mjs'],

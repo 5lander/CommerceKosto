@@ -10,6 +10,7 @@
  */
 
 import { ErrorDeDominio, type CodigoDeDominio } from '../../../shared/domain/errors/error-de-dominio';
+import { mensajeDeProblemas, type ProblemaDelLote } from '../../../shared/domain/lote/problemas';
 
 /**
  * Un movimiento de cantidad cero.
@@ -225,5 +226,20 @@ export class ConteoNoConfirmadoError extends ErrorDeDominio {
       'Ese conteo todavia esta en borrador. Confirmalo antes de cerrar el periodo: ' +
         'un mes cerrado sin conteo confirmado no puede producir food cost real.',
     );
+  }
+}
+
+/**
+ * Un lote de movimientos que no se puede escribir, con todos sus problemas.
+ *
+ * El libro es append-only (R3): una vez dentro, una fila mala solo se arregla
+ * con otra de signo contrario. Por eso el lote se para ANTES de escribir nada y
+ * se devuelven todos los motivos de una vez.
+ */
+export class MovimientoDeLoteInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(public readonly problemas: readonly ProblemaDelLote[]) {
+    super(mensajeDeProblemas(problemas));
   }
 }

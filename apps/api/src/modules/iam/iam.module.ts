@@ -116,6 +116,8 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
   // `ListarUbicaciones` se exporta desde P9: el consolidado necesita saber
   // que ubicaciones tiene la company, y pedirlo por el caso de uso es lo que
   // mantiene el alcance de sesion aplicandose una sola vez y en un solo sitio.
-  exports: [ValidarSesion, ListarUbicaciones],
+  // `IniciarSesion` se exporta para el CLI de importacion, que abre su sesion
+  // por el MISMO camino que el navegador en vez de fabricarse una a mano.
+  exports: [IniciarSesion, ValidarSesion, ListarUbicaciones],
 })
 export class IamModule {}

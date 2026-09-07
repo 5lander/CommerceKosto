@@ -59,3 +59,14 @@ function esMasReciente(candidato: PrecioConVigencia, actual: PrecioConVigencia):
   // idénticas.
   return diferencia === 0 ? candidato.createdAt.getTime() > actual.createdAt.getTime() : diferencia > 0;
 }
+
+/**
+ * De donde sale un precio de referencia — D8.
+ *
+ * **VIVE EN EL DOMINIO Y NO EN EL PUERTO**, donde estaba antes. `EXTERNO` esta
+ * reservado para una fuente que D8 deja fuera de alcance y `ULTIMA_COMPRA` lo
+ * pone el sistema al registrar una compra: son tres origenes de negocio, no
+ * tres valores de una columna. Lo destapo `audit:arch` cuando el dominio del
+ * lote tuvo que mirar hacia `application` para encontrarlo.
+ */
+export type OrigenDePrecio = 'MANUAL' | 'ULTIMA_COMPRA' | 'EXTERNO';

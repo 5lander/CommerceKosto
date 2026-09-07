@@ -11,6 +11,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { matchesAny, normalizePath } from '../lib/glob.mjs';
 
 /** @typedef {{ruta: string, linea: number, extracto: string}} Hallazgo */
@@ -88,7 +90,71 @@ function esImagenSinFijar(texto) {
   return sinDigest && etiquetaMovil;
 }
 
+
+/**
+ * El archivo que un script invoca con `node`, o `null` si no invoca ninguno.
+ *
+ * SOLO SE MIRA `node <ruta>`, y es deliberado: un `prisma migrate deploy` o un
+ * `eslint .` los resuelve npm por su cuenta y comprobarlos aqui exigiria
+ * reimplementar esa resolucion. Lo que esta regla cubre es el caso que fallo
+ * dos veces —una ruta de archivo escrita a mano en el manifiesto— y no
+ * pretende cubrir mas.
+ *
+ * @param {string} comando
+ * @returns {string | null}
+ */
+function archivoInvocado(comando) {
+  const partes = comando.trim().split(/\s+/u);
+  if (partes[0] !== 'node') return null;
+
+  // Se salta las banderas: `node --watch dist/main.js`.
+  const objetivo = partes.slice(1).find((parte) => !parte.startsWith('-'));
+  if (objetivo === undefined) return null;
+
+  return /\.(mjs|cjs|js|ts)$/u.test(objetivo) ? objetivo : null;
+}
+
 export const repoRules = [
+  {
+    id: 'script-de-package-json-apunta-a-nada',
+    descripcion: 'Un script de `package.json` que invoca un archivo que no existe',
+    porQue:
+      'SEGUNDA VEZ. `db:psql` apuntaba a `scripts/psql-shell.mjs`, que no existia, desde P0 y durante nueve paquetes (INC-014). Despues, `dev` ejecutaba `node --watch --experimental-transform-types src/main.ts`, que no arranca porque el paquete es CommonJS con imports sin extension. Ninguno de los dos lo vio ningun check: `knip` analiza imports de TypeScript, no las rutas que los scripts invocan. Un script roto no se nota hasta que alguien lo necesita, y para entonces suele ser el peor momento.',
+    referencia: 'docs/incidencias/INC-014',
+    desde: 'P10',
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string, raiz: string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer, raiz }) {
+      const hallazgos = [];
+
+      for (const ruta of archivos.filter((r) => r.endsWith('package.json'))) {
+        if (ruta.includes('node_modules')) continue;
+
+        /** @type {{scripts?: Record<string, string>}} */
+        const manifiesto = JSON.parse(leer(ruta));
+        const base = ruta.split('/').slice(0, -1).join('/');
+
+        for (const [nombre, comando] of Object.entries(manifiesto.scripts ?? {})) {
+          const objetivo = archivoInvocado(comando);
+          if (objetivo === null) continue;
+
+          const absoluto = join(raiz, base, objetivo);
+          if (existsSync(absoluto)) continue;
+
+          hallazgos.push({
+            ruta,
+            linea: 0,
+            extracto: `"${nombre}": ${comando}  ->  no existe ${objetivo}`,
+          });
+        }
+      }
+
+      return hallazgos;
+    },
+  },
+
   {
     id: 'sin-env-versionado',
     descripcion: 'Un archivo `.env` bajo control de versiones',

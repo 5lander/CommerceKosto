@@ -32,6 +32,18 @@
 import { Money } from '../../../shared/domain/money/tipos-monetarios';
 import type { Count, Ratio } from '../../../shared/domain/money/tipos-monetarios';
 
+/**
+ * Que clase de producto es — SPEC §8.
+ *
+ * **VIVE EN EL DOMINIO Y NO EN EL PUERTO**, donde estaba antes. Es una regla de
+ * negocio: `SIMPLE` consume items, `COMBO` consume productos simples ya
+ * costeados, y de esa distincion depende que la merma no se cobre dos veces
+ * (R12). `audit:arch` lo destapo cuando el dominio del lote necesito el tipo y
+ * tuvo que mirar hacia `application` para encontrarlo — que es exactamente lo
+ * que la regla de dependencia prohibe.
+ */
+export type TipoDeProducto = 'SIMPLE' | 'COMBO';
+
 export type BaseDeLinea = 'AP' | 'EP';
 export type EstadoDeLinea = 'ACTIVA' | 'INACTIVA';
 

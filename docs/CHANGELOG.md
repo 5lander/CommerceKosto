@@ -4,6 +4,55 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P10 — Importación de catálogo, acotada a una migración operada · 2026-09-07
+
+**Objetivo:** que el catálogo de un cliente entre sin digitarlo, y que entre entero o no entre.
+
+**Alcance recortado por decisión del usuario, con fecha comercial encima.** No hay pantalla de
+subida, ni previsualización en dos pasos, ni deduplicación asistida: es un comando que un operador
+ejecuta con el archivo delante. Lo que sí se construyó entero es la pieza que no caduca.
+
+### Entregado
+
+- **Escritura EN LOTE en los cuatro módulos dueños**, una transacción por lote. Es lo que más vale
+  del paquete: antes, cada método de repositorio abría su propia transacción, así que 200 ítems eran
+  200 transacciones y **la fila 150 mala dejaba escritas las 149 buenas**. Y no se podía envolver
+  desde fuera: `Prisma.TransactionClient` no expone `$transaction`
+- **`combo_component` tiene por fin una ruta de escritura.** P4 creó la tabla, P5 la lee para
+  costear, y **entre P4 y P10 nadie insertó una fila**: un combo se podía crear y jamás componer, y
+  costaba cero. No lo destapó ninguna prueba — lo destapó preguntar qué representaba una columna de
+  un Excel
+- **D4 cerrada leyendo el archivo, no interpretándolo.** `LNK` no era un tipo de insumo: era el apaño
+  con el que el Excel armaba un combo (`=INDEX(V_COSTEO!$H, MATCH(...))` sobre el costo por porción
+  de un producto de venta). **ADR-014**
+- Migración `p10_importaciones`: `import_job` + `import_job_status` con RLS deny-by-default y
+  `FORCE`, ocho `CHECK` con sus guardas documentadas, y el permiso `import.write` **de nivel
+  company** — `GERENTE_LOCAL` no lo recibe
+- Descriptor `PRECIOS` nuevo, y `empaque` / `activo` en `PRODUCTOS`. Sin precio no hay costo, y sin
+  costo la sesión con el cliente no demuestra nada
+- **`npm run importar`**, ejecutando `dist/cli.js` (INC-017), con guarda de producción por bandera
+  explícita y **sesión abierta por el mismo camino que el login** — no hay ninguna ruta nueva que
+  fabrique una sesión sin credenciales
+- **ADR-013**: el parser en `.mjs` fuera de `src/`, en proceso hijo sin variables de entorno, con
+  plazo y techo de memoria. Y lo que **no** aporta: sin reintentos, sin DLQ, sin sandbox de sistema
+- **835 pruebas**: 558 unitarias con la base apagada + 277 de integración
+
+### Lo que la auditoría paró
+
+Cuatro cosas reales, ninguna arreglada bajando un umbral. La que más vale: **knip destapó que los
+topes de tamaño y de filas de `SEGURIDAD.md` §5.1 estaban escritos y no los aplicaba nadie.** Un
+check de código muerto encontró un agujero de seguridad.
+
+### Pendiente
+
+- **`npm run bench` re-fechado a después del lanzamiento.** Se fijó para P9, no se pagó; se re-fechó
+  a P10, tampoco. Dicho, no escondido
+- Alias del dialecto real del cliente: cuando llegue su archivo. La pasada de análisis no escribe
+- Prueba de similitud dominio ↔ `pg_trgm` (la diferencia de tildes)
+- P11, P13, P14 y P15 **pospuestos**, con su motivo en `ESTADO.md`
+
+---
+
 ## P9 — Consolidado de company y comparativa entre ubicaciones · 2026-09-06
 
 **Objetivo:** ver la cadena completa y comparar locales.

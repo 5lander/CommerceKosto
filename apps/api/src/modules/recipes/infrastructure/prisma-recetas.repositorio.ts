@@ -33,9 +33,13 @@ import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persis
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type { GrafoDeItems } from '../domain/ciclos';
 import type { BaseDeLinea, EstadoDeLinea } from '../domain/linea-de-receta';
+import type { ResultadoDeLote } from '../../../shared/application/lote';
+import { clavePorNombre, nombresQueChocan } from '../../../shared/domain/lote/problemas';
 import type {
   ComponenteDeCombo,
+  ComponenteEnLote,
   ConfiguracionEnUbicacion,
+  DatosDeProductoEnLote,
   DatosDePropagacionRegistrada,
   DatosDeVersion,
   DestinoDePropagacion,
@@ -45,6 +49,7 @@ import type {
   ProductoEnUbicacion,
   ProductoLeido,
   PropagacionLeida,
+  RecetaEnLote,
   RecetaLeida,
   RecetaVigenteLeida,
   RepositorioDeRecetas,
@@ -143,6 +148,83 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
         }
         throw error;
       }
+    });
+  }
+
+  /**
+   * TODO EL LOTE O NADA — un solo `run()`.
+   *
+   * Tres escrituras que tienen que ocurrir juntas: el producto, su empaque y su
+   * configuracion en la ubicacion. `createMany` no devuelve ids, asi que los
+   * productos se releen por nombre despues de crearlos —el indice unico
+   * `(company_id, name)` lo hace determinista— y con esos ids se escribe el
+   * resto.
+   */
+  public async crearProductosEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly productos: readonly DatosDeProductoEnLote[];
+  }): Promise<ResultadoDeLote> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      const existentes = await tx.product.findMany({
+        where: { companyId: datos.companyId },
+        select: { name: true },
+      });
+      const chocan = nombresQueChocan(
+        datos.productos.map((p) => p.nombre),
+        existentes.map((f) => f.name),
+      );
+      if (chocan.length > 0) return { clase: 'nombres_en_uso', nombres: chocan };
+
+      await tx.product.createMany({
+        data: datos.productos.map((producto) => ({
+          companyId: datos.companyId,
+          name: producto.nombre.trim(),
+          type: producto.tipo,
+          category: producto.categoria,
+          packagingItemId: producto.empaqueItemId,
+          status: ACTIVA,
+        })),
+      });
+
+      await activarEnUbicacion(tx, datos);
+
+      return { clase: 'escrito', filas: datos.productos.length };
+    });
+  }
+
+  /**
+   * TODO EL LOTE O NADA — recetas y componentes de combo en la misma
+   * transaccion.
+   *
+   * Los componentes van con `createMany`; las recetas, una a una, porque cada
+   * version necesita su `id` para colgarle las lineas.
+   */
+  public async guardarRecetasEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly recetas: readonly RecetaEnLote[];
+    readonly combos: readonly ComponenteEnLote[];
+    readonly validFrom: Date;
+    readonly createdBy: UserId;
+  }): Promise<number> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      for (const receta of datos.recetas) {
+        await escribirVersion(tx, datos, receta);
+      }
+
+      if (datos.combos.length > 0) {
+        await tx.comboComponent.createMany({
+          data: datos.combos.map((componente) => ({
+            companyId: datos.companyId,
+            comboProductId: componente.comboProductId,
+            componentProductId: componente.componentProductId,
+            cantidad: componente.cantidad,
+          })),
+        });
+      }
+
+      return datos.recetas.length + datos.combos.length;
     });
   }
 
@@ -678,4 +760,80 @@ function comoReceta(fila: FilaDeReceta): RecetaLeida {
     nota: fila.note,
     lineas: fila.lineas.map(comoLinea),
   };
+}
+
+/**
+ * Una version de receta con sus lineas, dentro de una transaccion que ya esta
+ * abierta. Es el cuerpo de `guardarVersion` sin el `run()`, para que el lote
+ * pueda escribir cuarenta y ocho dentro de una sola.
+ */
+async function escribirVersion(
+  tx: ClienteDeTransaccion,
+  datos: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly validFrom: Date;
+    readonly createdBy: UserId;
+  },
+  receta: RecetaEnLote,
+): Promise<void> {
+  const fila = await tx.recipe.create({
+    data: {
+      companyId: datos.companyId,
+      locationId: datos.locationId,
+      ...porDestino(receta.destino),
+      status: ACTIVA,
+      validFrom: datos.validFrom,
+      createdBy: datos.createdBy,
+      note: null,
+    },
+    select: { id: true },
+  });
+
+  if (receta.lineas.length === 0) return;
+
+  await tx.recipeLine.createMany({
+    data: receta.lineas.map((linea, orden) => ({
+      companyId: datos.companyId,
+      recipeId: fila.id,
+      itemId: linea.itemId,
+      cantidad: linea.cantidad,
+      base: linea.base,
+      estado: linea.estado,
+      orden,
+    })),
+  });
+}
+
+/**
+ * La configuracion de cada producto en la ubicacion, dentro de la transaccion
+ * que acaba de crearlos.
+ *
+ * Los ids se releen por nombre porque `createMany` no los devuelve, y el indice
+ * unico `(company_id, name)` hace que esa relectura sea determinista.
+ */
+async function activarEnUbicacion(
+  tx: ClienteDeTransaccion,
+  datos: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly productos: readonly DatosDeProductoEnLote[];
+  },
+): Promise<void> {
+  const creados = await tx.product.findMany({
+    where: { companyId: datos.companyId },
+    select: { id: true, name: true },
+  });
+  const porNombre = new Map(creados.map((f) => [clavePorNombre(f.name), f.id]));
+
+  await tx.productLocation.createMany({
+    data: datos.productos.map((producto) => ({
+      companyId: datos.companyId,
+      productId: porNombre.get(clavePorNombre(producto.nombre)) ?? '',
+      locationId: datos.locationId,
+      activo: producto.activo,
+      pvp: producto.pvp,
+      rendimientoPorciones: producto.rendimientoPorciones,
+    })),
+  });
 }

@@ -47,6 +47,7 @@ import {
   ConsultarConteoConfirmado,
 } from './application/casos-de-uso/para-analitica';
 import { REPOSITORIO_DE_CONTEOS } from './application/ports/repositorio-de-conteos.port';
+import { RegistrarMovimientosEnLote } from './application/casos-de-uso/lotes';
 import { REPOSITORIO_DE_INVENTARIO } from './application/ports/repositorio-de-inventario.port';
 import { DependenciasDeInventarioNest } from './infrastructure/dependencias-de-inventario';
 import {
@@ -187,8 +188,14 @@ type Deps = DependenciasDeInventarioNest;
       useFactory: (saldos: ConsultarSaldos, movimientos: ListarMovimientos): LecturasDelLibro =>
         new LecturasDelLibro(saldos, movimientos),
     },
+    {
+      provide: RegistrarMovimientosEnLote,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (deps: DependenciasDeInventarioNest): RegistrarMovimientosEnLote =>
+        new RegistrarMovimientosEnLote(deps),
+    },
   ],
-  exports: [
+  exports: [RegistrarMovimientosEnLote, 
     ConsultarSaldos,
     ListarMovimientos,
     LeerConciliacion,

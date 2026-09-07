@@ -29,6 +29,7 @@ import {
   ListarProductos,
   ListarVersionesDeReceta,
 } from './application/casos-de-uso/recetas';
+import { CrearProductosEnLote, GuardarRecetasEnLote } from './application/casos-de-uso/lotes';
 import { REPOSITORIO_DE_RECETAS } from './application/ports/repositorio-de-recetas.port';
 import { DependenciasDeRecetasNest } from './infrastructure/dependencias-de-recetas';
 import { EmpaqueController } from './infrastructure/http/empaque.controller';
@@ -98,7 +99,17 @@ type Deps = DependenciasDeRecetasNest;
           new RevertirPropagacion(d),
         ),
     },
+    {
+      provide: CrearProductosEnLote,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (deps: DependenciasDeRecetasNest): CrearProductosEnLote => new CrearProductosEnLote(deps),
+    },
+    {
+      provide: GuardarRecetasEnLote,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (deps: DependenciasDeRecetasNest): GuardarRecetasEnLote => new GuardarRecetasEnLote(deps),
+    },
   ],
-  exports: [LeerCarta, LeerReceta, ListarVersionesDeReceta],
+  exports: [CrearProductosEnLote, GuardarRecetasEnLote, LeerCarta, LeerReceta, ListarVersionesDeReceta],
 })
 export class RecipesModule {}

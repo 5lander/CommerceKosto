@@ -14,6 +14,7 @@
 import { Module } from '@nestjs/common';
 
 import { CrearArticulo, ListarArticulos } from './application/casos-de-uso/articulos';
+import { CrearArticulosEnLote, CrearItemsEnLote } from './application/casos-de-uso/lotes';
 import {
   ActualizarItem,
   CrearGrupo,
@@ -71,7 +72,19 @@ import { DependenciasDeCatalogoNest } from './infrastructure/dependencias-de-cat
       useFactory: (deps: DependenciasDeCatalogoNest): GestionDeGrupos =>
         new GestionDeGrupos(new CrearGrupo(deps), new ListarGrupos(deps)),
     },
+    {
+      provide: CrearItemsEnLote,
+      inject: [DependenciasDeCatalogoNest],
+      useFactory: (deps: DependenciasDeCatalogoNest): CrearItemsEnLote =>
+        new CrearItemsEnLote(deps),
+    },
+    {
+      provide: CrearArticulosEnLote,
+      inject: [DependenciasDeCatalogoNest],
+      useFactory: (deps: DependenciasDeCatalogoNest): CrearArticulosEnLote =>
+        new CrearArticulosEnLote(deps),
+    },
   ],
-  exports: [LeerItem, ListarItems, ListarArticulos],
+  exports: [CrearItemsEnLote, CrearArticulosEnLote, LeerItem, ListarItems, ListarArticulos],
 })
 export class CatalogModule {}

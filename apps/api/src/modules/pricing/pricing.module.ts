@@ -21,6 +21,7 @@ import {
   ResolverPrecio,
   SugerirPrecio,
 } from './application/casos-de-uso/precios';
+import { SugerirPreciosEnLote } from './application/casos-de-uso/lotes';
 import { REPOSITORIO_DE_PRECIOS } from './application/ports/repositorio-de-precios.port';
 import { DependenciasDePreciosNest } from './infrastructure/dependencias-de-precios';
 import { AjustesController } from './infrastructure/http/ajustes.controller';
@@ -78,7 +79,12 @@ import { PrismaPreciosRepositorio } from './infrastructure/prisma-precios.reposi
       useFactory: (deps: DependenciasDePreciosNest): ActualizarAjustes =>
         new ActualizarAjustes(deps),
     },
+    {
+      provide: SugerirPreciosEnLote,
+      inject: [DependenciasDePreciosNest],
+      useFactory: (deps: DependenciasDePreciosNest): SugerirPreciosEnLote => new SugerirPreciosEnLote(deps),
+    },
   ],
-  exports: [CostoDeItem, CostosDeItems, LeerAjustes],
+  exports: [SugerirPreciosEnLote, CostoDeItem, CostosDeItems, LeerAjustes],
 })
 export class PricingModule {}

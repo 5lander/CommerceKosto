@@ -414,6 +414,71 @@ Lo que sí le corresponde —SPEC §4 lo dice con estas palabras— es un semáf
 de uso y con su propio tipo.
 
 
+## La importación de catálogo (desde P10)
+
+**No es un autoservicio: es una migración operada.** No hay pantalla de subida ni confirmación en dos
+pasos. Un operador ejecuta `npm run importar` con el archivo delante, mira el informe y decide.
+
+```mermaid
+flowchart TD
+    A["npm run importar<br/>archivo.csv --tipo=ITEMS"] --> B{"NODE_ENV<br/>= production?"}
+    B -->|"si, sin --operacion-supervisada"| X["Se niega"]
+    B -->|no| C["IniciarSesion + ValidarSesion<br/>(el MISMO camino que el login)"]
+    C --> D{"tiene<br/>import.write?"}
+    D -->|no| X
+    D --> E["Tope de TAMANO<br/>SEGURIDAD.md 5.1"]
+    E --> F["fork: parser aislado<br/>sin env, 192 MB, 15 s"]
+    F --> G["Tope de FILAS"]
+    G --> H["analizar() con el descriptor<br/>NUNCA lanza: devuelve problemas"]
+    H --> I["import_job: ANALIZADA<br/>el analisis en jsonb"]
+    I --> J{"--confirmar?"}
+    J -->|no| K["Imprime el informe<br/>y no escribe NADA"]
+    J -->|si| L{"hay filas<br/>con problema?"}
+    L -->|si| K
+    L -->|no| M["Caso de uso de LOTE<br/>del modulo dueno"]
+    M --> N["UNA transaccion:<br/>todo o nada"]
+    N --> O["import_job: CONFIRMADA"]
+```
+
+### Quién escribe qué
+
+**`imports` no escribe ni una fila de negocio.** Traduce celdas y delega en el módulo dueño, que
+valida con sus propias reglas — un ítem importado tiene que ser indistinguible de uno creado a mano.
+Lo hace cumplir la regla `tablas-de-catalogo-solo-en-catalog` de `audit:forbidden`, que nombra a
+`imports` explícitamente.
+
+| Tipo | Módulo dueño | Caso de uso |
+|---|---|---|
+| `ITEMS` | `catalog` | `CrearItemsEnLote` — crea también los grupos que falten |
+| `ARTICULOS` | `catalog` | `CrearArticulosEnLote` — el factor lo calcula el dominio |
+| `PRECIOS` | `pricing` | `SugerirPreciosEnLote` — nacen sugeridos (R5) |
+| `PRODUCTOS` | `recipes` | `CrearProductosEnLote` — producto + PVP + empaque |
+| `RECETAS` | `recipes` | `GuardarRecetasEnLote` — **recetas y componentes de combo** |
+| `MOVIMIENTOS` | `inventory` | `RegistrarMovimientosEnLote` |
+
+### Lo que hace que «todo o nada» sea cierto, y hasta dónde llega
+
+Cada caso de uso de lote abre **un solo `TenantTransaction.run()`** y escribe dentro. Antes de eso, el
+dominio valida el lote **entero** y devuelve todos los problemas con su posición — no el primero,
+porque quien migra un catálogo arregla el archivo de una pasada.
+
+**El límite, dicho en voz alta:** la atomicidad es **por pasada**, no entre módulos.
+`ClienteDeTransaccion` no expone `$transaction`, así que una transacción no puede contener a otra.
+Importar ítems y luego precios son dos transacciones. Lo compensa el orden —validar todo antes de
+escribir nada—, y lo que queda expuesto es un fallo de infraestructura entre pasadas.
+
+### Cómo se distingue una receta de un combo
+
+**Por el tipo del producto destino, no por una columna.** SPEC §8: un `SIMPLE` consume ítems, un
+`COMBO` consume productos simples ya costeados. Una línea cuyo destino es un combo se escribe en
+`combo_component`; si fuera a `recipe_line`, se le volvería a aplicar el rendimiento y la provisión de
+merma, que es lo que R12 prohíbe (ADR-008 §14).
+
+Un combo no puede contener otro combo: es lo que «componentes que son productos simples» significa, y
+es lo que hace innecesario validar ciclos ahí.
+
+---
+
 ## El proceso de la API por dentro (desde P0)
 
 Lo que atraviesa una petición, en orden. Las cuatro protecciones globales se registran en `AppModule`/`bootstrap.ts`, de modo que **las pruebas levantan exactamente la misma aplicación que se despliega**: una defensa cableada solo en `main.ts` no existe en los tests, y entonces el test de que existe no prueba nada.

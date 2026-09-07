@@ -1,0 +1,52 @@
+/**
+ * Errores de `imports`. Todos son de dominio: no saben de HTTP.
+ *
+ * **LO QUE SE LE DICE A QUIEN SUBIÓ UN ARCHIVO ES DELIBERADAMENTE POCO.** Un
+ * archivo es entrada hostil (CLAUDE.md §4.6): decir «detecté un ZIP cifrado» o
+ * «el plazo se agotó a los 15 segundos» convierte al importador en un detector
+ * de formatos y en un cronómetro que cualquiera puede consultar desde fuera. El
+ * detalle para diagnosticar va al log; aquí va lo accionable.
+ *
+ * **LOS PROBLEMAS DE UNA FILA NO SON ERRORES.** Viajan dentro del `Analisis`,
+ * porque un archivo con cuarenta filas malas no es un fallo: es un archivo del
+ * que se pueden importar las buenas y arreglar el resto. Solo lo que impide
+ * analizar —o escribir— llega hasta aquí.
+ */
+
+import { ErrorDeDominio, type CodigoDeDominio } from '../../../shared/domain/errors/error-de-dominio';
+
+/** El archivo no se pudo leer, o lo leído no se puede escribir. */
+export class ArchivoIlegibleError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+}
+
+export class ArchivoDemasiadoGrandeError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(limiteMb: number) {
+    super(`El archivo supera el máximo de ${String(limiteMb)} MB.`);
+  }
+}
+
+export class DemasiadasFilasError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(limite: number) {
+    super(`El archivo trae más de ${String(limite)} filas. Divídelo en varios.`);
+  }
+}
+
+/**
+ * El proceso hijo se pasó del plazo y se le mató.
+ *
+ * No dice cuánto tardó ni qué estaba haciendo: un archivo hostil no debe poder
+ * medir el plazo desde fuera. Para quien lo subió, el mensaje útil es el mismo
+ * en los dos casos: es demasiado grande o está mal formado.
+ */
+export class AnalisisAgotadoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('El archivo tardó demasiado en procesarse. Puede ser demasiado grande o estar dañado.');
+  }
+}

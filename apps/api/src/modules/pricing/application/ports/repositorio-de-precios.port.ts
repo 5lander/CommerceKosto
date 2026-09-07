@@ -22,7 +22,10 @@ import type {
 
 export const REPOSITORIO_DE_PRECIOS = 'REPOSITORIO_DE_PRECIOS';
 
-export type OrigenDePrecio = 'MANUAL' | 'ULTIMA_COMPRA' | 'EXTERNO';
+import type { OrigenDePrecio } from '../../domain/vigencia';
+
+// Se reexporta para que quien ya lo importaba de aqui no tenga que cambiar.
+export type { OrigenDePrecio };
 export type DecisionSobrePrecio = 'CONFIRMED' | 'REJECTED';
 
 /**
@@ -62,6 +65,21 @@ export interface DatosParaSugerir {
 
 export type ResultadoDeResolucion = 'resuelto' | 'no_encontrado' | 'ya_resuelto';
 
+/**
+ * Un precio dentro de un LOTE. Llega con los ids ya resueltos: quien los
+ * resuelve es el caso de uso, leyendo el catalogo por sus puertos — `pricing`
+ * no puede consultar `item` ni `purchase_article`, y `audit:forbidden` lo
+ * impide con la regla `tablas-de-catalogo-solo-en-catalog`.
+ */
+export interface DatosDePrecioEnLote {
+  readonly itemId: ItemId;
+  readonly purchaseArticleId: PurchaseArticleId | null;
+  readonly precio: string;
+  readonly ivaCompra: string;
+  readonly origen: OrigenDePrecio;
+  readonly nota: string | null;
+}
+
 export interface RepositorioDePrecios {
   ajustes(companyId: CompanyId): Promise<AjustesDeCompany | null>;
 
@@ -71,6 +89,22 @@ export interface RepositorioDePrecios {
   }): Promise<void>;
 
   sugerir(datos: DatosParaSugerir): Promise<ReferencePriceId>;
+
+  /**
+   * Escribe TODO el lote o nada, en **una sola transaccion**.
+   *
+   * `confirmar` decide si nacen sugeridos o ya vigentes. **No es un atajo sobre
+   * R5**: lo pone a `true` una persona, explicitamente, al cargar el archivo, y
+   * el caso de uso lo deja escrito en el log de auditoria. Ver `domain/lote.ts`.
+   */
+  sugerirEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly precios: readonly DatosDePrecioEnLote[];
+    readonly validFrom: Date;
+    readonly createdBy: UserId;
+    readonly confirmar: boolean;
+    readonly ahora: Date;
+  }): Promise<number>;
 
   /**
    * Confirma o rechaza, **solo si sigue sugerido**. La condición va en el

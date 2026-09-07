@@ -162,6 +162,7 @@ model Company {
   lineasDeConteo        PhysicalCountLine[]
   ventas                ProductSales[]
   costosFijos           FixedCost[]
+  importaciones         ImportJob[]
 
   @@map("company")
 }
@@ -297,6 +298,7 @@ model AppUser {
   conteosCreados     PhysicalCount[] @relation("conteos_creados")
   conteosConfirmados PhysicalCount[] @relation("conteos_confirmados")
   ventasCargadas     ProductSales[]
+  importacionesSubidas ImportJob[]
   costosCargados     FixedCost[]
 
   @@index([companyId, status])
@@ -1419,4 +1421,57 @@ model FixedCost {
   @@unique([periodId, concept])
   @@index([companyId, periodId])
   @@map("fixed_cost")
+}
+
+/// El catalogo de estados de una importacion — enum en tabla, no nativo (D5).
+model ImportJobStatus {
+  code String @id
+
+  importaciones ImportJob[]
+
+  @@map("import_job_status")
+}
+
+/// Una importacion: el archivo subido, su analisis y su desenlace.
+///
+/// **EL ANALISIS SE GUARDA, Y ESO ES LA DECISION.** Confirmar NO vuelve a
+/// parsear el archivo: escribe exactamente lo que la previsualizacion enseño.
+/// Volver a parsear seria abrir la puerta a que lo escrito no sea lo visto —el
+/// catalogo pudo cambiar entre medias, y el usuario aprobo una propuesta
+/// concreta, no «lo que salga de este archivo».
+///
+/// Es una CACHE de un analisis, no una fuente de verdad: si se pierde, se
+/// vuelve a subir el archivo. Por eso vive en `jsonb` y no en tablas.
+model ImportJob {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+
+  /// Que se esta importando: ITEMS, ARTICULOS, PRODUCTOS, RECETAS, MOVIMIENTOS.
+  kind   String
+  status String
+
+  /// La clave del archivo en el almacenamiento. **UUID generado por el
+  /// sistema**, nunca el nombre original (SEGURIDAD.md §5.3).
+  storageKey String @map("storage_key")
+  /// El nombre que trajo el archivo, SOLO para enseñarselo al usuario. No se
+  /// usa para nada mas: no abre ninguna ruta ni decide ningun formato.
+  originalName String @map("original_name")
+  byteSize     Int    @map("byte_size")
+
+  /// El analisis completo. `null` mientras no se ha analizado.
+  analysis Json? @db.JsonB
+
+  /// Cuantas filas se escribieron al confirmar. `null` si no se confirmo.
+  writtenRows Int? @map("written_rows")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String    @map("created_by") @db.Uuid
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  autor   AppUser         @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  estado  ImportJobStatus @relation(fields: [status], references: [code])
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("import_job")
 }

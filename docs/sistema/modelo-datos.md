@@ -726,7 +726,26 @@ consolidado multiplique el coste por el número de ubicaciones.
 | **P6** | `inventory_movement`, `inventory_transfer`, `inventory_production` + `inventory_movement_type`. **No hay `inventory_balance`**, y era lo previsto: el saldo es una agregación sobre el libro, no una tabla — R3 | ✅ |
 | **P7** | `period`, `physical_count`, `physical_count_line` + `period_status`, `physical_count_status`. **El conteo no ajusta el libro**: no hay clave foránea de `inventory_movement` hacia aquí, y confirmar no escribe ni un movimiento | ✅ |
 | **P8** | `product_sales`, `fixed_cost` + `fixed_cost_classification`. **Ninguna tabla derivada**: las seis vistas se calculan al vuelo sobre un contexto único por (ubicación, mes). Las materializadas de período cerrado se aplazan a P9 | ✅ |
-| P10 | `import_job`, `import_row` | ⬜ |
+| P10 | `import_job`, `import_job_status` | ✅ |
+
+**`import_row` no existe, y es una decisión.** El plan la listaba; el análisis vive en un `jsonb`
+dentro de `import_job` porque es una **cache de algo reproducible** —si se pierde, se vuelve a subir
+el archivo— y no una fuente de verdad. Una tabla de filas obligaría a mantener en SQL una estructura
+que vive en `imports/domain/analisis.ts` y cambia con los descriptores.
+
+**`import_job` es el RASTRO, no la importación.** No tiene ni una clave foránea hacia lo importado:
+si la tuviera, borrar un ítem obligaría a decidir qué hacer con su historia. Las filas importadas las
+escriben los módulos dueños.
+
+Sus dos invariantes viven en `CHECK`, y son las que hacen que el rastro valga algo:
+`import_job_confirmada_es_coherente` (confirmada **si y solo si** hay fecha y hay recuento) e
+`import_job_analizada_tiene_analisis` (no se confirma lo que nadie analizó). Categorías y guardas en
+`docs/sistema/guardas-de-dominio.md`.
+
+**Privilegios:** `import_job` lleva `GRANT UPDATE` —desviación respecto de P8, justificada en el
+bloque manual de la migración: aquí la unidad es un archivo y su fila tiene identidad, recorre
+`SUBIDA → ANALIZADA → CONFIRMADA`—. **No lleva `DELETE`**: una importación descartada sigue siendo
+algo que pasó.
 | P11 | `plan`, `subscription`, `cross_tenant_access_log` | ⬜ |
 
 ## Índices

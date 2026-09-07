@@ -63,6 +63,47 @@ Reglas que el esquema de entorno hace cumplir por su cuenta:
 - `DATABASE_URL` debe usar el rol `costeo_app`. Con cualquier otro, no arranca.
 - `costeo_shadow` **no existe en producción**: `migrate deploy` no la usa.
 
+## Cargar el catálogo de un cliente en producción
+
+El importador **se niega a correr con `NODE_ENV=production`**. Es deliberado: un `--company` copiado
+del sitio equivocado escribe cientos de filas en la base de otro. Para la carga inicial de un cliente
+—que sí ocurre en producción— la vía es explícita y queda registrada.
+
+```bash
+export COSTEO_IMPORT_PASSWORD='<la contrasena del usuario que carga>'
+
+npm run importar -- <archivo.csv> --tipo=ITEMS   --company=<uuid> --ubicacion=<uuid> --usuario=<correo>   --operacion-supervisada --confirmar
+```
+
+`--operacion-supervisada` **no basta por sí sola**: sin `--confirmar` sigue sin escribir. Antes de
+tocar nada imprime contra qué base va, con qué company y con qué usuario — **léelo**:
+
+```
+*** OPERACION SUPERVISADA CONTRA PRODUCCION ***
+Base:    postgresql://<host>:5432/costeo
+Company: 0198...
+Usuario: admin@cliente.ec
+```
+
+**Orden de las pasadas.** No es arbitrario: cada una necesita lo que puso la anterior.
+
+```
+ITEMS  ->  ARTICULOS  ->  PRECIOS  ->  PRODUCTOS  ->  RECETAS  ->  MOVIMIENTOS
+```
+
+**Corre cada pasada primero SIN `--confirmar`.** Imprime el informe con fila y columna de cada
+problema y no escribe nada. Solo cuando el informe salga limpio, repite con `--confirmar`.
+
+**Los precios nacen sugeridos.** Añade `--confirmar-precios` en la pasada de `PRECIOS` para dejarlos
+vigentes; sin eso el costeo no devuelve número. Es un acto explícito porque R5 lo exige, y queda en
+el log de auditoría con el nombre de quien lo hizo.
+
+**Si una pasada falla, no escribió nada** — es todo o nada dentro de la pasada. Lo que sí puede pasar
+es que fallen las pasadas 3 en adelante con las dos primeras ya dentro: el comando dice cuáles se
+aplicaron.
+
+---
+
 ## Revertir un despliegue
 
 ```sh

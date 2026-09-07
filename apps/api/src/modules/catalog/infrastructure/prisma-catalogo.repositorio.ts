@@ -27,9 +27,18 @@ import {
 } from '../../../shared/domain/identity/identificadores';
 import { Ratio } from '../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../shared/domain/unidad/unidad-de-uso';
+import type { ResultadoDeLote } from '../../../shared/application/lote';
+import {
+  clavePorNombre,
+  nombresQueChocan,
+  nombresUnicos,
+} from '../../../shared/domain/lote/problemas';
+import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
   ArticuloLeido,
+  DatosDeArticuloEnLote,
+  DatosDeItemEnLote,
   DatosParaActualizarItem,
   DatosParaCrearArticulo,
   DatosParaCrearItem,
@@ -264,6 +273,101 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
       }));
     });
   }
+
+  /**
+   * TODO EL LOTE O NADA — un solo `run()`, una sola transaccion.
+   *
+   * EL ORDEN IMPORTA Y NO ES ARBITRARIO:
+   *
+   *   1. leer los nombres que ya existen y devolverlos SIN escribir nada
+   *   2. asegurar los grupos que faltan
+   *   3. `createMany` de los items, en UNA sentencia
+   *
+   * El paso 1 existe para poder decir QUE nombres chocan. Dejar que el indice
+   * unico lo descubra daria un `P2002` que solo nombra la restriccion, y quien
+   * migra doscientos items necesita la lista, no el codigo de error.
+   *
+   * Sigue habiendo `catch` de duplicado como respaldo: entre la lectura y la
+   * escritura cabe otra transaccion. Con RLS y `FORCE`, todo esto ocurre dentro
+   * del tenant fijado por `run`.
+   */
+  public async crearItemsEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly items: readonly DatosDeItemEnLote[];
+  }): Promise<ResultadoDeLote> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      const existentes = await tx.item.findMany({
+        where: { companyId: datos.companyId },
+        select: { name: true },
+      });
+      const chocan = nombresQueChocan(
+        datos.items.map((i) => i.nombre),
+        existentes.map((f) => f.name),
+      );
+      if (chocan.length > 0) return { clase: 'nombres_en_uso', nombres: chocan };
+
+      const grupos = await asegurarGrupos(tx, datos.companyId, datos.items);
+
+      await tx.item.createMany({
+        data: datos.items.map((item) => ({
+          companyId: datos.companyId,
+          name: item.nombre.trim(),
+          type: item.tipo,
+          unitOfUse: item.unidadDeUso,
+          yield: item.rendimiento,
+          groupId: item.grupo === null ? null : (grupos.get(clavePorNombre(item.grupo)) ?? null),
+          status: ESTADO_ACTIVO,
+          priceConfidence: item.confianzaDePrecio,
+          keepsStock: item.llevaStock,
+        })),
+      });
+
+      return { clase: 'escrito', filas: datos.items.length };
+    });
+  }
+
+  /**
+   * TODO EL LOTE O NADA. Ver `crearItemsEnLote`.
+   *
+   * Los articulos apuntan a su item POR NOMBRE, que es lo que trae un archivo.
+   * Un nombre que no exista es un problema del lote y se devuelve como choque
+   * invertido: `nombres_en_uso` lleva aqui los items que FALTAN, y el caso de
+   * uso lo traduce. Es el unico sitio donde la union significa dos cosas, y por
+   * eso el caso de uso no la reenvia tal cual.
+   */
+  public async crearArticulosEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly articulos: readonly DatosDeArticuloEnLote[];
+  }): Promise<ResultadoDeLote> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      const items = await tx.item.findMany({
+        where: { companyId: datos.companyId },
+        select: { id: true, name: true },
+      });
+      const porNombre = new Map(items.map((f) => [clavePorNombre(f.name), f.id]));
+
+      const faltan = datos.articulos
+        .map((a) => a.item)
+        .filter((nombre) => !porNombre.has(clavePorNombre(nombre)));
+      if (faltan.length > 0) return { clase: 'nombres_en_uso', nombres: nombresUnicos(faltan) };
+
+      await tx.purchaseArticle.createMany({
+        data: datos.articulos.map((articulo) => ({
+          companyId: datos.companyId,
+          itemId: porNombre.get(clavePorNombre(articulo.item)) ?? '',
+          name: articulo.nombre.trim(),
+          brand: articulo.marca,
+          supplier: articulo.proveedor,
+          presentationAmount: articulo.presentacion,
+          presentationUnit: articulo.unidadDePresentacion,
+          conversionFactor: articulo.factorDeConversion,
+          status: ESTADO_ACTIVO,
+        })),
+      });
+
+      return { clase: 'escrito', filas: datos.articulos.length };
+    });
+  }
 }
 
 const CAMPOS_DE_ITEM = {
@@ -300,4 +404,34 @@ function comoItemLeido(fila: {
     confianzaDePrecio: fila.priceConfidence,
     llevaStock: fila.keepsStock,
   };
+}
+
+
+/**
+ * Crea los grupos que el lote menciona y no existen, y devuelve el mapa
+ * completo de nombre normalizado a id.
+ *
+ * `skipDuplicates` evita tener que restar conjuntos con cuidado: se piden
+ * todos, la base ignora los que ya estan. Despues se relee, porque
+ * `createMany` no devuelve ids.
+ */
+async function asegurarGrupos(
+  tx: ClienteDeTransaccion,
+  companyId: CompanyId,
+  items: readonly DatosDeItemEnLote[],
+): Promise<ReadonlyMap<string, string>> {
+  const nombres = nombresUnicos(items.flatMap((item) => (item.grupo === null ? [] : [item.grupo])));
+  if (nombres.length === 0) return new Map();
+
+  await tx.itemGroup.createMany({
+    data: nombres.map((name) => ({ companyId, name })),
+    skipDuplicates: true,
+  });
+
+  const filas = await tx.itemGroup.findMany({
+    where: { companyId },
+    select: { id: true, name: true },
+  });
+
+  return new Map(filas.map((f) => [clavePorNombre(f.name), f.id]));
 }

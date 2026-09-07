@@ -8,31 +8,99 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P9 cerrado.**
-**Fase del protocolo:** CIERRE de P9
-**Último commit:** `P9: Consolidado de company` (P8 `0067bd1`, P7 `72f0ba1`, P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
-**Fecha de última actualización:** 2026-09-06
+**Paquete en curso:** ninguno — **P10 cerrado.**
+**Fase del protocolo:** CIERRE de P10
+**Último commit:** `P10: Importación de catálogo` (P9 `47f1e7d`, P8 `0067bd1`, P7 `72f0ba1`, P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
+**Fecha de última actualización:** 2026-09-07
+
+### EL PROYECTO CAMBIÓ DE MODO — leer esto antes que nada
+
+**Hay fecha comercial: la semana que viene un restaurante tiene que estar usando el sistema.** Eso
+cambió el ALCANCE, no el estándar del motor. Decisión del usuario, no negociable:
+
+| Pospuesto | Motivo |
+|---|---|
+| **P11 y P13** (back office, API y frontend) | Con un cliente, el back office es el usuario. Crear el tenant es un seed |
+| **P10 como autoservicio** | Sin UI de subida, previsualización, deduplicación ni confirmación en dos pasos. Lo que se construyó es un comando |
+| **P14** (capa visual / manual de marca) | Frontend sobrio y consistente, sin identidad de marca |
+| **P15 completo** | Las tres barreras y la confidencialidad de BODEGA siguen vigentes en el motor. El endurecimiento de escala se pospone |
+
+**Y lo que cambió del protocolo, solo esto:** `apps/api` conserva las 7 fases, la auditoría completa
+y un commit por paquete. **El frontend no lleva las 7 fases** —allí no hay lógica de negocio, así que
+la auditoría de ~100 verificaciones protege poco y cuesta mucho—: tipos, lint, y que la pantalla haga
+lo que dice. **Un commit por PANTALLA**, no por paquete.
+
+Lo que NO cambia en ningún sitio: nada de `any`, dinero y cantidades nunca en punto flotante,
+decimales cruzando fronteras como string, cero lógica de negocio en el frontend, sin dependencias
+nuevas sin autorización, sin `--no-verify`.
 
 ### Dónde se retoma exactamente
 
-**Diez paquetes cerrados: P0 a P9.** El siguiente es **P10 — Importación Excel/CSV**, y necesita confirmación del usuario antes de empezar.
+**Once paquetes cerrados: P0 a P10.** Lo siguiente es la **Fase B — desplegar**, y empieza con una
+**parada entera**: no se ejecuta nada de infraestructura hasta que el usuario apruebe opciones con
+coste mensual real.
 
-**El backend de negocio está completo.** Lo que queda son las dos superficies que faltan —importación y frontend— más el endurecimiento final.
-
-**Hecho en P9 — completo**
+**Hecho en P10 — completo**
 
 | # | Entregable | Estado |
 |---|---|---|
-| 1 | Consolidado de company: agrega las ocho magnitudes de todas las ubicaciones | ✅ |
-| 2 | **Los porcentajes se recalculan sobre los totales, nunca se promedian** | ✅ |
-| 3 | Una ubicación sin datos se aparta y se nombra: **no suma cero** | ✅ |
-| 4 | El consolidado dice el estado del período de cada ubicación (ADR-010 §1) | ✅ |
-| 5 | Comparativa del mismo producto entre ubicaciones, con su dispersión | ✅ |
-| 6 | Comparativa de precios de compra **desde el libro**, por ubicación y artículo | ✅ |
-| 7 | Permiso de nivel company: `GERENTE_LOCAL` recibe 403 en las tres rutas | ✅ |
-| 8 | **ADR-012** con las siete decisiones | ✅ |
-| 9 | **727 pruebas**: 457 unitarias con la base apagada + 270 de integración | ✅ |
-| 10 | Presupuesto de §5 medido en topología de producción: **734 ms de 800** | ✅ |
+| 1 | Migración `p10_importaciones`: `import_job` + `import_job_status`, RLS deny-by-default y FORCE | ✅ |
+| 2 | **Escritura EN LOTE en los cuatro módulos dueños**, una transacción por lote | ✅ |
+| 3 | **Escritura de `combo_component`** — la tabla existía desde P4 y nadie la había escrito nunca | ✅ |
+| 4 | Descriptor `PRECIOS` y columnas `empaque` / `activo` en `PRODUCTOS` | ✅ |
+| 5 | `npm run importar`, con guarda de producción y sesión por el camino del login | ✅ |
+| 6 | **D4 cerrada** — ADR-014. No quedan decisiones 🔴 | ✅ |
+| 7 | **ADR-013** (parser aislado) y **ADR-014** (`LNK` era un componente de combo) | ✅ |
+| 8 | **835 pruebas**: 558 unitarias con la base apagada + 277 de integración | ✅ |
+
+### Lo que un «tú» futuro necesita saber de P10
+
+**1. `combo_component` llevaba seis paquetes existiendo sin que nadie la escribiera.**
+P4 creó la tabla, P5 la lee para costear (`componentesDeCombos`) y **entre P4 y P10 no se insertó una
+sola fila**. Un combo se podía crear como producto y no se podía componer nunca: costaba cero.
+Ninguna prueba lo vio porque ninguna creaba un combo con componentes. **Lo destapó preguntar qué
+representaba una columna de un Excel**, no una revisión de código.
+
+La lección, que es nueva: **una tabla con lectura y sin escritura es un agujero que ningún check ve.**
+`audit:deadcode` mira exports de TypeScript, no rutas de escritura a la base. Si un día se añade una
+tabla y solo se cablea su lectura, va a pasar otra vez.
+
+**2. La transacción por método era el fallo, y no se podía envolver desde fuera.**
+Cada método de repositorio abre su propia `TenantTransaction.run()`. 200 ítems = 200 transacciones.
+Y `ClienteDeTransaccion` es `Prisma.TransactionClient`, que **no expone `$transaction`**: no hay
+forma de que una transacción contenga a otra. La solución fue un método de repositorio nuevo por
+módulo. **La atomicidad es por pasada, no entre módulos**, y eso no se puede arreglar con este ORM.
+
+**3. Un check de CÓDIGO MUERTO encontró un agujero de SEGURIDAD.**
+knip señaló `MAXIMO_BYTES` y `MAXIMO_DE_FILAS` como exports sin usar. No eran código muerto: eran los
+topes de `SEGURIDAD.md` §5.1 **declarados y desconectados**. Estaban escritos desde que se escribió
+el parser y no los aplicaba nadie. Es INC-007 al revés: no es que el verde mienta, es que el rojo
+dice más de lo que parece. **Cuando knip señale una constante de configuración, pregunta si es que
+sobra o es que no se aplicó.**
+
+**4. `audit:arch` corrigió el sitio de dos tipos de negocio.**
+`TipoDeProducto` y `OrigenDePrecio` vivían en los puertos. Son reglas —SPEC §8 y D8—, y el dominio
+del lote los necesitaba: la regla de dependencia lo paró y se mudaron al dominio, con el puerto
+reexportándolos. **Cuando el dominio necesita un tipo que está en `application`, casi siempre el tipo
+está en el sitio equivocado.**
+
+**5. El CLI abre sesión con contraseña, por el mismo camino que el navegador.**
+La alternativa —un atajo que fabricara una `SesionActiva` sin credenciales— era una puerta que no
+existe en ningún otro sitio del sistema, y bastaría con que alguien la expusiera un día por HTTP.
+Con `IniciarSesion` + `ValidarSesion` no hay puerta nueva, y se hereda el bloqueo por intentos y el
+registro en `audit_log`. **La contraseña llega por `COSTEO_IMPORT_PASSWORD`.**
+
+**6. El importador se niega en producción, y la salida es una bandera explícita.**
+`--operacion-supervisada` levanta la negativa, exige además `--confirmar`, e imprime contra qué base
+va a escribir antes de hacerlo. El procedimiento completo está en `docs/runbooks/despliegue.md`. Se
+resolvió en P10 a propósito: dejarlo para el día del despliegue habría costado la tarde.
+
+**7. Lo que se aplazó del importador, y por qué se puede aplazar.**
+El primer cliente **no es el dueño del Excel de referencia**, así que el importador **no aprende su
+dialecto**: ni alias de cabecera ni el mapeo `INS`/`SUP`/`SUB`/`LNK`. Sería vocabulario de un archivo
+que no se va a importar. **La pasada de análisis no escribe nada** y ya reporta columnas no
+reconocidas y obligatorias ausentes: cuando llegue el archivo real, ajustar los alias es media hora
+sin tocar el camino de escritura.
 
 ### Lo que un «tú» futuro necesita saber de P9
 
@@ -138,16 +206,16 @@ Lo implementado:
 |---|---|---|
 | `audit:types` | ✅ | |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | 30 reglas sobre **261 archivos**. **Paró un atajo real en P9** |
-| `audit:arch` | ✅ | 226 módulos, 1005 dependencias. **Paró un ciclo real** en P8 |
-| `audit:deadcode` | ✅ | Sin ninguna lista blanca |
+| `audit:forbidden` | ✅ | 31 reglas sobre **303 archivos**. **Paró un `as unknown as` real en P10** |
+| `audit:arch` | ✅ | 267 módulos, 1171 dependencias. **Paró dos tipos que vivían en la capa equivocada** |
+| `audit:deadcode` | ✅ | Sin lista blanca. **Destapó dos límites de seguridad desconectados** |
 | `audit:complexity` | ✅ | |
-| `audit:duplication` | ✅ | **0 clones.** Cazó la cuarta repetición del bloque de auditoría |
-| `audit:migrations` | ✅ | M1–M11 · **10 migraciones** |
+| `audit:duplication` | ✅ | **0 clones.** Cazó dos en P10 |
+| `audit:migrations` | ✅ | M1–M11 · **11 migraciones** |
 | `audit:secrets` | ✅ | |
 | `audit:deps` | ✅ | |
 | `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | **457 unitarias** (sin base) + **270 de integración**; 5 saltadas con motivo — las de tiempo, que solo se exigen en CI (INC-016) |
+| `audit:tests` | ✅ | **558 unitarias** (sin base) + **277 de integración**; 5 saltadas con motivo (INC-016) |
 
 ## Progreso
 
@@ -161,16 +229,16 @@ Lo implementado:
 | P5 — MOTOR DE COSTEO ⭐ | ✅ Completado | `e5e3f7d` | 2026-09-04 |
 | P6 — Inventario · libro mayor append-only | ✅ Completado | `16200e5` | 2026-09-04 |
 | P7 — Períodos · conteo físico | ✅ Completado | `72f0ba1` | 2026-09-04 |
-| **P8 — Vistas analíticas** | ✅ Completado | *(el de este paquete)* | 2026-09-04 |
-| P9 — Consolidado y comparativa | ⬜ Pendiente | — | — |
-| P10 — Importación Excel/CSV | ⬜ Pendiente | — | — |
-| P11 — Back office | ⬜ Pendiente | — | — |
-| P12 — Frontend app cliente | ⬜ Pendiente | — | — |
-| P13 — Frontend back office | ⬜ Pendiente | — | — |
-| P14 — Capa visual | ⬜ Pendiente | — | — |
-| P15 — Endurecimiento | ⬜ Pendiente | — | — |
+| P8 — Vistas analíticas | ✅ Completado | `0067bd1` | 2026-09-04 |
+| P9 — Consolidado y comparativa | ✅ Completado | `47f1e7d` | 2026-09-06 |
+| **P10 — Importación de catálogo, acotada** | ✅ Completado | *(el de este paquete)* | 2026-09-07 |
+| P11 — Back office | ⏸️ **POSPUESTO** | — | Con un cliente, el back office es el usuario |
+| P12 — Frontend app cliente | 🟡 **Siguiente, recortado a 5 pantallas** | — | Fase C del sprint |
+| P13 — Frontend back office | ⏸️ **POSPUESTO** | — | No hay back office que operar |
+| P14 — Capa visual | ⏸️ **POSPUESTO** | — | Frontend sobrio, sin identidad de marca |
+| P15 — Endurecimiento | ⏸️ **POSPUESTO** | — | El aislamiento sigue vigente; la escala se pospone |
 
-Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado con pendientes
+Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto con motivo
 
 ---
 
@@ -219,6 +287,14 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 | 37 | **T6 lleva clasificación explícita**, no el prefijo del concepto | P8 | Lo pide el propio SPEC §17: «Nómina» quedaría fuera del prime cost sin avisar. **ADR-011** |
 | 38 | **`BODEGA` no recibe ninguna de las seis vistas**, solo el semáforo | P8 | Todas llevan consumo o stock teórico (§4.3). Tercera vez que aparece la misma asimetría. **ADR-011** |
 | 39 | **Las unidades vendidas son un entero** (`Count`), con `CHECK` en la base | P8 | Es lo que P5 ya asumía en `totalesDelMes` y lo que menu engineering necesita para contar |
+| 40 | **La escritura en lote es un método de repositorio nuevo por módulo**, no un envoltorio | P10 | `ClienteDeTransaccion` no expone `$transaction`: una transacción no puede contener a otra |
+| 41 | **La atomicidad es POR PASADA, no entre módulos.** Se compensa validando todo antes de escribir nada | P10 | Limitación del ORM, no del diseño. Documentada en el puerto y en `CONSTRUCCION.md` |
+| 42 | **Una línea es receta o es combo según el TIPO DEL PRODUCTO DESTINO**, no según una columna | P10 | SPEC §8 ya lo dice. Pedírselo al archivo sería pedirle que repita algo con opción a contradecirse. **ADR-014** |
+| 43 | **Un combo no puede contener otro combo** | P10 | Es lo que «componentes que son productos simples» significa, y hace innecesario validar ciclos ahí |
+| 44 | **Los precios importados se confirman en bloque, a petición explícita** | P10 | R5 exige que alguien decida, no que decida 149 veces. Queda en `audit_log` con su nombre |
+| 45 | **El CLI abre sesión con contraseña, por el camino del login** | P10 | Un atajo que fabricara sesiones sería una puerta que no existe en ningún otro sitio |
+| 46 | **`import_job` no tiene ninguna FK hacia lo importado** | P10 | Si la tuviera, borrar un ítem obligaría a decidir qué hacer con su historia |
+| 47 | **El análisis vive en `jsonb` y no se lee de vuelta** | P10 | Es caché de algo reproducible. Leerlo tipado exigía un `as unknown as` que `audit:forbidden` para |
 
 ---
 
@@ -228,7 +304,7 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 |---|---|---|---|
 | 1 | **La máquina de desarrollo corre Node 24.19.0; ADR-001 fija 24.20.0.** `engines` admite `>=24.19.0 <25` | P0 | Nada hoy |
 | 4 | ~~La explosión del consumo no aplica el rendimiento del ítem~~ | P6 | ✅ **CERRADA: verificado contra el Excel.** `T3_RECETAS.N` usa la cantidad de la receta tal cual; el rendimiento del ítem (`T1.L`) aparece **solo** en el costo (`T1.M = K/L`). El rendimiento encarece la unidad, no aumenta lo que sale de la bodega. **ADR-011 §1** |
-| 7 | **El MC promedio de menu engineering: el SPEC y el Excel se contradicen.** El SPEC dice «no la media simple»; el Excel usa `AVERAGE(P6:P53)`, que **es** la media simple. Se implementó siguiendo el SPEC —ponderado por unidades, que es el Kasavana-Smith canónico— | P8 | **Nada bloqueado, pero decide cuadrantes.** Es la única contradicción encontrada entre el SPEC y su fuente, y merece confirmarse con quien escribió el SPEC |
+| 7 | ~~El MC promedio de menu engineering: el SPEC y el Excel se contradicen~~ | P8 | ✅ **CERRADA en P10 por decisión del usuario: se queda PONDERADO**, como dice SPEC §319 y como es el Kasavana-Smith canónico. El `AVERAGE` del Excel es el atajo que la hoja hace fácil, y con cola larga desplaza el eje y reclasifica platos entre cuadrantes. La implementación actual era correcta. **ADR-015**, que además hace visible el MC de referencia y sus dos operandos para que el cliente pueda reproducirlo |
 | 5 | **Las seis vistas no se pueden contrastar contra el Excel celda a celda**, porque el Excel no tiene dimensión temporal (SPEC §3). La aritmética está probada con casos a mano y R7 cierra sobre el sistema entero | P7 · P8 | Nada. Es una limitación del origen, no una tarea pendiente |
 | 8 | ✅ **RESUELTA: `/costeo` cumple §5 con holgura. La que fallaba era la medición.** En la topología de producción —API y base en la misma red— el p95 es **~85 ms contra un presupuesto de 400** (21 %). El modo de 370 ms era **el proxy de Docker Desktop en Windows**, que se atasca ~300 ms cuando cruza un resultado grande: la misma consulta de 1.600 filas tarda 2 ms dentro del contenedor y pega picos de 320 ms desde el host. **INC-016** trae las once cosas que se descartaron midiendo | P8 | **Pero deja una decisión abierta: las tres suites de rendimiento corren en el host y nunca han medido el sistema.** Ver abajo |
 | 6 | **El coste de armar el contexto de las vistas no está medido.** Cinco consultas más el costeo de la carta, por (ubicación, mes) | P8 | Nada hoy. **P9 lo multiplica por el número de ubicaciones** y tiene presupuesto de 800 ms |
@@ -241,10 +317,15 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 
 | # | Deuda | Paquete | Cuándo se paga |
 |---|---|---|---|
-| 1 | **`npm run bench`** — el presupuesto de tiempo de §5 solo se exige en CI, porque el proxy de Docker en Windows falsea la medición en local (INC-016). Falta el banco que mida en la topología de producción | P8 | ⚠️ **VENCIDA.** Se fijó para P9 y P9 **no la pagó**: el presupuesto del consolidado se midió a mano, con la API en contenedor y `curl`. El procedimiento está en `docs/pasos/P9/CONSTRUCCION.md`. **Nueva fecha: P10**, o antes si vuelve a hacer falta medir |
+| 1 | **`npm run bench`** — el presupuesto de tiempo de §5 solo se exige en CI, porque el proxy de Docker en Windows falsea la medición en local (INC-016). Falta el banco que mida en la topología de producción | P8 | ⚠️ **VENCIDA DOS VECES.** Se fijó para P9 (no se pagó) y se re-fechó a P10 (tampoco). **Nueva fecha: después del lanzamiento**, y el motivo se dice en voz alta — este sprint no añade ningún presupuesto p95 nuevo y el tiempo sale del frontend. **Decisión del usuario, no un olvido** |
 | 2 | **Vistas materializadas para períodos cerrados** — el plan de P9 las listaba; no se construyeron porque el criterio de aceptación se cumple sin ellas y una caché de números es una fuente de números rancios | P9 | **Cuando aparezca una company con más de diez ubicaciones**, o cuando el número de CI se acerque al techo. El umbral está medido, no supuesto: ADR-012 §7 |
 
-> **Pendiente estructural, no deuda:** nadie puede leer `audit_log` porque no existe rol con `SELECT` sobre ella. Es lo que SEGURIDAD.md §10 pide, no un olvido, y se resuelve en **P11** creando `costeo_backoffice` con su política.
+| 3 | **Los alias del dialecto real del cliente** en los descriptores de importación | P10 | Cuando llegue su archivo. La pasada de análisis **no escribe nada** y ya reporta columnas no reconocidas y obligatorias ausentes: ajustarlo es media hora sin tocar el camino de escritura |
+| 4 | **Prueba de similitud dominio ↔ `pg_trgm`** — el dominio quita tildes y `pg_trgm` no. Medido: `similarity('tomate riñón','tomate rinon') = 0.53`, por encima del umbral de 0.3, así que el criterio de aceptación se sostiene; lo que no está probado es que coincidan siempre | P10 | Después del lanzamiento |
+
+> **Pendiente estructural, no deuda:** nadie puede leer `audit_log` porque no existe rol con `SELECT` sobre ella. Es lo que SEGURIDAD.md §10 pide, no un olvido, y se resolvía en **P11 — que está pospuesto**. Con un solo cliente el back office es el usuario, pero conviene saber que el log se escribe y no se lee.
+
+> **Una tabla con lectura y sin escritura no la ve ningún check.** `combo_component` llevó seis paquetes así. `audit:deadcode` mira exports de TypeScript, no rutas de escritura a la base.
 
 ---
 

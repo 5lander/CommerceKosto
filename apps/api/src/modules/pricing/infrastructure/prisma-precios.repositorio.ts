@@ -25,6 +25,7 @@ import {
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
   AjustesDeCompany,
+  DatosDePrecioEnLote,
   DatosParaSugerir,
   DecisionSobrePrecio,
   PrecioLeido,
@@ -111,6 +112,44 @@ export class PrismaPreciosRepositorio implements RepositorioDePrecios {
       });
 
       return aPriceId(fila.id);
+    });
+  }
+
+  /**
+   * TODO EL LOTE O NADA — un solo `run()`, una sola transaccion, y los precios
+   * escritos con `createMany` en UNA sentencia.
+   *
+   * `confirmedBy` y `confirmedAt` se rellenan aqui cuando `confirmar` es cierto,
+   * en la misma escritura: no hay un segundo paso que pudiera quedarse a medias
+   * y dejar la mitad del catalogo con precio vigente y la otra mitad sin el.
+   */
+  public async sugerirEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly precios: readonly DatosDePrecioEnLote[];
+    readonly validFrom: Date;
+    readonly createdBy: UserId;
+    readonly confirmar: boolean;
+    readonly ahora: Date;
+  }): Promise<number> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      await tx.referencePrice.createMany({
+        data: datos.precios.map((precio) => ({
+          companyId: datos.companyId,
+          itemId: precio.itemId,
+          purchaseArticleId: precio.purchaseArticleId,
+          price: precio.precio,
+          ivaCompra: precio.ivaCompra,
+          origin: precio.origen,
+          status: datos.confirmar ? CONFIRMADO : SUGERIDO,
+          validFrom: datos.validFrom,
+          createdBy: datos.createdBy,
+          confirmedBy: datos.confirmar ? datos.createdBy : null,
+          confirmedAt: datos.confirmar ? datos.ahora : null,
+          note: precio.nota,
+        })),
+      });
+
+      return datos.precios.length;
     });
   }
 

@@ -3,6 +3,7 @@
  */
 
 import { ErrorDeDominio, type CodigoDeDominio } from '../../../shared/domain/errors/error-de-dominio';
+import { mensajeDeProblemas, type ProblemaDelLote } from '../../../shared/domain/lote/problemas';
 
 export class PrecioNoEncontradoError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
@@ -35,4 +36,13 @@ export class ItemSinPrecioError extends ErrorDeDominio {
 
 export class AjustesInvalidosError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+}
+
+/** Un lote de precios que no se puede escribir, con todos sus problemas dentro. */
+export class LoteDePreciosInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(public readonly problemas: readonly ProblemaDelLote[]) {
+    super(mensajeDeProblemas(problemas));
+  }
 }

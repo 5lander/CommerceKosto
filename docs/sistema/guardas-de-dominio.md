@@ -194,28 +194,6 @@ Y hay una segunda razón para que exista además de la guarda: **la guarda vive 
 
 ## `20260904235107_p8_ventas_y_costos_fijos`
 
-Solo dos tablas y un catálogo, y **ninguna restricción nueva es un trigger**. Los dos 🔴 son índices únicos, que es la forma en que INC-012 se cuela cuando ya no quedan `CHECK` alcanzables: un `23505` sube igual de sin traducir que un `23514`.
-
-| Restricción | | Guarda |
-|---|---|---|
-| `product_sales_unidades_no_negativas` | 🟡 | Esquema: las unidades entran como magnitud sin signo. A diferencia del conteo físico, aquí «debe ser una cantidad positiva» **es** el mensaje útil: no existe el matiz de «miré y no había» |
-| `fixed_cost_classification_codigo_conocido` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él |
-| `fixed_cost_concepto_no_vacio` | 🟡 | `z.string().trim().min(1)` |
-| `fixed_cost_concepto_acotado` | 🟡 | `.max(200)` |
-| `fixed_cost_importe_no_negativo` | 🟡 | Esquema: el importe entra como decimal sin signo |
-| **único** `product_sales(period_id, product_id)` | 🔴 | **`exigirVentasValidas`** → `ProductoRepetidoEnVentasError`. Un lote con el mismo producto dos veces es una grilla mal armada, y el `23505` saldría como 500 |
-| **único** `fixed_cost(period_id, concept)` | 🔴 | **`exigirCostosValidos`** → `ConceptoRepetidoError`. Dos «Arriendo» en el mismo mes: uno de los dos sobra y nadie sabe cuál |
-
-### Lo que la base **no** comprueba aquí, y sí comprueba el dominio
-
-Escribir ventas o costos fijos en un **período cerrado** se rechaza, y no hay `CHECK` que lo haga: la restricción cruzaría dos tablas. Lo detiene `exigirPeriodoAbierto` en el caso de uso, con `PeriodoCerradoError` — el mismo error de P7, por el mismo motivo.
-
-Es coherente con lo que «cerrado es de solo lectura» significa (D6): si la cifra de ventas de un mes sellado pudiera cambiar, el food cost real de ese mes cambiaría con ella, y ese mes ya se informó. **La diferencia con el libro es que aquí no hay trigger de respaldo**, porque no hay una columna de fecha en la fila contra la que compararlo: el vínculo con el período es la clave foránea, y un `CHECK` no puede seguirla. Queda anotado: si algún día hay una segunda ruta de escritura a estas tablas, la guarda es lo único que las protege.
-
----
-
-## `20260904235107_p8_ventas_y_costos_fijos`
-
 Dos tablas y un catálogo. **Ninguna restricción nueva es un trigger**, y los dos 🔴 son índices únicos: es la vía por la que INC-012 se cuela cuando ya no quedan `CHECK` alcanzables, porque un `23505` sube igual de sin traducir que un `23514`.
 
 | Restricción | | Guarda |
@@ -233,6 +211,35 @@ Dos tablas y un catálogo. **Ninguna restricción nueva es un trigger**, y los d
 Escribir ventas o costos en un **período cerrado** se rechaza, y no hay `CHECK` que lo haga: la restricción cruzaría dos tablas. Lo detiene `exigirAbierto` en el caso de uso, con el mismo `PeriodoCerradoError` de P7.
 
 **A diferencia del libro, aquí no hay trigger de respaldo.** El vínculo con el período es una clave foránea y un `CHECK` no puede seguirla. Si algún día hay una segunda ruta de escritura a estas dos tablas, la guarda es lo único que las protege — y conviene saberlo antes de escribirla.
+
+---
+
+## `20260907180439_p10_importaciones`
+
+Una tabla de rastro y su catálogo. **Ninguna restricción es 🔴, y no es un descuido: hoy `import_job` tiene un único escritor y no es la API.** Lo escribe el CLI `npm run importar`, que valida el archivo entero —cabecera, tipo y las 149 filas— antes de abrir una transacción. Un `23514` desde esa ruta no le llega a nadie por HTTP: le llega al operador, en su terminal, con la fila y la columna delante.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `import_job_status_codigo_conocido` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él (`REVOKE` en el bloque de privilegios) |
+| `import_job_tipo_conocido` | 🟡 | El CLI resuelve `--tipo` contra `DESCRIPTORES` y falla antes de construir nada. La base repite la lista por defensa en profundidad |
+| `import_job_nombre_no_vacio` · `_acotado` | 🟡 | El nombre lo pone el sistema de archivos al leerlo, y se trunca al construir el trabajo |
+| `import_job_clave_no_vacia` | ⚪ | La clave es un UUID generado por el sistema (SEGURIDAD.md §5.3), nunca el nombre original |
+| `import_job_tamano_positivo` | 🟡 | El lector rechaza el archivo vacío antes: `esTextoPlano` falla con una muestra de cero bytes, y el error es `TipoDeArchivoNoAdmitidoError` |
+| `import_job_filas_no_negativas` | ⚪ | El recuento sale de `.length` de lo escrito |
+| `import_job_confirmada_es_coherente` | ⚪ | Lo escribe `marcarConfirmada`, que pone los tres campos a la vez o ninguno |
+| `import_job_analizada_tiene_analisis` | ⚪ | El repositorio guarda el análisis antes de poder confirmarlo; el estado no avanza sin él |
+
+### El día que exista la pantalla de importación, tres de estas cambian de color
+
+Es lo que hay que saber antes de escribir ese endpoint, no después. Con una subida por HTTP, `import_job_tipo_conocido` y las dos del nombre pasan a **🔴**: un tipo inventado y un nombre de archivo vacío son cosas que un cliente puede mandar, y sin guarda saldrían como `INTERNAL_ERROR 500`.
+
+Y la forma de escribirla ya está decidida por **INC-008**: esas validaciones son control de entrada y van **en el campo del esquema Zod, nunca en el refinamiento del objeto**. Un refinamiento no corre si otro campo falló antes, así que un `company_id` mal formado desactivaría la comprobación del tipo sin que nada avise. Se prueban **acompañadas de otro error**, no en aislamiento.
+
+### Lo que la base **no** comprueba aquí
+
+El `analysis` es `jsonb` y la base no mira dentro. Es deliberado: es una **caché de un análisis**, no una fuente de verdad — si se pierde, se vuelve a subir el archivo. Validarlo con un esquema en la base sería fijar en SQL una estructura que vive en `domain/analisis.ts` y que cambia con los descriptores.
+
+Tampoco comprueba que lo escrito coincida con lo analizado. **No puede**: las filas importadas van a `item`, `reference_price`, `product`, `recipe` e `inventory_movement`, y ninguna clave foránea las une a su importación. Lo que lo sostiene es el orden del CLI —validar todo, después escribir— y `written_rows`, que permite cuadrar el recuento a posteriori.
 
 ---
 

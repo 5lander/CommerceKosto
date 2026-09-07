@@ -33,6 +33,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CostingModule } from './modules/costing/costing.module';
 import { IamModule } from './modules/iam/iam.module';
+import { ImportsModule } from './modules/imports/imports.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PeriodsModule } from './modules/periods/periods.module';
 import { PricingModule } from './modules/pricing/pricing.module';
@@ -68,6 +69,7 @@ export class AppModule {
         PeriodsModule,
         InventoryModule,
         AnalyticsModule,
+        ImportsModule,
       ],
       controllers: [HealthController],
       providers: [

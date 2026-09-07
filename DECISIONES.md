@@ -116,13 +116,33 @@ Valores confirmados, tomados del Excel original. **Son configuración por compan
 
 ---
 
-## D4 — Qué representa el tipo `LNK` en T1 del Excel 🔴
+## D4 — Qué representa el tipo `LNK` en T1 del Excel ✅
 
-**Bloquea:** la migración de datos desde el Excel (no bloquea P0–P8).
+**Resuelta en P10, el 2026-09-07, leyendo el archivo.** El detalle completo, con las fórmulas como
+evidencia, está en **`docs/decisiones/ADR-014`**.
 
-Cuatro filas de `T1_INSUMOS` están marcadas `LNK` y el LEEME no las documenta. Los otros tres tipos sí están resueltos: `INS` → ítem comprado, `SUB` → ítem producido, `SUP` → nivel de confianza del precio.
+**`LNK` no es un tipo de insumo: es el apaño con el que el Excel armaba un COMBO.** La celda de
+precio de esas cuatro filas no contiene un precio, contiene
+`=INDEX(V_COSTEO!$H, MATCH("<código>", V_COSTEO!$B))` — el *costo neto por porción* de un **producto
+de venta**. Y las cuatro se usan en una única línea de receta, tres de ellas de un producto de la
+categoría `COMBOS UNIVERSITARIOS`.
 
-Hasta tener respuesta: **no modelar nada para `LNK`.** Si aparece al importar, se rechaza la fila con un error explícito y se pregunta.
+En una hoja, un producto solo puede tener ingredientes; para meter un plato dentro de otro hay que
+disfrazar el plato de ingrediente. **Este sistema no lo necesita**: SPEC §8 modela `COMBO` con
+componentes que son productos simples, y ADR-008 §14 fija que el combo suma componentes **ya
+costeados**. Un `LNK` se traduce a una fila de `combo_component`, nunca a un ítem — hacerlo como ítem
+congelaría un costo derivado y cobraría la merma dos veces (R12).
+
+Queda cerrado también el resto de la columna: `INS` → `COMPRADO` con confianza `FACTURA`; **`SUP` →
+`COMPRADO` con confianza `ESTIMADO`** (es un precio *supuesto*, y sus 8 filas son estructuralmente
+idénticas a las `INS`); `SUB` → `PRODUCIDO`.
+
+**Lo que el hallazgo destapó:** `combo_component` existía desde P4 y **nadie la había escrito nunca**.
+Un combo se podía crear y jamás componer, y costaba cero. P10 abrió esa ruta.
+
+Dos de las cuatro filas tienen defecto propio y se tratan aparte: **INS-149** enlaza a un producto
+que no existe y el `IFERROR` lo vuelve **0** —se rechaza, un cero es un número que entra en un
+margen—, e **INS-090** está marcada `LNK` sin enlazar nada, así que es un `INS` mal tipado.
 
 ---
 
@@ -235,5 +255,5 @@ Los textos visibles viven en archivos de recursos desde el primer componente, au
 - Claude Code **usa estos valores sin preguntar** mientras estén en 🟡
 - Si una tarea exige decidir algo que **no está aquí ni en el SPEC** → se agrega a `ESTADO.md` como duda, se elige la opción **más conservadora y configurable**, y se deja registrado
 - El usuario cambia 🟡 → ✅ al confirmar, o corrige el valor
-- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ver ADR-001); el único 🔴 vivo es **D4** (qué representa `LNK`), que bloquea la migración de datos reales pero no P0–P8
+- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ADR-001) y **D4 en P10** (ADR-014): **no queda ningún 🔴 vivo**
 - D12 (ORM) quedó confirmada en Prisma. Sus cuatro condiciones se verifican al cerrar P1.

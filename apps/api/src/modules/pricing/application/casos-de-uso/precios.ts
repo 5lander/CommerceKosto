@@ -16,6 +16,7 @@
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import type {
+  CompanyId,
   ItemId,
   PurchaseArticleId,
   ReferencePriceId,
@@ -151,11 +152,7 @@ export class SugerirPrecio {
    * equivocada para uno de los dos.
    */
   private async ivaPorDefecto(sesion: SesionActiva): Promise<string> {
-    const ajustes = await this.deps.repositorio.ajustes(sesion.companyId);
-    if (ajustes === null) {
-      throw new ItemSinPrecioError('La company no tiene parámetros de costeo configurados.');
-    }
-    return ajustes.ivaCompra;
+    return ivaDeLaCompany(this.deps.repositorio, sesion.companyId);
   }
 }
 
@@ -287,4 +284,24 @@ function presentar(vigente: PrecioLeido, costo: CostoDelItem): CostoVigente {
     costoNetoDeUso: costo.costoNetoDeUso.toStorageString(),
     sobrecostoDeMerma: costo.sobrecostoDeMerma.toStorageString(),
   };
+}
+
+/**
+ * El IVA de compra configurado en la company.
+ *
+ * Vive suelto y no dentro de un caso de uso porque lo necesitan dos —el alta de
+ * uno y la de un lote—, y escribirlo dos veces es el clon que
+ * `audit:duplication` para.
+ *
+ * @throws {ItemSinPrecioError}
+ */
+export async function ivaDeLaCompany(
+  repositorio: RepositorioDePrecios,
+  companyId: CompanyId,
+): Promise<string> {
+  const ajustes = await repositorio.ajustes(companyId);
+  if (ajustes === null) {
+    throw new ItemSinPrecioError('La company no tiene parámetros de costeo configurados.');
+  }
+  return ajustes.ivaCompra;
 }

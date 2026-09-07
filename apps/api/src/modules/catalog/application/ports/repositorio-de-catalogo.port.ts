@@ -18,6 +18,7 @@ import type {
   ItemId,
   PurchaseArticleId,
 } from '../../../../shared/domain/identity/identificadores';
+import type { ResultadoDeLote } from '../../../../shared/application/lote';
 import type { UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { UnidadDelCatalogo } from '../../domain/conversion';
 import type { ConfianzaDePrecio, TipoDeItem } from '../../domain/item';
@@ -95,6 +96,32 @@ export interface DatosParaCrearArticulo {
   readonly factorDeConversion: string;
 }
 
+/**
+ * Un ítem dentro de un LOTE. El grupo llega por NOMBRE, no por id: quien migra
+ * un catálogo tiene la columna «Grupo» escrita, no una clave que aún no existe.
+ * El repositorio crea los que falten dentro de la misma transacción.
+ */
+export interface DatosDeItemEnLote {
+  readonly nombre: string;
+  readonly tipo: TipoDeItem;
+  readonly unidadDeUso: UnidadDeUso;
+  readonly rendimiento: string;
+  readonly grupo: string | null;
+  readonly confianzaDePrecio: ConfianzaDePrecio;
+  readonly llevaStock: boolean | null;
+}
+
+/** Un artículo dentro de un LOTE. El ítem llega por NOMBRE, por lo mismo. */
+export interface DatosDeArticuloEnLote {
+  readonly item: string;
+  readonly nombre: string;
+  readonly marca: string | null;
+  readonly proveedor: string | null;
+  readonly presentacion: string;
+  readonly unidadDePresentacion: UnidadDeUso;
+  readonly factorDeConversion: string;
+}
+
 export interface RepositorioDeCatalogo {
   /**
    * El catálogo GLOBAL de unidades. Sin tenant: un kilogramo pesa lo mismo en
@@ -125,7 +152,28 @@ export interface RepositorioDeCatalogo {
     readonly itemId: ItemId;
   }): Promise<ItemLeido | null>;
 
+  /**
+   * Escribe TODO el lote o no escribe nada, en **una sola transacción**.
+   *
+   * Es la razón de que este método exista en vez de un bucle sobre `crearItem`:
+   * cada método de este repositorio abre su propia transacción, así que un
+   * bucle de doscientas altas son doscientas transacciones y la fila 150 mala
+   * dejaría escritas las 149 buenas.
+   *
+   * Crea también los grupos que falten, dentro de esa misma transacción.
+   */
+  crearItemsEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly items: readonly DatosDeItemEnLote[];
+  }): Promise<ResultadoDeLote>;
+
   crearArticulo(datos: DatosParaCrearArticulo): Promise<ResultadoDeAlta<PurchaseArticleId>>;
+
+  /** Todo el lote o nada, en una sola transacción. Ver `crearItemsEnLote`. */
+  crearArticulosEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly articulos: readonly DatosDeArticuloEnLote[];
+  }): Promise<ResultadoDeLote>;
 
   listarArticulos(entrada: {
     readonly companyId: CompanyId;
