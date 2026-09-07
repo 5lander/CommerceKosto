@@ -51,6 +51,18 @@ export const CONSULTA_DEL_MES = z.object({
   mes: z.coerce.number().int().min(PRIMER_MES).max(ULTIMO_MES),
 });
 
+/**
+ * El mes de la COMPANY: lo mismo sin `locationId`, y esa ausencia es el punto.
+ *
+ * Un consolidado que aceptara `locationId` seria una vista por ubicacion con
+ * otro nombre. Aqui el alcance sale del permiso y de la sesion, nunca del
+ * parametro — CLAUDE.md §4.1, barrera 3.
+ */
+export const CONSULTA_DEL_MES_DE_COMPANY = z.object({
+  anio: z.coerce.number().int().min(PRIMER_ANIO).max(ULTIMO_ANIO),
+  mes: z.coerce.number().int().min(PRIMER_MES).max(ULTIMO_MES),
+});
+
 export const CUERPO_DE_VENTAS = z
   .object({
     ...MES_DE_UBICACION,
@@ -80,6 +92,89 @@ export const CUERPO_DE_COSTOS = z
   .strict();
 
 export type ConsultaDelMes = z.infer<typeof CONSULTA_DEL_MES>;
+export type ConsultaDelMesDeCompany = z.infer<typeof CONSULTA_DEL_MES_DE_COMPANY>;
+
+export interface AporteDeUbicacionDto {
+  readonly locationId: string;
+  readonly nombre: string;
+  readonly estadoDelPeriodo: string;
+  readonly unidades: string;
+  readonly ventaNeta: string;
+  readonly mcTotal: string;
+  readonly consumoTeorico: string;
+  readonly consumoReal: string;
+  readonly comprasDelMes: string;
+  readonly inventarioFinal: string;
+  readonly costosFijos: string;
+}
+
+export interface ConsolidadoDto {
+  readonly anio: number;
+  readonly mes: number;
+  readonly ubicaciones: readonly AporteDeUbicacionDto[];
+  readonly sinDatos: readonly { readonly locationId: string; readonly nombre: string }[];
+  readonly cerradas: number;
+  readonly abiertas: number;
+  readonly totales: {
+    readonly unidades: string;
+    readonly ventaNeta: string;
+    readonly mcTotal: string;
+    readonly consumoTeorico: string;
+    readonly consumoReal: string;
+    readonly comprasDelMes: string;
+    readonly inventarioFinal: string;
+    readonly costosFijos: string;
+  };
+  readonly foodCostTeoricoPct: string | null;
+  readonly foodCostRealPct: string | null;
+  readonly margenPct: string | null;
+  readonly cobertura: string | null;
+}
+
+export interface ObservacionDeProductoDto {
+  readonly locationId: string;
+  readonly ubicacion: string;
+  readonly activo: boolean;
+  readonly pvp: string | null;
+  readonly costoPorPorcion: string | null;
+  readonly foodCostPct: string | null;
+  readonly margenUnitario: string | null;
+  readonly unidades: string;
+}
+
+export interface ComparativaDeProductoDto {
+  readonly productId: string;
+  readonly nombre: string;
+  readonly activoEn: number;
+  readonly unidadesTotales: string;
+  readonly enUbicaciones: readonly ObservacionDeProductoDto[];
+  readonly pvpMinimo: string | null;
+  readonly pvpMaximo: string | null;
+  readonly brechaDePvp: string | null;
+  readonly foodCostMinimo: string | null;
+  readonly foodCostMaximo: string | null;
+  readonly brechaDeFoodCost: string | null;
+}
+
+export interface PrecioPagadoDto {
+  readonly locationId: string;
+  readonly ubicacion: string;
+  readonly purchaseArticleId: string | null;
+  readonly articulo: string | null;
+  readonly importe: string;
+  readonly cantidad: string;
+  readonly precioUnitario: string | null;
+}
+
+export interface ComparativaDeCompraDto {
+  readonly itemId: string;
+  readonly item: string;
+  readonly pagos: readonly PrecioPagadoDto[];
+  readonly precioMinimo: string | null;
+  readonly precioMaximo: string | null;
+  readonly brecha: string | null;
+  readonly brechaPct: string | null;
+}
 export type CuerpoDeVentas = z.infer<typeof CUERPO_DE_VENTAS>;
 export type CuerpoDeCostos = z.infer<typeof CUERPO_DE_COSTOS>;
 

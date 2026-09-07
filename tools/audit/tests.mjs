@@ -27,10 +27,26 @@ const HOST = process.env['POSTGRES_HOST'] ?? '127.0.0.1';
 const SOLO_UNITARIAS = process.argv.includes('--solo-unitarias');
 
 /**
+ * Cuantas veces se pregunta antes de dar la base por ausente.
+ *
+ * NACE DE UN FALLO REAL, en el commit de P9. Con la base ARRIBA y sana, la
+ * sonda agoto su plazo y `audit:tests` se degrado a PARCIAL: el commit paso
+ * sin correr una sola prueba de integracion, y en verde. La causa es el atasco
+ * del proxy de Docker en Windows (INC-016), que ocasionalmente traga una
+ * conexion entera.
+ *
+ * Un intento respondia a «¿esta la base?» con «¿esta y ademas responde rapido
+ * ahora mismo?», que es otra pregunta. Tres intentos separan las dos: una base
+ * apagada falla las tres veces al instante —`ECONNREFUSED`, no agota plazo—, y
+ * una base viva detras de un transporte con hipo contesta a la segunda.
+ */
+const INTENTOS = 3;
+
+/**
  * Sonda TCP: no necesita psql ni credenciales, solo saber si algo escucha.
  * @returns {Promise<boolean>}
  */
-function baseDisponible() {
+function unSondeo() {
   return new Promise((resolver) => {
     const socket = connect({ host: HOST, port: PUERTO });
     /** @param {boolean} disponible */
@@ -64,6 +80,16 @@ const unitariasOk = correrProyecto('unit');
 if (!unitariasOk) {
   console.error('\naudit:tests  FALLO — pruebas unitarias en rojo');
   process.exit(1);
+}
+
+/**
+ * @returns {Promise<boolean>}
+ */
+async function baseDisponible() {
+  for (let intento = 0; intento < INTENTOS; intento += 1) {
+    if (await unSondeo()) return true;
+  }
+  return false;
 }
 
 const hayBase = await baseDisponible();

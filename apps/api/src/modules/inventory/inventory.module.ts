@@ -43,6 +43,7 @@ import { RegistrarTransferencia } from './application/casos-de-uso/transferencia
 import {
   CalcularConsumoTeorico,
   ConsultarAgregadosDelPeriodo,
+  ConsultarComprasPorArticulo,
   ConsultarConteoConfirmado,
 } from './application/casos-de-uso/para-analitica';
 import { REPOSITORIO_DE_CONTEOS } from './application/ports/repositorio-de-conteos.port';
@@ -138,6 +139,11 @@ type Deps = DependenciasDeInventarioNest;
       useFactory: (d: Deps): CalcularConsumoTeorico => new CalcularConsumoTeorico(d),
     },
     {
+      provide: ConsultarComprasPorArticulo,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): ConsultarComprasPorArticulo => new ConsultarComprasPorArticulo(d),
+    },
+    {
       provide: ConsultarAgregadosDelPeriodo,
       inject: [DependenciasDeInventarioNest],
       useFactory: (d: Deps): ConsultarAgregadosDelPeriodo => new ConsultarAgregadosDelPeriodo(d),
@@ -187,6 +193,7 @@ type Deps = DependenciasDeInventarioNest;
     ListarMovimientos,
     LeerConciliacion,
     ConsultarAgregadosDelPeriodo,
+    ConsultarComprasPorArticulo,
     ConsultarConteoConfirmado,
     CalcularConsumoTeorico,
   ],

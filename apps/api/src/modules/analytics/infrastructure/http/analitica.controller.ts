@@ -36,6 +36,12 @@ import {
   RegistrarVentas,
 } from '../../application/casos-de-uso/carga';
 import {
+  CompararComprasEntreUbicaciones,
+  CompararProductosEntreUbicaciones,
+  ConsultarConsolidado,
+  PERMISO_CONSOLIDADO,
+} from '../../application/casos-de-uso/consolidado';
+import {
   ConsultarFoodCostReal,
   ConsultarInventarioValorizado,
   ConsultarMenuEngineering,
@@ -45,9 +51,14 @@ import {
 } from '../../application/casos-de-uso/vistas';
 import {
   CONSULTA_DEL_MES,
+  CONSULTA_DEL_MES_DE_COMPANY,
   CUERPO_DE_COSTOS,
   CUERPO_DE_VENTAS,
+  type ComparativaDeCompraDto,
+  type ComparativaDeProductoDto,
+  type ConsolidadoDto,
   type ConsultaDelMes,
+  type ConsultaDelMesDeCompany,
   type CostoDto,
   type CuerpoDeCostos,
   type CuerpoDeVentas,
@@ -60,6 +71,9 @@ import {
   type VentaDto,
 } from './analitica.dto';
 import {
+  comoComparativaDeCompraDto,
+  comoComparativaDeProductoDto,
+  comoConsolidadoDto,
   comoEquilibrioDto,
   comoFoodCostDto,
   comoInventarioDto,
@@ -230,6 +244,70 @@ export class AnaliticaController {
     @Query(new EsquemaPipe(CONSULTA_DEL_MES)) consulta: ConsultaDelMes,
   ): Promise<InventarioDto> {
     return comoInventarioDto(await this.vistas.inventario.ejecutar(sesion, mesDe(consulta)));
+  }
+}
+
+/** Las tres vistas de la cadena, en un solo proveedor. */
+export class VistasDeLaCadena {
+  public readonly total: ConsultarConsolidado;
+  public readonly productos: CompararProductosEntreUbicaciones;
+  public readonly compras: CompararComprasEntreUbicaciones;
+
+  public constructor(piezas: {
+    readonly total: ConsultarConsolidado;
+    readonly productos: CompararProductosEntreUbicaciones;
+    readonly compras: CompararComprasEntreUbicaciones;
+  }) {
+    this.total = piezas.total;
+    this.productos = piezas.productos;
+    this.compras = piezas.compras;
+  }
+}
+
+/**
+ * La cadena entera: el consolidado de company y las dos comparativas.
+ *
+ * **CONTROLADOR APARTE PORQUE EL PERMISO ES OTRO**, igual que el semáforo de
+ * reposición y por la misma razón. `analytics.consolidated.read` es de nivel
+ * company y `GERENTE_LOCAL` no lo tiene: ver sumadas las ventas y los márgenes
+ * de los locales de sus compañeros es la escalada horizontal que E18 prohíbe
+ * en la propagación de recetas, con otro disfraz.
+ *
+ * **NINGUNA RUTA ACEPTA `locationId`**, y esa ausencia es la barrera 3: el
+ * alcance sale de la sesión. Un consolidado con `locationId` sería una vista
+ * por ubicación con otro nombre.
+ */
+@Controller('consolidado')
+export class ConsolidadoController {
+  public constructor(private readonly consolidado: VistasDeLaCadena) {}
+
+  @Get()
+  @Requiere(PERMISO_CONSOLIDADO)
+  public async resumen(
+    @SesionActual() sesion: SesionActiva,
+    @Query(new EsquemaPipe(CONSULTA_DEL_MES_DE_COMPANY)) consulta: ConsultaDelMesDeCompany,
+  ): Promise<ConsolidadoDto> {
+    return comoConsolidadoDto(await this.consolidado.total.ejecutar(sesion, consulta));
+  }
+
+  @Get('productos')
+  @Requiere(PERMISO_CONSOLIDADO)
+  public async productos(
+    @SesionActual() sesion: SesionActiva,
+    @Query(new EsquemaPipe(CONSULTA_DEL_MES_DE_COMPANY)) consulta: ConsultaDelMesDeCompany,
+  ): Promise<readonly ComparativaDeProductoDto[]> {
+    const filas = await this.consolidado.productos.ejecutar(sesion, consulta);
+    return filas.map(comoComparativaDeProductoDto);
+  }
+
+  @Get('compras')
+  @Requiere(PERMISO_CONSOLIDADO)
+  public async compras(
+    @SesionActual() sesion: SesionActiva,
+    @Query(new EsquemaPipe(CONSULTA_DEL_MES_DE_COMPANY)) consulta: ConsultaDelMesDeCompany,
+  ): Promise<readonly ComparativaDeCompraDto[]> {
+    const filas = await this.consolidado.compras.ejecutar(sesion, consulta);
+    return filas.map(comoComparativaDeCompraDto);
   }
 }
 

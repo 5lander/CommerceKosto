@@ -4,6 +4,38 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P9 — Consolidado de company y comparativa entre ubicaciones · 2026-09-06
+
+**Objetivo:** ver la cadena completa y comparar locales.
+
+### Entregado
+
+- **Consolidado de company**: agrega ventas, márgenes, consumo, compras, inventario y costos fijos de todas las ubicaciones de un mes
+- **Los porcentajes se recalculan sobre los totales, nunca se promedian.** Es la decisión que justifica el paquete: un local pequeño con food cost del 80 % y otro grande con el 30 % dan 30,1 % ponderado y 55 % en media simple, y **el segundo número es plausible en pantalla y falso**. Hay una prueba con los dos valores que cae si alguien sustituye la fórmula
+- **Una ubicación sin datos del mes se aparta y se nombra**, no suma cero — la misma regla que ADR-010 §5 aplicó a un ítem sin contar
+- **El consolidado dice el estado del período de cada ubicación**, porque el período es por ubicación (ADR-010 §1) y puede estar sumando meses cerrados con abiertos
+- **Comparativa del mismo producto entre ubicaciones**: PVP, food cost, margen y unidades, con mínimo, máximo y brecha para ordenar por dispersión
+- **Comparativa de precios de compra desde el LIBRO**, no desde `reference_price` —que es de company y daría el mismo número siempre—, agrupada también por artículo para poder responder «¿y es que compra otra marca?»
+- **Permiso `analytics.consolidated.read`, de nivel company.** `GERENTE_LOCAL` **no** lo tiene: ver la cadena entera es la escalada horizontal que E18 prohíbe en la propagación de recetas. Tres pruebas de 403 y una cuarta que verifica que sigue viendo lo suyo
+- **ADR-012** con las siete decisiones
+- **727 pruebas**: 457 unitarias con la base apagada + 270 de integración
+
+### Medido
+
+| | mediana | p95 |
+|---|---|---|
+| Una ubicación | 69 ms | — |
+| **Diez ubicaciones** | 616 ms | **734 ms** de 800 |
+
+Cumple **al 92 %**, y escala lineal: **alrededor de doce ubicaciones se rompe**.
+
+### Pendiente
+
+- **Las vistas materializadas no se construyeron**, y no es un olvido: el criterio de aceptación se cumple sin ellas y una caché de números en este sistema es una fuente de números rancios. ADR-012 §7 deja el diseño y el umbral medido que las dispararía
+- **`npm run bench` sigue sin existir.** Era la deuda que P8 dejó con fecha de pago en P9 y **no se pagó**: el presupuesto se midió a mano con la API en contenedor. La deuda sigue abierta
+
+---
+
 ## P8 — Vistas analíticas · 2026-09-04
 
 **Objetivo:** las seis vistas del Excel, por ubicación.

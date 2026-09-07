@@ -809,6 +809,38 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
 | `POST`/`GET /analitica/costos-fijos` | `cost.write` / `cost.read` | Ídem |
 | `GET /analitica/resumen` · `menu-engineering` · `food-cost-real` · `punto-de-equilibrio` · `inventario` | `analytics.read` | Todos **menos `BODEGA`** |
 | `GET /analitica/reposicion` | `replenishment.read` | **Todos, `BODEGA` incluido** |
+| `GET /consolidado` · `/consolidado/productos` · `/consolidado/compras` | `analytics.consolidated.read` | `OWNER`, `ADMIN`, `LECTURA`. **`GERENTE_LOCAL` NO** |
+
+### El consolidado de company — `analytics.consolidated.read`
+
+**Tres rutas, y ninguna acepta `locationId`.** Esa ausencia es la barrera 3 de CLAUDE.md §4.1: el alcance sale de la sesión, nunca del parámetro. Un consolidado con `locationId` sería una vista por ubicación con otro nombre.
+
+| Ruta | Qué devuelve |
+|---|---|
+| `GET /consolidado?anio&mes` | El total de la cadena: aporte por ubicación, totales y los cuatro porcentajes |
+| `GET /consolidado/productos?anio&mes` | El mismo producto en cada ubicación, con mínimo, máximo y brecha |
+| `GET /consolidado/compras?anio&mes` | Lo que cada ubicación pagó por cada ítem y en qué artículo |
+
+**`GERENTE_LOCAL` recibe 403 en las tres.** Ver la cadena entera es la escalada horizontal de §4.4 — la misma línea que el criterio E18 traza en la propagación de recetas. Sigue viendo, sin cambios, las vistas de su ubicación.
+
+**Los porcentajes del consolidado se recalculan sobre los totales, nunca se promedian** (ADR-012 §1). Y **una ubicación sin datos de ese mes no suma cero**: sale en `sinDatos` con su nombre.
+
+```jsonc
+{
+  "anio": 2026, "mes": 3,
+  "ubicaciones": [
+    { "locationId": "…", "nombre": "Centro", "estadoDelPeriodo": "CERRADO",
+      "ventaNeta": "869.565217391304", "consumoTeorico": "200" }
+  ],
+  "sinDatos": [{ "locationId": "…", "nombre": "Sur recién abierto" }],
+  "cerradas": 1, "abiertas": 1,
+  "totales": { "unidades": "140", "ventaNeta": "…", "comprasDelMes": "288" },
+  "foodCostTeoricoPct": "0.207474226804",   // Σconsumo ÷ Σventa, NO el promedio
+  "margenPct": "…", "cobertura": null
+}
+```
+
+**`estadoDelPeriodo` no es decorativo.** El período es de una ubicación (ADR-010 §1), así que el total puede mezclar meses cerrados con meses todavía abiertos —cuyo número aún puede cambiar—, y quien lo lee tiene derecho a saberlo.
 
 ### `POST /analitica/ventas` — `sales.write`
 

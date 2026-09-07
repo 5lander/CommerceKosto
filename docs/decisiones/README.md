@@ -19,6 +19,7 @@ Plantilla en `docs/plantillas/ADR.md`.
 | [ADR-009](ADR-009-el-signo-el-costo-y-el-interruptor-de-stock.md) | El signo del movimiento, el importe del lote y la confidencialidad del saldo frente a `BODEGA` | ✅ aceptado | P6 |
 | [ADR-010](ADR-010-el-mes-el-corte-y-lo-que-no-se-conto.md) | De quién es el período, dónde vive la frontera del mes, y qué significa exactamente no haber contado un ítem | ✅ aceptado | P7 |
 | [ADR-011](ADR-011-el-consumo-teorico-y-lo-que-R7-destapo.md) | El consumo teórico, el rendimiento por lote, y el fallo de P6 que la conciliación R7 sacó a la luz | ✅ aceptado | P8 |
+| [ADR-012](ADR-012-el-consolidado-y-lo-que-no-se-suma.md) | El consolidado de company: qué suma, qué se recalcula sobre los totales, y el umbral medido que haría falta una vista materializada | ✅ aceptado | P9 |
 
 ## ADRs esperados por el plan
 

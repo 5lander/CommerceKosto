@@ -141,6 +141,21 @@ export interface ConsultaDelLibro {
   readonly cursor: string | null;
 }
 
+/**
+ * Una fila de `comprasPorArticulo`: lo pagado y lo recibido, sin dividir.
+ *
+ * **Solo ids.** Los nombres del item y del articulo los pone quien consulta,
+ * leyendo el catalogo por sus puertos: `inventory` no toca sus tablas
+ * (CLAUDE.md §2, y `audit:forbidden` lo hace cumplir).
+ */
+export interface CompraPorArticulo {
+  readonly locationId: LocationId;
+  readonly itemId: ItemId;
+  readonly purchaseArticleId: string | null;
+  readonly importe: string;
+  readonly cantidad: string;
+}
+
 export interface RepositorioDeInventario {
   /** Un movimiento suelto: `COMPRA`, `MERMA`, `AJUSTE` o una corrección. */
   registrarUno(entrada: {
@@ -213,6 +228,29 @@ export interface RepositorioDeInventario {
     readonly desde: Date;
     readonly hasta: Date;
   }): Promise<readonly AgregadoDeItem[]>;
+
+  /**
+   * Lo que cada ubicación pagó de verdad por cada ítem, y en qué presentación
+   * — la comparativa de compras de P9.
+   *
+   * **NO SALE DE `reference_price`, Y ESA ES LA DECISIÓN.** El precio de
+   * referencia es de la company y no tiene ubicación: compararlo entre locales
+   * daría el mismo número siempre, que es una comparativa que no compara nada.
+   * Lo que sí varía por ubicación es la factura, y la factura está aquí.
+   *
+   * Agrega por `(location_id, item_id, purchase_article_id)` porque la pregunta
+   * del dueño lleva las tres: «¿por qué el Norte paga el tomate más caro —y es
+   * que compra otra marca?». Los nombres los resuelve quien consulta.
+   *
+   * `importe` y `cantidad` vienen **sin dividir**: el precio unitario se
+   * calcula en el dominio, donde la división lleva su escala explícita y su
+   * guarda de divisor cero.
+   */
+  comprasPorArticulo(entrada: {
+    readonly companyId: CompanyId;
+    readonly desde: Date;
+    readonly hasta: Date;
+  }): Promise<readonly CompraPorArticulo[]>;
 
   /** Paginación por cursor, nunca `OFFSET` (CLAUDE.md §5). */
   libro(consulta: ConsultaDelLibro): Promise<PaginaDelLibro>;

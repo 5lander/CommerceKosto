@@ -8,31 +8,50 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P8 cerrado.**
-**Fase del protocolo:** CIERRE de P8
-**Último commit:** `P8: Vistas analíticas` (P7 `72f0ba1`, P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
-**Fecha de última actualización:** 2026-09-04
+**Paquete en curso:** ninguno — **P9 cerrado.**
+**Fase del protocolo:** CIERRE de P9
+**Último commit:** `P9: Consolidado de company` (P8 `0067bd1`, P7 `72f0ba1`, P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
+**Fecha de última actualización:** 2026-09-06
 
 ### Dónde se retoma exactamente
 
-**Nueve paquetes cerrados: P0 a P8.** El siguiente es **P9 — Consolidado de company y comparativa entre ubicaciones**, y necesita confirmación del usuario antes de empezar.
+**Diez paquetes cerrados: P0 a P9.** El siguiente es **P10 — Importación Excel/CSV**, y necesita confirmación del usuario antes de empezar.
 
-**Las seis vistas del Excel existen, y R7 cierra sobre el sistema entero.** Era el último criterio de aceptación pendiente desde P0.
+**El backend de negocio está completo.** Lo que queda son las dos superficies que faltan —importación y frontend— más el endurecimiento final.
 
-**Hecho en P8 — completo**
+**Hecho en P9 — completo**
 
 | # | Entregable | Estado |
 |---|---|---|
-| 1 | Food cost real y varianza (SPEC §16) **con R7 sobre dataset completo** | ✅ |
-| 2 | Menu engineering con los cuatro cuadrantes, más `SIN_DATOS` e `INACTIVO` | ✅ |
-| 3 | Punto de equilibrio con **clasificación explícita** de T6 | ✅ |
-| 4 | Inventario valorizado con estados, cobertura y punto de reorden | ✅ |
-| 5 | Resumen gerencial con semáforos, y `SIN_DATO` como cuarto estado | ✅ |
-| 6 | `BODEGA` **no recibe ninguna vista**: solo el semáforo, sin la cantidad | ✅ |
-| 7 | `product_sales` y `fixed_cost`: los dos datos que el sistema no puede deducir | ✅ |
-| 8 | **La corrección del consumo teórico**, que R7 destapó | ✅ |
-| 9 | **ADR-011** con las siete decisiones | ✅ |
-| 10 | **702 pruebas**: 442 unitarias con la base apagada + 260 de integración | ✅ |
+| 1 | Consolidado de company: agrega las ocho magnitudes de todas las ubicaciones | ✅ |
+| 2 | **Los porcentajes se recalculan sobre los totales, nunca se promedian** | ✅ |
+| 3 | Una ubicación sin datos se aparta y se nombra: **no suma cero** | ✅ |
+| 4 | El consolidado dice el estado del período de cada ubicación (ADR-010 §1) | ✅ |
+| 5 | Comparativa del mismo producto entre ubicaciones, con su dispersión | ✅ |
+| 6 | Comparativa de precios de compra **desde el libro**, por ubicación y artículo | ✅ |
+| 7 | Permiso de nivel company: `GERENTE_LOCAL` recibe 403 en las tres rutas | ✅ |
+| 8 | **ADR-012** con las siete decisiones | ✅ |
+| 9 | **727 pruebas**: 457 unitarias con la base apagada + 270 de integración | ✅ |
+| 10 | Presupuesto de §5 medido en topología de producción: **734 ms de 800** | ✅ |
+
+### Lo que un «tú» futuro necesita saber de P9
+
+**1. El error de este paquete que sobrevive a una revisión es promediar un porcentaje.**
+Un local que vende 200 con food cost del 80 % y otro que vende 100.000 con el 30 % dan **30,1 %**, no 55 %. La media simple le da a cada local un voto igual y el dueño decide por dólar. Los dos números son plausibles en pantalla; solo uno decide precios bien. La prueba unitaria lleva los dos y compara contra la media simple explícitamente.
+
+**2. La comparativa de compras sale del LIBRO, no de `reference_price`.**
+El precio de referencia es de company y no tiene ubicación: compararlo entre locales daría el mismo número siempre. Lo que varía es la factura, y `purchase_article_id` en `inventory_movement` estaba puesto desde P6 exactamente para esto. Hay una prueba que lo fija: el precio de referencia es 2,00 y la comparativa devuelve 1,20 y 1,68.
+
+**3. El consolidado escala LINEAL, y el presupuesto se cumple al 92 %.**
+Diez ubicaciones: p95 de **734 ms contra 800**, medido con la API y la base en la misma red. La proporción es 8,9× pese al `Promise.all`, porque la mayor parte del trabajo es CPU de Node y eso no se paraleliza esperando. **Alrededor de doce ubicaciones se rompe** — ahí entra la vista materializada que ADR-012 §7 deja diseñada.
+
+**4. `audit:forbidden` paró un atajo real y el arreglo mejoró el diseño.**
+El repositorio de `inventory` resolvía nombres leyendo `item` y `purchase_article` directamente. La regla `tablas-de-catalogo-solo-en-catalog` lo cazó: ahora devuelve ids y `analytics` pone los nombres con `ListarItems` y `ListarArticulos`.
+
+**5. El hook de pre-commit podía pasar en verde SIN correr la integración, y se arregló.**
+Con la base arriba y sana, la sonda TCP de `audit:tests` —un intento, 1,5 s— la tragó el atasco de INC-016 y el check se degradó a `PARCIAL`. Es INC-007 caso 8 en el peor sitio: se degrada justo bajo las condiciones que hacen falso todo lo demás. Ahora son **tres intentos**: una base apagada falla las tres al instante, una viva con hipo contesta a la segunda.
+
+**6. La migración de P9 no crea ni una tabla.** Solo un permiso. Es la señal de que P8 dejó el terreno hecho: el consolidado es la suma de lo que cada ubicación ya publica, no un cálculo nuevo por otro camino.
 
 ### Lo que un «tú» futuro necesita saber de P8
 
@@ -79,8 +98,8 @@ P6 le negó el saldo, P7 la conciliación, P8 las seis vistas. Y las tres veces 
 
 1. **El rendimiento del ÍTEM sigue sin confirmarse contra el Excel** (abierta desde P6), y ahora importa más: afecta al `consumo_teorico` que P8 publica en dos vistas. **No confundirlo con el rendimiento por lote**, que es el que P8 corrigió: aquel vive en el costo (SPEC §12), este en la cantidad (SPEC §14).
 2. **Las vistas no están contrastadas contra el Excel celda a celda**, y ahora se sabe por qué no se puede: **el Excel no tiene ninguna unidad vendida cargada** (`T2_PRODUCTOS.H` es cero en los 48 productos). Sus tres vistas que dependen de ese dato están en cero. No hay valores esperados que extraer — pero **sus fórmulas sí se verificaron una a una**, y coinciden.
-3. **El coste de armar el contexto no tiene medición propia.** Presupuesto de P9: 800 ms para diez ubicaciones. **Y llega con un aviso:** si `/costeo` tiene un modo de 370 ms (duda 8), el consolidado de diez ubicaciones lo hereda multiplicado.
-4. **El consolidado de P9 puede sumar meses cerrados con meses abiertos**, porque el período es por ubicación (P7). Tendrá que decirlo.
+3. ~~El coste de armar el contexto no tiene medición propia~~ ✅ **Medido en P9: 734 ms de 800 con diez ubicaciones.** Cumple al 92 % y escala lineal, así que **doce ubicaciones lo rompen**. Es el aviso que P10 y P11 heredan.
+4. ~~El consolidado puede sumar meses cerrados con abiertos~~ ✅ **Resuelto en P9:** la respuesta trae `estadoDelPeriodo` por ubicación y los contadores `cerradas` / `abiertas`.
 5. **D4 (`LNK`) sigue en 🔴.** No ha bloqueado nada; bloquea la migración de datos del Excel.
 6. **Nadie puede leer `audit_log`** — pendiente estructural de P11, sin cambios desde P7.
 
@@ -119,16 +138,16 @@ Lo implementado:
 |---|---|---|
 | `audit:types` | ✅ | |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | 30 reglas sobre **252 archivos** (228 en P7) |
-| `audit:arch` | ✅ | 222 módulos, 973 dependencias. **Paró un ciclo real** en P8 |
+| `audit:forbidden` | ✅ | 30 reglas sobre **261 archivos**. **Paró un atajo real en P9** |
+| `audit:arch` | ✅ | 226 módulos, 1005 dependencias. **Paró un ciclo real** en P8 |
 | `audit:deadcode` | ✅ | Sin ninguna lista blanca |
 | `audit:complexity` | ✅ | |
 | `audit:duplication` | ✅ | **0 clones.** Cazó la cuarta repetición del bloque de auditoría |
-| `audit:migrations` | ✅ | M1–M11. **M11 ha parado las tres migraciones a las que se ha enfrentado** |
+| `audit:migrations` | ✅ | M1–M11 · **10 migraciones** |
 | `audit:secrets` | ✅ | |
 | `audit:deps` | ✅ | |
 | `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | 442 unitarias (sin base) + **256 de 260** de integración; 4 saltadas con motivo — las de tiempo, que solo se exigen en CI (INC-016) |
+| `audit:tests` | ✅ | **457 unitarias** (sin base) + **270 de integración**; 5 saltadas con motivo — las de tiempo, que solo se exigen en CI (INC-016) |
 
 ## Progreso
 
@@ -222,7 +241,8 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⚠️ Completado c
 
 | # | Deuda | Paquete | Cuándo se paga |
 |---|---|---|---|
-| 1 | **`npm run bench`** — el presupuesto de tiempo de §5 solo se exige en CI, porque el proxy de Docker en Windows falsea la medición en local (INC-016). Falta el banco que mida en la topología de producción | P8 | **P9**, que trae su propio presupuesto de 800 ms y no se puede verificar sin él |
+| 1 | **`npm run bench`** — el presupuesto de tiempo de §5 solo se exige en CI, porque el proxy de Docker en Windows falsea la medición en local (INC-016). Falta el banco que mida en la topología de producción | P8 | ⚠️ **VENCIDA.** Se fijó para P9 y P9 **no la pagó**: el presupuesto del consolidado se midió a mano, con la API en contenedor y `curl`. El procedimiento está en `docs/pasos/P9/CONSTRUCCION.md`. **Nueva fecha: P10**, o antes si vuelve a hacer falta medir |
+| 2 | **Vistas materializadas para períodos cerrados** — el plan de P9 las listaba; no se construyeron porque el criterio de aceptación se cumple sin ellas y una caché de números es una fuente de números rancios | P9 | **Cuando aparezca una company con más de diez ubicaciones**, o cuando el número de CI se acerque al techo. El umbral está medido, no supuesto: ADR-012 §7 |
 
 > **Pendiente estructural, no deuda:** nadie puede leer `audit_log` porque no existe rol con `SELECT` sobre ella. Es lo que SEGURIDAD.md §10 pide, no un olvido, y se resuelve en **P11** creando `costeo_backoffice` con su política.
 

@@ -27,10 +27,18 @@ import type {
   FoodCostRealDto,
   InventarioDto,
   ItemDelInventarioDto,
+  ComparativaDeCompraDto,
+  ComparativaDeProductoDto,
+  ConsolidadoDto,
   MenuDto,
   PuntoDeEquilibrioDto,
   ResumenDto,
 } from './analitica.dto';
+import type {
+  ComparativaDeCompra,
+  ComparativaDeProducto,
+  Consolidado,
+} from '../../application/casos-de-uso/consolidado';
 
 /** `toExactString()` y no `toStorageString()`: sin ceros de relleno. */
 interface Decimal {
@@ -145,6 +153,90 @@ export function comoResumenDto(resumen: Resumen): ResumenDto {
 }
 
 /** Tres campos, y ninguno es una cantidad. Ver `FilaDeReposicionDto`. */
+export function comoConsolidadoDto(consolidado: Consolidado): ConsolidadoDto {
+  return {
+    anio: consolidado.anio,
+    mes: consolidado.mes,
+    ubicaciones: consolidado.ubicaciones.map((aporte) => ({
+      locationId: aporte.locationId,
+      nombre: aporte.nombre,
+      estadoDelPeriodo: aporte.estadoDelPeriodo,
+      unidades: texto(aporte.unidades),
+      ventaNeta: texto(aporte.ventaNeta),
+      mcTotal: texto(aporte.mcTotal),
+      consumoTeorico: texto(aporte.consumoTeorico),
+      consumoReal: texto(aporte.consumoReal),
+      comprasDelMes: texto(aporte.comprasDelMes),
+      inventarioFinal: texto(aporte.inventarioFinal),
+      costosFijos: texto(aporte.costosFijos),
+    })),
+    sinDatos: consolidado.sinDatos.map((u) => ({ locationId: u.locationId, nombre: u.nombre })),
+    cerradas: consolidado.cerradas,
+    abiertas: consolidado.abiertas,
+    totales: {
+      unidades: texto(consolidado.totales.unidades),
+      ventaNeta: texto(consolidado.totales.ventaNeta),
+      mcTotal: texto(consolidado.totales.mcTotal),
+      consumoTeorico: texto(consolidado.totales.consumoTeorico),
+      consumoReal: texto(consolidado.totales.consumoReal),
+      comprasDelMes: texto(consolidado.totales.comprasDelMes),
+      inventarioFinal: texto(consolidado.totales.inventarioFinal),
+      costosFijos: texto(consolidado.totales.costosFijos),
+    },
+    foodCostTeoricoPct: opcional(consolidado.foodCostTeoricoPct),
+    foodCostRealPct: opcional(consolidado.foodCostRealPct),
+    margenPct: opcional(consolidado.margenPct),
+    cobertura: opcional(consolidado.cobertura),
+  };
+}
+
+export function comoComparativaDeProductoDto(
+  fila: ComparativaDeProducto,
+): ComparativaDeProductoDto {
+  return {
+    productId: fila.productId,
+    nombre: fila.nombre,
+    activoEn: fila.activoEn,
+    unidadesTotales: texto(fila.unidadesTotales),
+    enUbicaciones: fila.enUbicaciones.map((o) => ({
+      locationId: o.locationId,
+      ubicacion: o.ubicacion,
+      activo: o.activo,
+      pvp: opcional(o.pvp),
+      costoPorPorcion: opcional(o.costoPorPorcion),
+      foodCostPct: opcional(o.foodCostPct),
+      margenUnitario: opcional(o.margenUnitario),
+      unidades: texto(o.unidades),
+    })),
+    pvpMinimo: opcional(fila.pvpMinimo),
+    pvpMaximo: opcional(fila.pvpMaximo),
+    brechaDePvp: opcional(fila.brechaDePvp),
+    foodCostMinimo: opcional(fila.foodCostMinimo),
+    foodCostMaximo: opcional(fila.foodCostMaximo),
+    brechaDeFoodCost: opcional(fila.brechaDeFoodCost),
+  };
+}
+
+export function comoComparativaDeCompraDto(fila: ComparativaDeCompra): ComparativaDeCompraDto {
+  return {
+    itemId: fila.itemId,
+    item: fila.item,
+    pagos: fila.pagos.map((pago) => ({
+      locationId: pago.locationId,
+      ubicacion: pago.ubicacion,
+      purchaseArticleId: pago.purchaseArticleId,
+      articulo: pago.articulo,
+      importe: texto(pago.importe),
+      cantidad: texto(pago.cantidad),
+      precioUnitario: opcional(pago.precioUnitario),
+    })),
+    precioMinimo: opcional(fila.precioMinimo),
+    precioMaximo: opcional(fila.precioMaximo),
+    brecha: opcional(fila.brecha),
+    brechaPct: opcional(fila.brechaPct),
+  };
+}
+
 export function comoReposicionDto(fila: FilaDeReposicion): FilaDeReposicionDto {
   return { itemId: fila.itemId, nombre: fila.nombre, semaforo: fila.semaforo };
 }

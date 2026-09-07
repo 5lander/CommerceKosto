@@ -14,14 +14,19 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
+import { ListarArticulos } from '../../catalog/application/casos-de-uso/articulos';
 import { ListarItems } from '../../catalog/application/casos-de-uso/items';
 import { CostearCarta } from '../../costing/application/casos-de-uso/costear';
 import { LeerConciliacion } from '../../inventory/application/casos-de-uso/conteos';
+import { ListarUbicaciones } from '../../iam/application/casos-de-uso/ubicaciones';
 import {
   CalcularConsumoTeorico,
   ConsultarAgregadosDelPeriodo,
+  ConsultarComprasPorArticulo,
   ConsultarConteoConfirmado,
 } from '../../inventory/application/casos-de-uso/para-analitica';
+import { CalendarioDePeriodos } from '../../periods/domain/periodo';
+import { ZONA_HORARIA_DE_PERIODOS } from '../../../shared/infrastructure/config/periods';
 import {
   AsegurarPeriodo,
   ConsultarPeriodo,
@@ -71,4 +76,26 @@ export class DependenciasDeAnaliticaNest {
   /** No lo usa `analytics`, pero `LeerConciliacion` lo necesita cableado. */
   @Inject(LeerConciliacion)
   public readonly conciliacion!: LeerConciliacion;
+
+  // --- P9: lo que el consolidado anade -------------------------------------
+
+  @Inject(ListarUbicaciones)
+  public readonly listarUbicaciones!: ListarUbicaciones;
+
+  @Inject(ListarArticulos)
+  public readonly listarArticulos!: ListarArticulos;
+
+  @Inject(ConsultarComprasPorArticulo)
+  public readonly comprasPorArticulo!: ConsultarComprasPorArticulo;
+
+  /**
+   * El calendario, para traducir (ano, mes) a los dos instantes del corte.
+   *
+   * Se construye aqui y no se inyecta porque no tiene estado ni dependencias:
+   * es la zona horaria de `config/periods.ts` y nada mas. La misma que usan
+   * `periods` y las pruebas — si hubiera dos, un mes tendria dos fronteras.
+   */
+  public readonly calendario: CalendarioDePeriodos = new CalendarioDePeriodos(
+    ZONA_HORARIA_DE_PERIODOS,
+  );
 }

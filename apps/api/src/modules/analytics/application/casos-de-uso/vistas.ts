@@ -193,7 +193,7 @@ function menuDe(datos: ContextoDelPeriodo): Menu {
   });
 }
 
-function foodCostDe(datos: ContextoDelPeriodo): FoodCostReal {
+export function foodCostDe(datos: ContextoDelPeriodo): FoodCostReal {
   return foodCostReal({
     inventarioInicial: datos.inventarioInicial,
     comprasDelMes: datos.comprasDelMes,
@@ -224,7 +224,7 @@ function equilibrioDe(datos: ContextoDelPeriodo): PuntoDeEquilibrio {
   });
 }
 
-function inventarioDe(datos: ContextoDelPeriodo): Inventario {
+export function inventarioDe(datos: ContextoDelPeriodo): Inventario {
   return valorizarInventario({
     items: [...datos.itemsDelInventario].map((itemId) => filaDeInventario(datos, itemId)),
     parametros: {

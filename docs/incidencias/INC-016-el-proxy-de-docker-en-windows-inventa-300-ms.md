@@ -118,6 +118,23 @@ Nadie pierde de vista el rendimiento por trabajar en Windows: el número sigue d
 
 **Deuda con fecha de pago:** esto deja el presupuesto guardado por CI y por nadie más. Lo que corresponde es un banco de pruebas que mida en la topología de producción —`npm run bench`, con la API en la red de compose—, anotado en `ESTADO.md` para P9, que trae su propio presupuesto de 800 ms.
 
+## Lo que destapó al cerrar P9: un check que pasa en verde sin medir nada
+
+**El commit de P9 pasó el hook de pre-commit sin correr una sola prueba de integración.** En verde, y avisándolo en una línea que es fácil no leer:
+
+```
+audit:tests  PARCIAL — unitarias en verde; integracion omitida
+             (nada escucha en 127.0.0.1:5432)
+```
+
+**La base estaba arriba y sana.** `docker compose ps` la daba healthy y el puerto escuchando. Lo que falló fue la sonda TCP de `tools/audit/tests.mjs`: un intento con plazo de 1,5 s, tragado por el mismo atasco de esta ficha.
+
+**Es INC-007 caso 8 otra vez, y en el peor sitio posible**: la degradación ocurre justo bajo las condiciones que hacen falso todo lo demás.
+
+El defecto de fondo estaba en la pregunta. Un solo intento no pregunta «¿está la base?» sino «¿está **y además responde rápido ahora mismo**?». Tres intentos separan las dos cosas: una base apagada falla las tres al instante —`ECONNREFUSED` no agota plazo—, y una base viva detrás de un transporte con hipo contesta a la segunda.
+
+**Corregido en el mismo paquete**, que es lo que el README de incidencias exige: `INTENTOS = 3`.
+
 ## Prevención
 
 **La regla que queda, y vale para todo presupuesto de §5:** antes de creerse un número de rendimiento —bueno o malo—, comprueba **por dónde viaja el dato**. Una medición a través del proxy de Docker en Windows no es una medición del sistema.

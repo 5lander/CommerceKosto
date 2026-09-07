@@ -98,6 +98,24 @@ Tres consecuencias, hermanas de las tres de P6:
 
 Guardián: `docs/pasos/P7/evidencia/guardian-4-confidencialidad-frente-a-bodega.txt`, que lo rompe por los dos sitios reales —relajar el permiso, y añadir un campo a la proyección «básica»— y captura los dos fallos.
 
+
+---
+
+## El permiso de nivel company — P9
+
+`analytics.consolidated.read` protege las tres rutas del consolidado, y **`GERENTE_LOCAL` no lo tiene**.
+
+| Rol | ¿Ve la cadena? | Por qué |
+|---|---|---|
+| `OWNER`, `ADMIN` | Sí | Mandan sobre la company |
+| `LECTURA` | Sí | Rol de solo lectura de nivel company — el contador, el socio |
+| `GERENTE_LOCAL` | **No, 403** | Vería, sumadas y comparadas, las ventas y los márgenes de los locales de sus compañeros |
+| `BODEGA` | No | Ya no recibe ninguna vista analítica desde P8 |
+
+**Es la tercera vez que aparece la misma línea**, y conviene verla junta: P4 se la negó en la propagación de recetas (criterio E18), P6 y P7 en el saldo y la conciliación, y P9 en el consolidado. La regla que las une es la de CLAUDE.md §4.4: **un gerente manda en su local, no en la cadena ni en el local de al lado.**
+
+**Dónde se comprueba.** En la primera línea de cada caso de uso, en su propia función, nunca dentro de un refinamiento — CLAUDE.md §3, y la razón está en INC-008. Cuatro pruebas de integración: tres de 403, una por ruta, y una cuarta que verifica que el gerente **sigue viendo la vista de su ubicación**. Sin esa cuarta, una restricción demasiado ancha pasaría por buena.
+
 ### Y por tercera vez, en las vistas analíticas *(P8)*
 
 `BODEGA` no recibe **ninguna** de las seis vistas. Todas llevan consumo teórico, stock teórico, diferencias o costos: cuatro de los seis datos prohibidos de la matriz, y desde cualquiera de ellos se despeja la receta por la misma aritmética.

@@ -13,6 +13,7 @@
 import { Module } from '@nestjs/common';
 
 import { CatalogModule } from '../catalog/catalog.module';
+import { IamModule } from '../iam/iam.module';
 import { CostingModule } from '../costing/costing.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PeriodsModule } from '../periods/periods.module';
@@ -23,6 +24,11 @@ import {
   RegistrarCostosFijos,
   RegistrarVentas,
 } from './application/casos-de-uso/carga';
+import {
+  CompararComprasEntreUbicaciones,
+  CompararProductosEntreUbicaciones,
+  ConsultarConsolidado,
+} from './application/casos-de-uso/consolidado';
 import {
   ConsultarFoodCostReal,
   ConsultarInventarioValorizado,
@@ -37,7 +43,9 @@ import {
   AnaliticaController,
   CargaController,
   CargasDelMes,
+  ConsolidadoController,
   ReposicionController,
+  VistasDeLaCadena,
   VistasDelMes,
 } from './infrastructure/http/analitica.controller';
 import { PrismaAnaliticaRepositorio } from './infrastructure/prisma-analitica.repositorio';
@@ -45,8 +53,8 @@ import { PrismaAnaliticaRepositorio } from './infrastructure/prisma-analitica.re
 type Deps = DependenciasDeAnaliticaNest;
 
 @Module({
-  imports: [CatalogModule, CostingModule, InventoryModule, PeriodsModule, PricingModule],
-  controllers: [CargaController, AnaliticaController, ReposicionController],
+  imports: [CatalogModule, CostingModule, IamModule, InventoryModule, PeriodsModule, PricingModule],
+  controllers: [CargaController, AnaliticaController, ConsolidadoController, ReposicionController],
   providers: [
     { provide: REPOSITORIO_DE_ANALITICA, useClass: PrismaAnaliticaRepositorio },
 
@@ -66,6 +74,16 @@ type Deps = DependenciasDeAnaliticaNest;
           costos: new RegistrarCostosFijos(d),
           leerVentas: new ConsultarVentas(d),
           leerCostos: new ConsultarCostosFijos(d),
+        }),
+    },
+    {
+      provide: VistasDeLaCadena,
+      inject: [DependenciasDeAnaliticaNest],
+      useFactory: (d: Deps): VistasDeLaCadena =>
+        new VistasDeLaCadena({
+          total: new ConsultarConsolidado(d),
+          productos: new CompararProductosEntreUbicaciones(d),
+          compras: new CompararComprasEntreUbicaciones(d),
         }),
     },
     {

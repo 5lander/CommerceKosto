@@ -31,6 +31,7 @@ import {
   productionId as aProductionId,
   transferId as aTransferId,
   type CompanyId,
+  type ItemId,
   type LocationId,
   type MovementId,
   type ProductionId,
@@ -42,6 +43,7 @@ import { TenantTransaction } from '../../../shared/infrastructure/persistence/te
 import { DIRECCION_DE, type TipoDeMovimiento } from '../domain/movimiento';
 import type {
   AgregadoDeItem,
+  CompraPorArticulo,
   ConsultaDelLibro,
   DatosDeProduccionRegistrada,
   DatosDeTransferenciaRegistrada,
@@ -460,6 +462,45 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
       });
 
       return plegarAgregados(filas);
+    });
+  }
+
+  /**
+   * Lo pagado y lo recibido por (ubicacion, item, articulo) — la comparativa
+   * de compras de P9.
+   *
+   * `groupBy` agrega en SQL, no en la aplicacion (CLAUDE.md §5).
+   *
+   * **DEVUELVE IDS, NO NOMBRES, y eso lo decidio `audit:forbidden`.** La primera
+   * version resolvia aqui los nombres del item y del articulo con dos lecturas
+   * de catalogo, y la regla `tablas-de-catalogo-solo-en-catalog` la paro: el
+   * catalogo es fuente unica de verdad y se lee por sus puertos, no por sus
+   * tablas desde otro modulo (CLAUDE.md §2). Los nombres los pone `analytics`
+   * con `ListarItems` y `ListarArticulos`, que es donde corresponde.
+   */
+  public async comprasPorArticulo(entrada: {
+    readonly companyId: CompanyId;
+    readonly desde: Date;
+    readonly hasta: Date;
+  }): Promise<readonly CompraPorArticulo[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.inventoryMovement.groupBy({
+        by: ['locationId', 'itemId', 'purchaseArticleId'],
+        where: {
+          companyId: entrada.companyId,
+          occurredAt: { gte: entrada.desde, lt: entrada.hasta },
+          type: COMPRA,
+        },
+        _sum: { quantity: true, totalCost: true },
+      });
+
+      return filas.map((fila) => ({
+        locationId: fila.locationId as LocationId,
+        itemId: fila.itemId as ItemId,
+        purchaseArticleId: fila.purchaseArticleId,
+        importe: (fila._sum.totalCost ?? CERO_DECIMAL).toFixed(),
+        cantidad: (fila._sum.quantity ?? CERO_DECIMAL).toFixed(),
+      }));
     });
   }
 

@@ -113,6 +113,9 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
     { provide: APP_GUARD, useClass: SesionGuard },
     { provide: APP_GUARD, useClass: PermisosGuard },
   ],
-  exports: [ValidarSesion],
+  // `ListarUbicaciones` se exporta desde P9: el consolidado necesita saber
+  // que ubicaciones tiene la company, y pedirlo por el caso de uso es lo que
+  // mantiene el alcance de sesion aplicandose una sola vez y en un solo sitio.
+  exports: [ValidarSesion, ListarUbicaciones],
 })
 export class IamModule {}

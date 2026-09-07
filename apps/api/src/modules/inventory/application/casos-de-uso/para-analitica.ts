@@ -24,7 +24,10 @@ import {
   exigirUbicacionEnAlcance,
   type SesionActiva,
 } from '../../../iam/application/casos-de-uso/validar-sesion';
-import type { AgregadoDeItem } from '../ports/repositorio-de-inventario.port';
+import type {
+  AgregadoDeItem,
+  CompraPorArticulo,
+} from '../ports/repositorio-de-inventario.port';
 import {
   catalogoDeConsumo,
   totalConsumido,
@@ -47,6 +50,27 @@ export class ConsultarAgregadosDelPeriodo {
   ): Promise<readonly AgregadoDeItem[]> {
     exigirUbicacionEnAlcance(sesion, entrada.locationId);
     return this.deps.repositorio.agregadosDelPeriodo({ companyId: sesion.companyId, ...entrada });
+  }
+}
+
+/**
+ * Lo que cada ubicación pagó por cada ítem en el período — la comparativa de
+ * compras de P9.
+ *
+ * **NO COMPRUEBA ALCANCE DE UBICACIÓN, y es a propósito.** Esta consulta es de
+ * company entera: su razón de ser es cruzar ubicaciones. Quien la llama tiene
+ * que haber exigido antes el permiso de nivel company, y lo hace
+ * `CompararComprasEntreUbicaciones` en su primera línea. Un `GERENTE_LOCAL` no
+ * llega hasta aquí.
+ */
+export class ConsultarComprasPorArticulo {
+  public constructor(private readonly deps: DependenciasDeConteo) {}
+
+  public async ejecutar(
+    sesion: SesionActiva,
+    entrada: { readonly desde: Date; readonly hasta: Date },
+  ): Promise<readonly CompraPorArticulo[]> {
+    return this.deps.repositorio.comprasPorArticulo({ companyId: sesion.companyId, ...entrada });
   }
 }
 
