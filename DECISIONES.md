@@ -234,13 +234,37 @@ No diseñar la integración. Solo no cerrarle la puerta.
 
 ---
 
-## D10 — Hosting y despliegue 🟡
+## D10 — Hosting y despliegue ✅
 
-**Valor provisional:** contenedores sobre AWS, con PostgreSQL gestionado. La decisión concreta de servicio se posterga al paquete de endurecimiento.
+**Resuelta en la Fase B, el 2026-09-08. El detalle completo está en `docs/decisiones/ADR-016`.**
 
-Consecuencia obligatoria desde P0: **nada específico de proveedor en el código de aplicación.** Almacenamiento de archivos y correo van tras puerto con fake.
+**Un único VPS en Hostinger corriendo el `docker-compose` del proyecto: PostgreSQL, PgBouncer y la
+API en la misma máquina.** El valor provisional decía «contenedores sobre AWS con PostgreSQL
+gestionado»; se decidió distinto, y estas son las tres razones:
+
+1. **El arranque de roles funciona tal cual está probado.** `docker/postgres/initdb/` crea
+   `costeo_migrator` y `costeo_app` y aplica `grants.sql`. Ese hook **solo existe si la base es
+   nuestra**: con un gestionado hay que reescribirlo como script de arranque — código nuevo, no
+   probado, en la pieza de la que depende la Barrera 1 entera.
+2. **PgBouncer es el nuestro, en modo transacción**, que es exactamente contra lo que
+   `pgbouncer.spec.ts` demuestra la cuarta condición de D12.
+3. **Con un cliente, lo que importa es poder arreglarlo a las once de la noche**, y eso es
+   `docker compose logs`, no una consola con VPC, IAM y grupos de parámetros.
+
+**Lo que se pierde, registrado como decisión y no como olvido:** no hay failover, los parches del
+sistema son nuestros, y **el respaldo es nuestro**. Los de Hostinger son semanales y del VPS entero;
+el libro de inventario es append-only y no se reconstruye desde ningún otro sitio. Por eso la
+decisión viene con una condición no opcional: **`pg_dump` diario más archivado de WAL fuera de la
+máquina, con restauración probada** (`scripts/respaldo.mjs`).
+
+**Se revisa** con el segundo cliente de pago, con más de diez ubicaciones en una company, tras
+cualquier caída que cueste datos, o en P15 — lo que llegue antes.
+
+Consecuencia obligatoria desde P0, que no cambia: **nada específico de proveedor en el código de
+aplicación.** Almacenamiento de archivos y correo van tras puerto con fake.
 
 ---
+
 
 ## D11 — Idioma y localización 🟡
 

@@ -1,0 +1,28 @@
+# Caddy — el unico proceso que mira a internet.
+#
+# TLS AUTOMATICO: Caddy pide el certificado a Let's Encrypt en el primer
+# arranque y lo renueva solo. No hay cron, ni hook de recarga, ni un certificado
+# caducado un domingo por la manana.
+#
+# REQUISITO: el dominio tiene que resolver a la IP del VPS ANTES de levantar
+# esto. Let's Encrypt valida por HTTP en el puerto 80; si el DNS no ha
+# propagado, el certificado falla y Caddy reintenta con espera creciente.
+
+{
+	email {$CORREO_TLS}
+}
+
+{$DOMINIO} {
+	# Las cabeceras de seguridad las pone la APLICACION, no el proxy
+	# (`shared/infrastructure/http/security-headers.ts`, 18 pruebas en
+	# `audit:sec-headers`). Ponerlas tambien aqui las duplicaria y crearia dos
+	# sitios que mantener en sincronia — y el dia que difieran, gana la que no
+	# esta probada.
+	reverse_proxy api:3000
+
+	# El registro va a stdout, que es de donde `docker compose logs` lo lee.
+	log {
+		output stdout
+		format json
+	}
+}

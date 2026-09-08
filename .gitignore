@@ -26,6 +26,9 @@ Desktop.ini
 .vscode/*
 !.vscode/extensions.json
 
+# Respaldos locales — datos, jamas en el repositorio
+.respaldos/
+
 # Registros locales
 *.log
 npm-debug.log*

@@ -17,6 +17,7 @@
       "entry": [
         "src/main.ts",
         "src/cli.ts",
+        "src/hashear.ts",
         "src/**/*.module.ts",
         "src/**/*.spec.ts",
         "test/**/*.ts",

@@ -133,13 +133,33 @@ export function aplicarSql({ conexion, sql, descripcion }) {
 
 /**
  * Consulta que devuelve texto plano, sin cabeceras ni alineacion.
- * @param {{conexion: string, sql: string}} peticion
+ *
+ * `variables` es la forma SEGURA de meter un valor en el SQL, y es la misma que
+ * `docker/postgres/initdb/sql/roles.sql` usa desde P0: se pasan con `-v` y se
+ * referencian como `:'nombre'`, y **psql las entrecomilla y las escapa**. No es
+ * escapar a mano: es delegarlo en quien sabe hacerlo.
+ *
+ * POR QUE ESTO Y NO INTERPOLAR EN LA CADENA. Interpolar es inyeccion SQL, y la
+ * regla `no-sql-interpolado` de `audit:forbidden` lo caza. Un identificador
+ * —nombre de tabla o de base— no se puede pasar asi, y la respuesta del
+ * proyecto a eso es no tenerlos dinamicos, no abrir una exencion.
+ *
+ * OJO: las variables solo se sustituyen cuando el SQL entra por **stdin**, no
+ * con `-c`. Es INC-009, y por eso esta funcion usa `-f -`.
+ *
+ * @param {{conexion: string, sql: string, variables?: Readonly<Record<string, string>>}} peticion
  * @returns {string}
  */
-export function consultar({ conexion, sql }) {
+export function consultar({ conexion, sql, variables = {} }) {
+  const declaraciones = Object.entries(variables).flatMap(([clave, valor]) => [
+    '-v',
+    `${clave}=${valor}`,
+  ]);
+
   const { estado, salida, error } = ejecutar({
     conexion,
-    argumentos: ['-t', '-A', '-c', sql],
+    argumentos: [...declaraciones, '-t', '-A', '-f', '-'],
+    entrada: sql,
     silencioso: true,
   });
 

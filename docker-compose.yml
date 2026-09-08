@@ -47,8 +47,13 @@ services:
       - log_min_duration_statement=200
       - -c
       - pg_stat_statements.track=all
+    # ATADO A 127.0.0.1 A PROPOSITO. Con `- '5432:5432'` Docker publica en
+    # 0.0.0.0 y **abre un agujero en el cortafuegos del host sin avisar**: las
+    # reglas de `ufw` no ven el trafico que Docker mete por su propia cadena de
+    # iptables. En la maquina de desarrollo da igual; en el VPS es la diferencia
+    # entre una base local y una base en internet.
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       # Solo lectura: el contenedor no debe poder alterar sus propios scripts.
       - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -103,7 +108,7 @@ services:
       MAX_CLIENT_CONN: '50'
       IGNORE_STARTUP_PARAMETERS: extra_float_digits,options,search_path
     ports:
-      - '${PGBOUNCER_PORT:-6432}:5432'
+      - '127.0.0.1:${PGBOUNCER_PORT:-6432}:5432'
     healthcheck:
       test: ['CMD-SHELL', 'nc -z 127.0.0.1 5432']
       interval: 5s
@@ -133,8 +138,11 @@ services:
       MAIL_ADAPTER: fake
       STORAGE_ADAPTER: fake
       LOG_LEVEL: info
+    # En produccion quien atiende internet es Caddy, que llega a la API por la
+    # red interna de compose. Este puerto queda en local para poder mirar la API
+    # sin pasar por el proxy cuando algo va mal.
     ports:
-      - '${API_PORT:-3000}:3000'
+      - '127.0.0.1:${API_PORT:-3000}:3000'
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
