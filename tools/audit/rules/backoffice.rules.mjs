@@ -18,7 +18,7 @@
  * acabaria relajado. Cada una nombra su via.
  */
 
-const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts'];
 const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 
 /** El unico sitio donde la conexion privilegiada puede existir. */

@@ -41,7 +41,7 @@
  */
 const MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql';
 
-const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
 
 /**
  * El propio escaner y sus fixtures contienen a proposito los textos que
@@ -125,7 +125,7 @@ export const coreRules = [
     porQue:
       'En Windows el shell no PASA los argumentos: los concatena sin comillas, y uno con espacios (una consulta SQL, una ruta) llega troceado. La via correcta es `correr` / `correrCli` de scripts/lib/proceso.mjs. Ver docs/incidencias/INC-006.',
     patron: /shell:\s*(?:true|process\.platform\s*===\s*['"]win32['"])/g,
-    incluye: ['tools/**/*.mjs', 'scripts/**/*.mjs', 'apps/*/src/**/*.ts'],
+    incluye: ['tools/**/*.mjs', 'scripts/**/*.mjs', 'apps/*/src/**/*.{ts,tsx}'],
     // proceso.mjs es quien encapsula la decision: contiene `shell: false`.
     excluye: [...META, 'scripts/lib/proceso.mjs'],
     desde: 'P0',

@@ -203,7 +203,7 @@ Nota sobre `webhook.signature.invalid`: se reactiva el día que exista un webhoo
 
 ### Auditoría de login reforzada
 - **Cada login registra IP, geo aproximada, user agent y device_id** — éxitos Y fallos
-- **Login desde dispositivo o ubicación nueva → correo de aviso al titular** ("Nuevo inicio de sesión en {nombre del producto} desde {ciudad} · {dispositivo}. ¿No fuiste tú? Asegura tu cuenta aquí"). El nombre sale de `config/branding.ts` (D1), nunca literal en el código
+- **Login desde dispositivo o ubicación nueva → correo de aviso al titular** ("Nuevo inicio de sesión en {nombre del producto} desde {ciudad} · {dispositivo}. ¿No fuiste tú? Asegura tu cuenta aquí"). El nombre sale de `apps/web/src/textos/es.ts` → `TEXTOS.producto` (D1, cerrada en P14: **Platise**), nunca literal en el código
 - El usuario puede ver sus **sesiones activas** (dispositivo, ubicación, última actividad) y **cerrar cualquiera** desde su perfil
 - Panel de actividad de la cuenta: historial de logins visible al `OWNER` y a los `ADMIN` de la company
 - Anomalías que generan alerta interna: login exitoso tras ráfaga de fallos · misma cuenta desde dos países en ventana corta · operador de back office fuera de horario habitual · recorrido masivo de recetas

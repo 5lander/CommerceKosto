@@ -18,7 +18,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/Estados';
+import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { ErrorDeApi, llamar } from '../../lib/api';
 import { useSucursal, type Sucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
@@ -85,7 +85,7 @@ export default function ElegirSucursal(): ReactNode {
 
   return (
     <Pantalla>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 'var(--espacio-2)' }}>
+      <ul className="lista-limpia pila pila--minima">
         {sucursales.map((sucursal) => (
           <li key={sucursal.id}>
             <button
@@ -93,18 +93,10 @@ export default function ElegirSucursal(): ReactNode {
               onClick={() => {
                 seleccionar(sucursal.id);
               }}
-              style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left' }}
+              className="opcion"
             >
-              <span style={{ fontSize: 'var(--texto-lg)' }}>{sucursal.nombre}</span>
-              <span
-                style={{
-                  marginLeft: 'var(--espacio-2)',
-                  color: 'var(--color-texto-tenue)',
-                  fontSize: 'var(--texto-sm)',
-                }}
-              >
-                {sucursal.tipo}
-              </span>
+              <span>{sucursal.nombre}</span>
+              <span className="etiqueta">{sucursal.tipo}</span>
             </button>
           </li>
         ))}
@@ -115,13 +107,11 @@ export default function ElegirSucursal(): ReactNode {
 
 function Pantalla({ children }: { readonly children: ReactNode }): ReactNode {
   return (
-    <main
-      style={{ maxWidth: '32rem', margin: '0 auto', padding: 'var(--espacio-8) var(--espacio-4)' }}
-    >
-      <h1 style={{ fontSize: 'var(--texto-xl)' }}>{TEXTOS.sucursal.titulo}</h1>
-      <p style={{ color: 'var(--color-texto-suave)', marginBottom: 'var(--espacio-6)' }}>
-        {TEXTOS.sucursal.ayuda}
-      </p>
+    <main className="pantalla pila">
+      <div className="pila pila--minima">
+        <h1 className="titulo">{TEXTOS.sucursal.titulo}</h1>
+        <p className="subtitulo">{TEXTOS.sucursal.ayuda}</p>
+      </div>
       {children}
     </main>
   );

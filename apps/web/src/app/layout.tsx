@@ -7,7 +7,8 @@ import '../styles/global.css';
 
 export const metadata: Metadata = {
   title: TEXTOS.producto,
-  description: 'Costeo de alimentos, inventario por sucursal y analítica de menú.',
+  description: TEXTOS.firma,
+  icons: { icon: '/marca/isotipo.svg' },
 };
 
 export default function RootLayout({ children }: { readonly children: ReactNode }): ReactNode {

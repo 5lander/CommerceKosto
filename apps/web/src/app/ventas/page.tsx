@@ -25,8 +25,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/Estados';
+import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { Marco } from '../../componentes/Marco';
+import { Tabla } from '../../componentes/ui/Tabla';
 import { llamar } from '../../lib/api';
 import { useSucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
@@ -187,9 +188,9 @@ export default function Ventas(): ReactNode {
       titulo={TEXTOS.ventas.titulo}
       ayuda={TEXTOS.ventas.ayuda}
       acciones={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--espacio-3)' }}>
+        <div className="linea">
           {confirmado && cambiadas.length === 0 && (
-            <span role="status" style={{ color: 'var(--color-bien)' }}>
+            <span role="status" className="bien">
               {TEXTOS.ventas.guardado}
             </span>
           )}
@@ -226,68 +227,55 @@ export default function Ventas(): ReactNode {
       )}
 
       {carta !== null && activos.length > 0 && (
-        <>
-          <p style={{ color: 'var(--color-texto-suave)', fontSize: 'var(--texto-sm)', marginTop: 0 }}>
-            {TEXTOS.ventas.atajos}
-          </p>
+        <div className="pila pila--apretada">
+          <p className="nota">{TEXTOS.ventas.atajos}</p>
 
-          <div style={{ background: 'var(--color-superficie)', border: '1px solid var(--color-borde)', borderRadius: 'var(--radio-lg)', overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-borde)' }}>
-                  <th style={{ textAlign: 'left', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                    {TEXTOS.costeo.producto}
-                  </th>
-                  <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {TEXTOS.ventas.mesAnterior}
-                  </th>
-                  <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                    {TEXTOS.ventas.unidades}
-                  </th>
+          <Tabla>
+            <thead>
+              <tr>
+                <th>{TEXTOS.costeo.producto}</th>
+                <th>{TEXTOS.ventas.mesAnterior}</th>
+                <th>{TEXTOS.ventas.unidades}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activos.map((producto, indice) => (
+                <tr key={producto.productId}>
+                  <td>
+                    {producto.nombre}
+                    {producto.categoria !== null && (
+                      <span className="bloque tenue">{producto.categoria}</span>
+                    )}
+                  </td>
+
+                  <td className="numero tenue">
+                    {anteriores.get(producto.productId) ?? TEXTOS.comun.sinDato}
+                  </td>
+
+                  <td className="numero">
+                    <input
+                      ref={(elemento) => {
+                        campos.current[indice] = elemento;
+                      }}
+                      className="celda-editable"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      aria-label={`${TEXTOS.ventas.unidades} · ${producto.nombre}`}
+                      value={valores.get(producto.productId) ?? ''}
+                      onChange={(e) => {
+                        escribir(producto.productId, e.target.value);
+                      }}
+                      onKeyDown={(e) => {
+                        teclas(e, indice);
+                      }}
+                    />
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {activos.map((producto, indice) => (
-                  <tr key={producto.productId} style={{ borderBottom: '1px solid var(--color-borde)' }}>
-                    <td style={{ padding: 'var(--espacio-2) var(--espacio-3)' }}>
-                      {producto.nombre}
-                      {producto.categoria !== null && (
-                        <span style={{ display: 'block', color: 'var(--color-texto-tenue)', fontSize: 'var(--texto-xs)' }}>
-                          {producto.categoria}
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="numero" style={{ padding: 'var(--espacio-2) var(--espacio-3)', color: 'var(--color-texto-tenue)' }}>
-                      {anteriores.get(producto.productId) ?? '—'}
-                    </td>
-
-                    <td style={{ padding: 'var(--espacio-2) var(--espacio-3)', textAlign: 'right' }}>
-                      <input
-                        ref={(elemento) => {
-                          campos.current[indice] = elemento;
-                        }}
-                        className="numero"
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="off"
-                        aria-label={`${TEXTOS.ventas.unidades} · ${producto.nombre}`}
-                        value={valores.get(producto.productId) ?? ''}
-                        onChange={(e) => {
-                          escribir(producto.productId, e.target.value);
-                        }}
-                        onKeyDown={(e) => {
-                          teclas(e, indice);
-                        }}
-                        style={{ width: '7rem', textAlign: 'right' }}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+              ))}
+            </tbody>
+          </Tabla>
+        </div>
       )}
     </Marco>
   );

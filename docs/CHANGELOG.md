@@ -4,6 +4,71 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P14 — Capa visual · 2026-09-08
+
+**La identidad de `docs/Manual de Marca/platise-brand-book.pdf` entra en `apps/web`, y ni una línea
+de `apps/api` cambia.** El producto se llama **Platise**: el manual lo publica desde agosto, y con
+eso se cierra D1, que llevaba desde P0 con «Costeo» como provisional y la nota «no inventar
+branding». No se inventó: se abrió el archivo.
+
+**Los valores se leyeron del PDF, no de una captura.** El manual está exportado desde Chromium, así
+que sus colores viven como operadores `rg` con cuatro decimales y su tipografía como fuentes
+incrustadas. La prueba de que la lectura es correcta no es que se parezca: **los seis ratios de
+contraste que el manual publica se recalcularon uno a uno y dan sus mismas cifras**, hasta el
+segundo decimal. Si un hex estuviera mal leído, alguno de los seis no cuadraría.
+
+**El panel operativo va en claro, sin vidrio y sin sombra, y no lo decide el gusto.** El manual
+publica una columna oscura de tokens y aun así dice, en su página de interfaz: «un panel oscuro con
+vidrio gana en portafolio y pierde al chef en la cocina; esa es una decisión de producto, no de
+estética». Y prohíbe el vidrio detrás de una tabla densa porque baja el contraste del texto pequeño.
+Esta aplicación es tabla densa entera, así que no hay tokens de vidrio ni de sombra: enviarlos sería
+código muerto.
+
+**El semáforo de food cost usa los tres significados del manual, no un verde-ámbar-rojo.** Jade para
+lo que sostiene, Persimmon **Profundo** para lo que pide atención y Oxblood —que el manual llama
+literalmente «pérdida»— para lo que la produce. Persimmon vivo no se usa como texto: con 3,93:1
+reprueba, y el manual lo dice antes de que a nadie se le ocurra. Su variante profunda da 5,64:1,
+calculado aquí porque el manual no lo publica.
+
+**El logotipo se extrajo de las curvas de Bézier del PDF, no se redibujó.** El manual da las
+fórmulas del isotipo, y redibujar desde una fórmula es interpretar. La geometría extraída reproduce
+su tabla de construcción sin que se le impusiera: caja de 61,803 × 100 (`H/φ`), trazo de 11,803,
+panza de `rx` 26,75 y `ry` 25, y la rotura del arco a −21,25°, que es `−90 + 180/φ²`.
+
+**Las fuentes se autoalojan.** Inter e IBM Plex Mono, subconjuntos latin y latin-ext, 185 kB. Sin
+`next/font/google`: descarga en tiempo de build, y el frontend todavía no tiene cadena de despliegue
+escrita — no conviene que nazca dependiendo de tener red para construir. Además, así el navegador de
+un dueño de restaurante no le pide nada a un tercero. **Se verificó la licencia SIL OFL 1.1 de las
+dos**, que el propio manual declaraba pendiente sin verificar.
+
+**Fraunces no se sirve**, y es la decisión más discutible del paquete: el manual la asigna al nivel
+Display, de 66 a 172 px, para «aperturas», y su página de interfaz no la usa en el panel operativo.
+Traerla para usarla a 24 px sería inventar un tamaño que el manual no contempla. Reversible en diez
+minutos si se prefiere lo contrario.
+
+**Y `componentes/ui`, que §10 nombra desde P0 y no existía.** La capa visual vivía en 107 bloques
+`style={{…}}` repartidos por las páginas: para cambiar el aspecto había que abrir los archivos que
+traen los datos, o sea que la promesa de §10 no era cierta estructuralmente. Ahora quedan cero.
+
+**Lo que la auditoría destapó, y es lo más importante del paquete:** después de añadir tres archivos
+y borrar uno, `audit:forbidden` seguía diciendo «346 archivos». Los patrones decían
+`apps/*/src/**/*.ts` y **ninguno `.tsx`**: las 34 reglas nunca habían examinado una sola de las 2.000
+líneas del frontend. Corregido a `*.{ts,tsx}`, el contador se mueve a 359 y el guardián lo confirma.
+Es la **décima** recurrencia de INC-007 — y la lección nueva es que un glob de extensión es un
+alcance con fecha de caducidad, que solo delata un contador que no se mueve.
+
+**Se revirtieron dos correcciones de CSS que no corregían nada.** Se añadieron contra un
+desbordamiento horizontal deducido de una captura; medido, el desbordamiento no existía y la captura
+era una maqueta sin `meta viewport`. Un comentario que dice «esto evita un fallo» cuando no lo evita
+es peor que no tener comentario.
+
+Pendiente: el margen de referencia se muestra con 12 decimales porque la API lo manda a escala de
+almacenamiento sin el par `mostrar`/`exacto`. Arreglarlo bien es un cambio de la API, que el
+criterio de aceptación de P14 prohíbe. **Auditoría: OK · 585 unitarias + 313 de integración, sin
+modificar ninguna.**
+
+---
+
 ## P13 — Frontend del back office · 2026-09-08
 
 **La interfaz la sirve el propio proceso del back office (ADR-018).** Cuatro vistas —entrar,

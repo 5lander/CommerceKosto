@@ -32,7 +32,7 @@
  */
 const MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql';
 
-const CODIGO = ['apps/*/src/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
 const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 
 /** Nombre de la tabla en snake_case y su equivalente en el cliente de Prisma. */

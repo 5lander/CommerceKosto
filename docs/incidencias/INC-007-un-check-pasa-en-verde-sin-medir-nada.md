@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
-| **Recurrencias** | **9** |
+| **Recurrencias** | **10** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -127,6 +127,58 @@ pero el archivo se genero desde una cadena de otro lenguaje donde `` **no es «
 Tiene su prueba del guardian: se vuelve a meter el retroceso en `tools/audit/migrations.mjs`, se comprueba que el check falla senalando linea y columna, y se revierte. La salida esta en `docs/pasos/P5/evidencia/guardian-5-caracter-de-control.txt`.
 
 **Esta es la primera prevencion de INC-007 que ataca la CAUSA y no el sintoma.** Las siete anteriores enseñaban a desconfiar del verde; esta impide que el fallo se escriba.
+
+## Caso 10 (P14) — la misma trampa, ahora con la extensión del archivo
+
+**Otra vez lo delató el contador de archivos, y otra vez porque NO se movió.**
+
+### Qué pasó
+
+P14 añade tres `.tsx` a `apps/web` y borra uno. Después del cambio, el check
+seguía diciendo lo mismo que antes:
+
+```
+audit:forbidden  OK — 34 reglas sobre 346 archivos
+```
+
+Tres archivos más y uno menos, y el número clavado. O el contador no cuenta, o
+esos archivos no los mira nadie.
+
+### La causa
+
+Todos los patrones dicen `apps/*/src/**/*.ts`. **Ninguno decía `.tsx`.**
+
+Las 34 reglas —`: any`, `as any`, `@ts-ignore`, `eslint-disable`, marcadores
+pendientes— **nunca examinaron una sola línea del frontend**. La Fase C construyó
+2.000 líneas en cinco pantallas y ninguna pasó por aquí.
+
+Es exactamente el caso 9 con otra ropa: allí el glob fallaba por la ruta, aquí
+por la extensión. En los dos el efecto es el mismo —una regla que no mira nada
+no falla nunca— y en los dos lo único que chirrió fue un número.
+
+### El arreglo
+
+Los siete patrones, en seis archivos de reglas, pasan a:
+
+```js
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts'];
+```
+
+El contador se mueve a **359**, que son los 13 `.tsx` que faltaban, contados uno
+a uno.
+
+**Y el guardián, que es la otra mitad:** con un `// @ts-ignore` y un
+`const colado: any = 1` metidos a propósito en `ui/Tabla.tsx`, el check pasa a
+`FALLO — 2 infraccion(es)` y las nombra con su línea. Antes las dos pasaban en
+silencio.
+
+### La lección, que es nueva
+
+**Un glob de extensión es un alcance con fecha de caducidad.** El día que el
+repositorio ganó un tipo de archivo nuevo, treinta y cuatro reglas se quedaron
+mirando a otro lado sin que nada fallara. No hay forma de que un check avise de
+lo que no está mirando: **lo único que lo delata es que el contador no se mueva
+cuando el repositorio sí lo hace.** Por eso ese número se lee en cada paquete.
 
 ## Caso 9 (P6) — la regla llevaba desde P0 sin mirar una sola migración
 

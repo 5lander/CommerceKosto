@@ -21,7 +21,7 @@
  * la abierta es siempre la que alguien encuentra.
  */
 
-const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts'];
 const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 
 /** Lo unico autorizado a escribir en las tablas del catalogo. */

@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/Estados';
+import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { Marco } from '../../componentes/Marco';
 import { llamar } from '../../lib/api';
 import { useSucursal } from '../../lib/sesion';
@@ -64,15 +64,6 @@ const ORDEN: readonly Cuadrante[] = [
   'SIN_DATOS',
   'INACTIVO',
 ];
-
-const COLOR: Readonly<Record<Cuadrante, string>> = {
-  ESTRELLA: 'var(--color-bien)',
-  CABALLO: 'var(--color-atencion)',
-  ROMPECABEZAS: 'var(--color-atencion)',
-  PERRO: 'var(--color-mal)',
-  SIN_DATOS: 'var(--color-texto-tenue)',
-  INACTIVO: 'var(--color-texto-tenue)',
-};
 
 function mesActual(): { readonly anio: number; readonly mes: number } {
   const ahora = new Date();
@@ -130,10 +121,10 @@ export default function MenuEngineering(): ReactNode {
       )}
 
       {menu !== null && conVentas.length > 0 && (
-        <>
+        <div className="pila">
           <Referencia menu={menu} />
           <Matriz menu={menu} nombres={nombres} />
-        </>
+        </div>
       )}
     </Marco>
   );
@@ -149,30 +140,20 @@ function Referencia({ menu }: { readonly menu: Menu }): ReactNode {
   if (menu.mcPromedio === null || menu.mcTotal === null) return null;
 
   return (
-    <section
-      style={{
-        background: 'var(--color-superficie)',
-        border: '1px solid var(--color-borde)',
-        borderRadius: 'var(--radio-lg)',
-        padding: 'var(--espacio-4)',
-        marginBottom: 'var(--espacio-6)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 'var(--espacio-3)', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--color-texto-suave)' }}>{TEXTOS.menu.referencia}</span>
-        <strong className="numero" style={{ fontSize: 'var(--texto-xl)' }}>
-          {menu.mcPromedio}
-        </strong>
+    <section className="panel panel--relleno pila pila--apretada">
+      <div className="dato">
+        <span className="etiqueta">{TEXTOS.menu.referencia}</span>
+        <strong className="cifra cifra--menor">{menu.mcPromedio}</strong>
       </div>
 
-      <p style={{ margin: 'var(--espacio-3) 0 0', color: 'var(--color-texto-suave)', fontSize: 'var(--texto-sm)' }}>
+      <p className="nota">
         Es el <strong>promedio ponderado por unidades vendidas</strong>, no el promedio simple de los
         platos: <span className="numero">{menu.mcTotal}</span> de margen total entre{' '}
         <span className="numero">{menu.unidadesConMargen}</span> unidades. Un plato caro que se vende
         una vez al mes no cuenta lo mismo que uno que se vende cien veces.
       </p>
 
-      <p style={{ margin: 'var(--espacio-2) 0 0', color: 'var(--color-texto-suave)', fontSize: 'var(--texto-sm)' }}>
+      <p className="nota">
         <strong>Si divides por las {menu.unidadesTotales} unidades totales no te va a dar.</strong>{' '}
         Un producto sin precio de venta no entra ni en el margen total ni en las unidades del
         promedio, y por eso los dos números se enseñan por separado.
@@ -189,68 +170,60 @@ function Matriz({
   readonly nombres: ReadonlyMap<string, string>;
 }): ReactNode {
   return (
-    <div style={{ display: 'grid', gap: 'var(--espacio-4)' }}>
+    <div className="pila">
       {ORDEN.map((cuadrante) => {
         const productos = menu.productos.filter((p) => p.cuadrante === cuadrante);
         if (productos.length === 0) return null;
 
         return (
-          <section
-            key={cuadrante}
-            style={{
-              background: 'var(--color-superficie)',
-              border: '1px solid var(--color-borde)',
-              borderLeft: `4px solid ${COLOR[cuadrante]}`,
-              borderRadius: 'var(--radio-lg)',
-              padding: 'var(--espacio-4)',
-            }}
-          >
-            <h2 style={{ fontSize: 'var(--texto-lg)', color: COLOR[cuadrante] }}>
-              {TEXTOS.menu.cuadrantes[cuadrante]}
-            </h2>
-            <p style={{ margin: 'var(--espacio-1) 0 var(--espacio-3)', color: 'var(--color-texto-suave)', fontSize: 'var(--texto-sm)' }}>
-              {TEXTOS.menu.explicaCuadrante[cuadrante]}
-            </p>
-
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--texto-sm)' }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: 'var(--espacio-2)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                    {TEXTOS.costeo.producto}
-                  </th>
-                  <th style={{ textAlign: 'right', padding: 'var(--espacio-2)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                    {TEXTOS.menu.unidades}
-                  </th>
-                  <th style={{ textAlign: 'right', padding: 'var(--espacio-2)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                    {TEXTOS.costeo.margen}
-                  </th>
-                  <th style={{ textAlign: 'right', padding: 'var(--espacio-2)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                    {TEXTOS.menu.indice}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {productos.map((producto) => (
-                  <tr key={producto.productId} style={{ borderTop: '1px solid var(--color-borde)' }}>
-                    <td style={{ padding: 'var(--espacio-2)' }}>
-                      {nombres.get(producto.productId) ?? producto.productId}
-                    </td>
-                    <td className="numero" style={{ padding: 'var(--espacio-2)' }}>
-                      {producto.unidades}
-                    </td>
-                    <td className="numero" style={{ padding: 'var(--espacio-2)' }}>
-                      {producto.margenContribucion ?? '—'}
-                    </td>
-                    <td className="numero" style={{ padding: 'var(--espacio-2)' }}>
-                      {producto.indicePopularidad ?? '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <Cuadrante key={cuadrante} cuadrante={cuadrante} productos={productos} nombres={nombres} />
         );
       })}
     </div>
+  );
+}
+
+function Cuadrante({
+  cuadrante,
+  productos,
+  nombres,
+}: {
+  readonly cuadrante: Cuadrante;
+  readonly productos: readonly ProductoDelMenu[];
+  readonly nombres: ReadonlyMap<string, string>;
+}): ReactNode {
+  return (
+    <section
+      className="panel panel--relleno cuadrante pila pila--apretada"
+      data-cuadrante={cuadrante}
+    >
+      <div className="pila pila--minima">
+        <h2 className="cuadrante__titulo">{TEXTOS.menu.cuadrantes[cuadrante]}</h2>
+        <p className="nota">{TEXTOS.menu.explicaCuadrante[cuadrante]}</p>
+      </div>
+
+      <div className="tabla-marco">
+        <table className="tabla tabla--compacta">
+        <thead>
+          <tr>
+            <th>{TEXTOS.costeo.producto}</th>
+            <th>{TEXTOS.menu.unidades}</th>
+            <th>{TEXTOS.costeo.margen}</th>
+            <th>{TEXTOS.menu.indice}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {productos.map((producto) => (
+            <tr key={producto.productId}>
+              <td>{nombres.get(producto.productId) ?? producto.productId}</td>
+              <td className="numero">{producto.unidades}</td>
+              <td className="numero">{producto.margenContribucion ?? TEXTOS.comun.sinDato}</td>
+              <td className="numero">{producto.indicePopularidad ?? TEXTOS.comun.sinDato}</td>
+            </tr>
+          ))}
+        </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

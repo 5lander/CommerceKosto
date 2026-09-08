@@ -538,3 +538,79 @@ graph TB
 | `/ready` | *readiness* — ¿puede atender tráfico? | Sí |
 
 La distinción tiene coste concreto: si `/health` mirara la base, un corte de PostgreSQL haría que el orquestador **matara y reiniciara todas las réplicas**, que es lo peor que puede pasar durante un corte de base de datos. Con `/ready`, la réplica sale del balanceador y vuelve sola.
+
+---
+
+## La capa visual de la aplicación cliente (desde P14)
+
+`apps/web` viste la identidad de `docs/Manual de Marca/platise-brand-book.pdf`.
+El detalle de las decisiones está en **ADR-019**; aquí va cómo está montado y
+qué se puede tocar sin romper nada.
+
+```mermaid
+graph LR
+    subgraph Reemplazable["Capa visual · se reescribe entera"]
+        TK[tokens.css<br/>paleta, retícula, tipografía]
+        TP[tipografia.css<br/>generado]
+        GL[global.css<br/>vocabulario de clases]
+        UI["componentes/ui/<br/>Marca · Tabla · Estados"]
+    end
+
+    subgraph Estable["No se toca al cambiar el aspecto"]
+        PG["app/*/page.tsx<br/>solo className"]
+        LB["lib/api.ts · lib/sesion.tsx"]
+        TX["textos/es.ts"]
+    end
+
+    TK --> GL
+    TP --> GL
+    GL --> UI
+    GL -.->|clases| PG
+    UI --> PG
+    TX --> PG
+    PG --> LB
+```
+
+### Dónde vive cada cosa
+
+| Capa | Archivo | Se reemplaza |
+|---|---|---|
+| Tokens | `src/styles/tokens.css` | ✅ entero |
+| Tipografía | `src/styles/tipografia.css` (**generado**) + `public/fuentes/` | ✅ entero |
+| Apariencia | `src/styles/global.css` | ✅ entero |
+| Componentes de UI | `src/componentes/ui/` | ✅ entero |
+| Marca | `public/marca/{isotipo,logotipo}.svg` | ✅ entero |
+| Pantallas | `src/app/*/page.tsx` | ⚠️ solo sus `className` |
+| Hooks y servicios | `src/lib/` | ❌ no se toca |
+
+**La prueba de que la separación es real:** `global.css` se puede reescribir
+entero sin abrir una sola página. No queda ni un `style={{…}}` ni un `var(--…)`
+dentro de un componente — antes de P14 había 107 bloques repartidos.
+
+### Las tres reglas que no se pueden romper al cambiar el aspecto
+
+1. **El panel operativo va en claro, sin vidrio y sin sombra.** No es
+   preferencia: el manual (p. 30) lo decide por el reflejo de una cocina, y
+   prohíbe el vidrio detrás de una tabla densa porque baja el contraste del
+   texto pequeño. Por eso no hay `prefers-color-scheme`.
+2. **Persimmon vivo (`#C4552F`) no es color de texto.** Reprueba con 3,93:1 y el
+   manual lo declara «la regla, no el error». Se usa como señal —la cinta al
+   costado de una fila— y su variante profunda (`#A8391A`, 5,64:1) para texto.
+3. **El tramo menor de la «regla rota» es siempre Persimmon.** Si el naranja
+   queda a la izquierda, se invirtió el significado: el tramo mayor son los
+   costos y el menor es el margen. El manual lo lista como pieza mal generada.
+
+### Cómo se regenera lo generado
+
+`tipografia.css` y los dos `.svg` de la marca no se escriben a mano. Salen del
+PDF del manual con los guiones que quedaron descritos en
+`docs/pasos/P14/CONSTRUCCION.md`. **Si el manual cambia de versión, se vuelven a
+extraer de ahí**, y la comprobación de que la extracción es correcta es
+recalcular los seis ratios de contraste que el manual publica: si un hex se leyó
+mal, alguno no cuadra.
+
+### Qué NO cubre ninguna prueba automatizada
+
+El aspecto. Lo que hay es medición con navegador —Chrome sin cabeza, capturas y
+`scrollWidth` contra `clientWidth`—, y es lo que encontró los dos fallos reales
+de P14: la barra partida en dos filas y un desbordamiento que resultó no existir.

@@ -8,8 +8,8 @@
 
 ## Estado actual
 
-**Fase en curso:** ninguna — **Fases A, B, C y D cerradas.**
-**Último commit:** `Pantalla 5: inventario y conteo físico` (`61d64e4`)
+**Fase en curso:** ninguna. **El plan P0–P15 está completo.**
+**Último commit:** `P14: Capa visual`
 **Fecha de última actualización:** 2026-09-08
 
 ### EL PROYECTO CAMBIÓ DE MODO — leer esto antes que nada
@@ -21,15 +21,25 @@ por pantalla.
 
 ### Dónde se retoma exactamente
 
-**Lo que falta para que el cliente use el sistema el lunes son DOS cosas, y ninguna es código:**
+**No queda código pendiente del plan.** P0–P15 están cerrados; P14 fue el último, el 2026-09-08.
+
+**Lo que falta para que el cliente use el sistema son DOS cosas, y ninguna es código:**
 
 1. **Aprovisionar el VPS.** Todo está escrito y probado en local; hace falta la cuenta de Hostinger.
    `scripts/vps/preparar.sh` y `desplegar.sh`, más `docs/runbooks/despliegue.md`.
+   ⚠️ **Y hay un hueco conocido: `apps/web` no tiene cadena de despliegue.** Ni `Dockerfile`, ni
+   servicio en `docker-compose.prod.yml`, ni una línea en el runbook; `npm run build` de la raíz solo
+   construye la API. Se descubrió en P14 y **no se arregló ahí** porque es trabajo de despliegue, no
+   de capa visual. Es lo primero que hay que escribir antes de subir nada.
 2. **Los datos del tenant real.** `npm run seed:tenant` está escrito y probado; falta el archivo con
    el nombre de la company, sus ubicaciones y sus usuarios. **No se inventan.**
 
-**P15, P11 y P13 están cerrados** (2026-09-08). Solo queda **P14 — la capa visual**, con las 7 fases
-completas. Es el último paquete del plan.
+### El producto se llama PLATISE
+
+Cerrado en P14 leyendo `docs/Manual de Marca/platise-brand-book.pdf`, que lo publica desde agosto de
+2026. **D1 pasa a ✅.** El nombre comercial es Platise y la firma es «El margen, plato por plato.»;
+el repositorio, los paquetes y los roles de base de datos siguen llamándose `costeo-saas` /
+`costeo_app`, que es infraestructura y no se toca.
 
 ### Lo hecho en el sprint
 
@@ -38,7 +48,8 @@ completas. Es el último paquete del plan.
 | **A** | P10 — importación acotada, y el MC de referencia | `b9c4403`, `a7d6aa1` |
 | **B** | Despliegue decidido (ADR-016) y cadena de respaldo probada | `1e71e7f` |
 | **C** | Las cinco pantallas | `2813068`, `851f3ad`, `e04b761`, `8d9d24d`, `61d64e4` |
-| **D** | Guion de la sesión y comprobación previa | con este |
+| **D** | Guion de la sesión y comprobación previa | `61d64e4` |
+| **Pospuestos** | P15 endurecimiento, P11 back office, P13 su interfaz, P14 capa visual | `c4450e7`, `a5512b8`, `ac4eb97`, y el de P14 |
 
 ### Lo que un «tú» futuro necesita saber del sprint
 
@@ -76,6 +87,63 @@ El origen con barra final es el que cuesta media tarde: el navegador nunca la ma
 **6. Next escribe un `CLAUDE.md` dentro de `apps/web` en cada arranque.** Desactivado con
 `agentRules: false`. Un segundo archivo con ese nombre, generado por una herramienta y sin revisar,
 es justo la ambigüedad que el `CLAUDE.md` del proyecto existe para impedir.
+
+### Lo que un «tú» futuro necesita saber de P14
+
+**1. Un check puede no estar mirando lo que crees, y el único síntoma es un número que no se mueve.**
+Después de añadir tres archivos y borrar uno, `audit:forbidden` seguía diciendo «346 archivos». La
+causa: todos los patrones decían `apps/*/src/**/*.ts` y **ninguno `.tsx`**. Las 34 reglas —`: any`,
+`@ts-ignore`, `eslint-disable`, marcadores pendientes— **nunca habían examinado una sola de las 2.000
+líneas del frontend** que construyó la Fase C. Corregido a `*.{ts,tsx}`, el contador va a **359**.
+
+Es la **décima** recurrencia de INC-007 y su caso 10. La lección nueva: **un glob de extensión es un
+alcance con fecha de caducidad.** El día que el repositorio gana un tipo de archivo, las reglas se
+quedan mirando a otro lado y nada falla. Vale para el siguiente: si algún día entra `.vue`, `.svelte`
+o un segundo workspace, **ese contador tiene que moverse**.
+
+**2. El manual de marca es una especificación, no una paleta — y se puede verificar.**
+Publica tokens con columna clara y oscura, una escala de Fibonacci con el uso de cada término, cuatro
+niveles tipográficos con interlínea y **seis ratios de contraste calculados**. Los seis se
+recalcularon y **dan sus mismas cifras hasta el segundo decimal**, lo que prueba que los hex se
+leyeron bien. Si algún día se retoca la paleta, ese recálculo es la comprobación: un hex mal copiado
+descuadra su ratio.
+
+Y trae decisiones de producto que no son estéticas: **el panel operativo va en claro** porque «un
+panel oscuro con vidrio gana en portafolio y pierde al chef en la cocina», y el vidrio **no puede ir
+detrás de una tabla densa** porque baja el contraste del texto pequeño. Por eso no hay
+`prefers-color-scheme` ni tokens de sombra: no es un olvido.
+
+**3. Los valores del manual salieron del PDF, no de una captura, y eso hay que saber repetirlo.**
+El archivo está exportado desde Chromium: los colores son operadores `rg` con cuatro decimales, las
+fuentes van incrustadas con su `ToUnicode` y **el logotipo es un trazado de Bézier**. Descomprimir
+los flujos del PDF da el texto, la paleta y la geometría exactos. El logotipo de
+`apps/web/public/marca/` **se extrajo así, no se redibujó**: reproduce la tabla de construcción del
+manual —caja `H/φ`, trazo 11,803, rotura a −21,25°— sin que se le impusiera.
+
+**4. La retícula del manual es de LÁMINA, no de aplicación.**
+`--f6` (144 px) es su «margen lateral», pensado para 1600 × 900. Aplicado a la barra de la app a
+1280 px, **parte la navegación en dos filas**. Se usa `--f3`. La regla del manual —toda medida sale
+de la serie de Fibonacci— se respeta; el término se elige según el lienzo.
+
+**5. Se revirtieron dos correcciones de CSS que no corregían nada.**
+Se dedujo un desbordamiento horizontal de una captura de móvil y se añadieron `minmax(0, 1fr)` y
+`min-width: 0` con su comentario explicativo. **Medido después, el desbordamiento no existía**: la
+maqueta de prueba no llevaba `meta viewport`, y `scrollWidth` daba idéntico con y sin las reglas a
+500 y a 320 px. **Un comentario que dice «esto evita un fallo» cuando no lo evita es peor que no
+tener comentario.** Es INC-007 aplicado a uno mismo: el arreglo también hay que verificarlo.
+
+**6. La capa visual se verifica con un navegador, y está a mano.**
+No hay pruebas automatizadas de aspecto, pero Chrome sin cabeza sí sirve y encontró cosas:
+`chrome --headless=new --screenshot=x.png --window-size=W,H <url>`. Con eso se rasterizó el logotipo,
+se capturaron las pantallas contra el build de producción y se midió `scrollWidth` contra
+`clientWidth` inyectando un guion. **Los dos fallos reales del paquete los encontró una captura, no
+una lectura del código.**
+
+**7. `apps/web` no tiene despliegue, y P14 no lo arregló.**
+Ni `Dockerfile`, ni servicio en `docker-compose.prod.yml`, ni línea en el runbook; el `build` de la
+raíz solo construye la API. Es la razón por la que las fuentes se **autoalojan** en vez de usar
+`next/font/google`: ese descarga en tiempo de build, y no conviene que una cadena de despliegue que
+todavía no existe nazca dependiendo de tener red.
 
 ### Lo que un «tú» futuro necesita saber de P10
 
@@ -228,18 +296,22 @@ Lo implementado:
 
 | Check | Estado | Nota |
 |---|---|---|
-| `audit:types` | ✅ | |
+| `audit:types` | ✅ | Cuatro proyectos: API, interfaz del back office, tooling y `apps/web` |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | 31 reglas sobre **303 archivos**. **Paró un `as unknown as` real en P10** |
-| `audit:arch` | ✅ | 267 módulos, 1171 dependencias. **Paró dos tipos que vivían en la capa equivocada** |
-| `audit:deadcode` | ✅ | Sin lista blanca. **Destapó dos límites de seguridad desconectados** |
+| `audit:forbidden` | ✅ | 34 reglas sobre **359 archivos**. **En P14 pasó de 346: los `.tsx` no los miraba nadie** |
+| `audit:arch` | ✅ | 291 módulos, 1284 dependencias |
+| `audit:deadcode` | ✅ | Sin lista blanca |
 | `audit:complexity` | ✅ | |
-| `audit:duplication` | ✅ | **0 clones.** Cazó dos en P10 |
-| `audit:migrations` | ✅ | M1–M11 · **11 migraciones** |
-| `audit:secrets` | ✅ | |
-| `audit:deps` | ✅ | |
+| `audit:duplication` | ✅ | **0 clones** |
+| `audit:migrations` | ✅ | M1–M11 · **13 migraciones** |
+| `audit:secrets` | ✅ | Sobre `**/*`, incluidos los `.woff2` |
+| `audit:deps` | ✅ | 4 vulnerabilidades aceptadas y documentadas |
 | `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | **558 unitarias** (sin base) + **277 de integración**; 5 saltadas con motivo (INC-016) |
+| `audit:tests` | ✅ | **585 unitarias** (sin base) + **313 de integración**; 5 saltadas con motivo (INC-016) |
+
+> **`npm run bench` sigue fuera de `npm run audit`, a propósito** (documentado en `docs/AUDITORIA.md`
+> I8): levanta la API en la red de compose y tarda minutos. Se corre a mano y el consolidado marcaba
+> 480,2 ms de 800 en la última medición.
 
 ## Progreso
 
@@ -259,7 +331,7 @@ Lo implementado:
 | **P11 — Back office** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 | P12 — Frontend app cliente | ✅ **Completado, recortado a 5 pantallas** | Fase C | 2026-09-08 |
 | **P13 — Frontend back office** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
-| P14 — Capa visual | 🟡 **SIGUIENTE** | — | El último. Aplica `docs/Manual de Marca/` a `apps/web`; el back office se queda sobrio a propósito |
+| **P14 — Capa visual** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 | **P15 — Endurecimiento** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 
 Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto con motivo
@@ -319,6 +391,12 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto co
 | 45 | **El CLI abre sesión con contraseña, por el camino del login** | P10 | Un atajo que fabricara sesiones sería una puerta que no existe en ningún otro sitio |
 | 46 | **`import_job` no tiene ninguna FK hacia lo importado** | P10 | Si la tuviera, borrar un ítem obligaría a decidir qué hacer con su historia |
 | 47 | **El análisis vive en `jsonb` y no se lee de vuelta** | P10 | Es caché de algo reproducible. Leerlo tipado exigía un `as unknown as` que `audit:forbidden` para |
+| 48 | **El panel operativo va en CLARO, sin vidrio y sin sombra** | P14 | Lo decide el manual, p. 30, con su motivo: «un panel oscuro con vidrio gana en portafolio y pierde al chef en la cocina». **ADR-019** |
+| 49 | **El semáforo usa Jade, Persimmon PROFUNDO y Oxblood**, no verde-ámbar-rojo | P14 | Persimmon vivo reprueba como texto (3,93:1) y el manual lo declara color de señal. Su variante profunda da 5,64:1, calculado aquí. **ADR-019** |
+| 50 | **Fraunces no se sirve en la aplicación** | P14 | Es nivel Display, de 66 a 172 px, para «aperturas». La app no tiene aperturas. Usarla a 24 px sería inventar un tamaño. **Reversible en diez minutos.** ADR-019 |
+| 51 | **Las fuentes se autoalojan**, sin `next/font/google` | P14 | Ese descarga en tiempo de build, y `apps/web` no tiene cadena de despliegue todavía. Y así el navegador del cliente no habla con un tercero. **ADR-019** |
+| 52 | **El logotipo se EXTRAJO de las curvas del PDF**, no se redibujó desde las fórmulas | P14 | Redibujar desde una fórmula es interpretar, y una interpretación de un logo es otro logo. **ADR-019** |
+| 53 | **El producto se llama Platise; el repositorio sigue siendo `costeo-saas`** | P14 | El nombre comercial es un texto visible; el nombre de trabajo es infraestructura y tocarlo movería roles de base de datos y cadenas de conexión. **Cierra D1** |
 
 ---
 
@@ -346,6 +424,10 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto co
 
 | 3 | **Los alias del dialecto real del cliente** en los descriptores de importación | P10 | Cuando llegue su archivo. La pasada de análisis **no escribe nada** y ya reporta columnas no reconocidas y obligatorias ausentes: ajustarlo es media hora sin tocar el camino de escritura |
 | 4 | **Prueba de similitud dominio ↔ `pg_trgm`** — el dominio quita tildes y `pg_trgm` no. Medido: `similarity('tomate riñón','tomate rinon') = 0.53`, por encima del umbral de 0.3, así que el criterio de aceptación se sostiene; lo que no está probado es que coincidan siempre | P10 | Después del lanzamiento |
+| 5 | **`apps/web` no tiene cadena de despliegue**: ni `Dockerfile`, ni servicio en `docker-compose.prod.yml`, ni línea en el runbook. El `build` de la raíz solo construye la API | P14 | **Antes de subir nada.** Es lo primero del despliegue, y P14 no lo tocó porque es trabajo de infraestructura, no de capa visual |
+| 6 | **El margen de referencia se muestra con 12 decimales** (`5.482000000000`): la API lo manda a escala de almacenamiento sin el par `mostrar`/`exacto` que sí trae el DTO de costeo | P14 | Cuando se pueda tocar la API. Arreglarlo en el frontend obligaría a repetir el redondeo medio-hacia-arriba que ya vive en `costeo/page.tsx`, y eso lo para `audit:duplication`. **Lo limpio es que la API publique `mostrar`** |
+| 7 | **La pantalla de menú tiene prosa interpolada dentro del componente**, contra D11 | P14 | Cuando haya un ayudante de formato. No es visual, y por eso P14 no lo tocó |
+| 8 | **No hay pruebas automatizadas de la capa visual** | P14 | Se verifica con Chrome sin cabeza y capturas, que es lo que encontró los dos fallos reales de P14. Una prueba de regresión visual es un paquete propio |
 
 > **Resuelto en P11.** `audit_log` ya tiene lector: `costeo_backoffice` tiene `SELECT` sobre ella y `LeerAuditoria` la sirve. Leer la auditoría de un tenant es un acceso cross-tenant como cualquier otro — pide motivo y deja su línea. Estuvo diez paquetes escribiéndose sin que nadie pudiera leerla: cumplía la letra de SEGURIDAD.md §10 y no su propósito.
 

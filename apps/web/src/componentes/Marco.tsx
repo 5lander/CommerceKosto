@@ -7,6 +7,11 @@
  * manda a elegirla. Sin eso, cada pantalla tendría que comprobarlo y la que se
  * olvidara llamaría a la API con `locationId=null` — que la API rechaza, pero
  * con un mensaje sobre un parámetro, no sobre lo que la persona tiene que hacer.
+ *
+ * **P14 no le cambió el comportamiento, solo el aspecto.** Lo que antes eran
+ * diez bloques `style={{…}}` ahora son clases de `global.css`; el efecto que
+ * redirige, la salida que limpia pase lo que pase y la espera de un ciclo para
+ * distinguir «todavía no se leyó» de «no hay» están igual que en la Fase C.
  */
 
 import Link from 'next/link';
@@ -17,6 +22,7 @@ import type { ReactNode } from 'react';
 import { llamar } from '../lib/api';
 import { useSucursal } from '../lib/sesion';
 import { TEXTOS } from '../textos/es';
+import { Isotipo } from './ui/Marca';
 
 const SECCIONES = [
   { href: '/costeo', texto: TEXTOS.costeo.titulo },
@@ -69,44 +75,26 @@ export function Marco({
   }
 
   return (
-    <div style={{ minHeight: '100vh' }}>
-      <header
-        style={{
-          background: 'var(--color-superficie)',
-          borderBottom: '1px solid var(--color-borde)',
-          padding: 'var(--espacio-3) var(--espacio-4)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 'var(--espacio-4)',
-            flexWrap: 'wrap',
-            maxWidth: '76rem',
-            margin: '0 auto',
-          }}
-        >
-          <nav style={{ display: 'flex', gap: 'var(--espacio-1)', flexWrap: 'wrap' }}>
+    <>
+      <header className="barra">
+        <div className="barra__interior">
+          <nav className="barra__grupo">
+            <Isotipo />
+            <span className="marca-nombre">{TEXTOS.producto}</span>
+
             {SECCIONES.map((seccion) => (
               <Link
                 key={seccion.href}
                 href={seccion.href}
-                style={{
-                  padding: 'var(--espacio-2) var(--espacio-3)',
-                  borderRadius: 'var(--radio)',
-                  textDecoration: 'none',
-                  color: ruta === seccion.href ? 'var(--color-acento-texto)' : 'var(--color-texto)',
-                  background: ruta === seccion.href ? 'var(--color-acento)' : 'transparent',
-                }}
+                className="nav-enlace"
+                aria-current={ruta === seccion.href ? 'page' : undefined}
               >
                 {seccion.texto}
               </Link>
             ))}
           </nav>
 
-          <div style={{ display: 'flex', gap: 'var(--espacio-2)' }}>
+          <div className="barra__grupo">
             <button
               type="button"
               onClick={() => {
@@ -125,28 +113,26 @@ export function Marco({
             </button>
           </div>
         </div>
+
+        {/*
+          La «regla rota» del manual (p. 27), que es el recurso que asigna a
+          cintas y encabezados: la línea se parte en su sección áurea y el tramo
+          menor —el margen— va en Persimmon.
+        */}
+        <hr className="regla-rota" />
       </header>
 
-      <main style={{ maxWidth: '76rem', margin: '0 auto', padding: 'var(--espacio-6) var(--espacio-4)' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-end',
-            gap: 'var(--espacio-4)',
-            flexWrap: 'wrap',
-            marginBottom: 'var(--espacio-6)',
-          }}
-        >
-          <div>
-            <h1 style={{ fontSize: 'var(--texto-xl)' }}>{titulo}</h1>
-            <p style={{ margin: 0, color: 'var(--color-texto-suave)' }}>{ayuda}</p>
+      <main className="lamina">
+        <div className="encabezado">
+          <div className="pila pila--minima">
+            <h1 className="titulo">{titulo}</h1>
+            <p className="subtitulo">{ayuda}</p>
           </div>
           {acciones}
         </div>
 
         {sucursal === null ? null : children}
       </main>
-    </div>
+    </>
   );
 }

@@ -21,8 +21,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/Estados';
+import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { Marco } from '../../componentes/Marco';
+import { Tabla } from '../../componentes/ui/Tabla';
 import { llamar } from '../../lib/api';
 import { useSucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
@@ -71,6 +72,9 @@ interface CosteoDeCarta {
  * Es deuda anotada, no un descuido: el día que la API publique los umbrales de
  * la company, esto se sustituye por ellos y el color deja de ser aproximado.
  */
+/** Venta neta, margen, food cost y multiplicador: las cuatro que no salen. */
+const COLUMNAS_DE_VENTA = 4;
+
 const UMBRAL_VERDE = '0.28';
 const UMBRAL_MAXIMO = '0.32';
 
@@ -79,10 +83,23 @@ function menorOIgual(izquierda: string, derecha: string): boolean {
   return izquierda.localeCompare(derecha, undefined, { numeric: true }) <= 0;
 }
 
-function colorDelFoodCost(pct: string): string {
-  if (menorOIgual(pct, UMBRAL_VERDE)) return 'var(--color-bien)';
-  if (menorOIgual(pct, UMBRAL_MAXIMO)) return 'var(--color-atencion)';
-  return 'var(--color-mal)';
+/**
+ * El semaforo devuelve una CLASE, no un color.
+ *
+ * Los tres colores viven en `tokens.css` y salen del manual de marca: Jade para
+ * lo que va bien, Persimmon Profundo para lo que pide atencion y Oxblood para la
+ * perdida. Devolver aqui un `var(--color-…)` volveria a meter la capa visual en
+ * el archivo que trae los datos, que es justo lo que P14 saca de aqui.
+ */
+function claseDelFoodCost(pct: string): string {
+  if (menorOIgual(pct, UMBRAL_VERDE)) return 'numero bien';
+  if (menorOIgual(pct, UMBRAL_MAXIMO)) return 'numero atencion';
+  return 'numero mal';
+}
+
+/** Una fila con food cost por encima del maximo lleva la senal al costado. */
+function pideAtencion(pct: string): boolean {
+  return !menorOIgual(pct, UMBRAL_MAXIMO);
 }
 
 /** Un decimal se muestra con un decimal de porcentaje. */
@@ -207,113 +224,73 @@ export default function Costeo(): ReactNode {
         <Vacio titulo={TEXTOS.costeo.vacio} ayuda={TEXTOS.costeo.vacioAyuda} />
       )}
 
-      {carta !== null && carta.productos.length > 0 && <Tabla productos={carta.productos} />}
+      {carta !== null && carta.productos.length > 0 && <TablaDeCosteo productos={carta.productos} />}
     </Marco>
   );
 }
 
-function Tabla({ productos }: { readonly productos: readonly ProductoCosteado[] }): ReactNode {
+function TablaDeCosteo({ productos }: { readonly productos: readonly ProductoCosteado[] }): ReactNode {
   return (
-    <>
-      <div style={{ overflowX: 'auto', background: 'var(--color-superficie)', borderRadius: 'var(--radio-lg)', border: '1px solid var(--color-borde)' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--texto-sm)' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--color-borde)' }}>
-              <Encabezado alineado="left">{TEXTOS.costeo.producto}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.costoBruto}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.costoNeto}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.costoTotal}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.ventaNeta}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.margen}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.foodCost}</Encabezado>
-              <Encabezado>{TEXTOS.costeo.multiplicador}</Encabezado>
-            </tr>
-          </thead>
-          <tbody>
-            {productos.map((producto) => (
-              <Fila key={producto.productId} producto={producto} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="pila">
+      <Tabla compacta>
+        <thead>
+          <tr>
+            <th>{TEXTOS.costeo.producto}</th>
+            <th>{TEXTOS.costeo.costoBruto}</th>
+            <th>{TEXTOS.costeo.costoNeto}</th>
+            <th>{TEXTOS.costeo.costoTotal}</th>
+            <th>{TEXTOS.costeo.ventaNeta}</th>
+            <th>{TEXTOS.costeo.margen}</th>
+            <th>{TEXTOS.costeo.foodCost}</th>
+            <th>{TEXTOS.costeo.multiplicador}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {productos.map((producto) => (
+            <Fila key={producto.productId} producto={producto} />
+          ))}
+        </tbody>
+      </Tabla>
 
-      <p style={{ color: 'var(--color-texto-suave)', fontSize: 'var(--texto-sm)', marginTop: 'var(--espacio-4)' }}>
-        {TEXTOS.costeo.notaIva}
-      </p>
-    </>
-  );
-}
-
-function Encabezado({
-  children,
-  alineado = 'right',
-}: {
-  readonly children: ReactNode;
-  readonly alineado?: 'left' | 'right';
-}): ReactNode {
-  return (
-    <th
-      style={{
-        textAlign: alineado,
-        padding: 'var(--espacio-3)',
-        fontWeight: 600,
-        color: 'var(--color-texto-suave)',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {children}
-    </th>
+      <p className="nota">{TEXTOS.costeo.notaIva}</p>
+    </div>
   );
 }
 
 function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode {
   const { venta, costos } = producto;
+  const senal = venta.vendible && pideAtencion(venta.foodCostPct);
 
   return (
-    <tr style={{ borderBottom: '1px solid var(--color-borde)' }}>
-      <td style={{ padding: 'var(--espacio-3)' }}>
+    <tr data-senal={senal ? 'true' : undefined}>
+      <td>
         {producto.nombre}
-        {producto.categoria !== null && (
-          <span style={{ display: 'block', color: 'var(--color-texto-tenue)', fontSize: 'var(--texto-xs)' }}>
-            {producto.categoria}
-          </span>
-        )}
+        {producto.categoria !== null && <span className="bloque tenue">{producto.categoria}</span>}
         {producto.itemsSinCosto.length > 0 && (
-          <span style={{ display: 'block', color: 'var(--color-atencion)', fontSize: 'var(--texto-xs)' }}>
-            Sin precio: {producto.itemsSinCosto.join(', ')}
+          <span className="bloque tenue atencion">
+            {TEXTOS.costeo.sinPrecio} {producto.itemsSinCosto.join(', ')}
           </span>
         )}
       </td>
 
-      <Celda>{costos.costoBrutoLote.mostrar}</Celda>
-      <Celda>{costos.costoNetoLote.mostrar}</Celda>
-      <Celda>{costos.costoTotalUnidad.mostrar}</Celda>
+      <td className="numero">{costos.costoBrutoLote.mostrar}</td>
+      <td className="numero">{costos.costoNetoLote.mostrar}</td>
+      <td className="numero">{costos.costoTotalUnidad.mostrar}</td>
 
       {venta.vendible ? (
         <>
-          <Celda>{venta.ventaNeta.mostrar}</Celda>
-          <Celda>{venta.margenContribucion.mostrar}</Celda>
-          <Celda color={colorDelFoodCost(venta.foodCostPct)}>
+          <td className="numero">{venta.ventaNeta.mostrar}</td>
+          <td className="numero">{venta.margenContribucion.mostrar}</td>
+          <td className={claseDelFoodCost(venta.foodCostPct)}>
             {comoPorcentaje(venta.foodCostPct)}
-          </Celda>
-          <Celda>{venta.multiplicador ?? '—'}</Celda>
+          </td>
+          <td className="numero">{venta.multiplicador ?? TEXTOS.comun.sinDato}</td>
         </>
       ) : (
-        <td
-          colSpan={4}
-          style={{ padding: 'var(--espacio-3)', color: 'var(--color-texto-tenue)' }}
-        >
+        <td colSpan={COLUMNAS_DE_VENTA} className="tenue">
           {venta.motivo}
         </td>
       )}
     </tr>
-  );
-}
-
-function Celda({ children, color }: { readonly children: ReactNode; readonly color?: string }): ReactNode {
-  return (
-    <td className="numero" style={{ padding: 'var(--espacio-3)', color }}>
-      {children}
-    </td>
   );
 }

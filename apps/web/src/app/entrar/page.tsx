@@ -10,12 +10,17 @@
  *
  * La cookie de sesión la pone el servidor con `Set-Cookie`, y es `HttpOnly`.
  * **Esta pantalla nunca ve el token**, y por eso no puede filtrarlo.
+ *
+ * **P14 puso aquí el LOGOTIPO y no el isotipo.** Es lo que dice el manual
+ * (p. 16): «el logotipo presenta la marca, el isotipo la recuerda». Esta es la
+ * única pantalla donde la marca se presenta; en las demás ya se la conoce.
  */
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { ReactNode, SyntheticEvent } from 'react';
 
+import { Logotipo } from '../../componentes/ui/Marca';
 import { ErrorDeApi, llamar } from '../../lib/api';
 import { TEXTOS } from '../../textos/es';
 
@@ -47,62 +52,69 @@ export default function Entrar(): ReactNode {
   }
 
   return (
-    <main
-      style={{ maxWidth: '22rem', margin: '0 auto', padding: 'var(--espacio-8) var(--espacio-4)' }}
-    >
-      <h1 style={{ fontSize: 'var(--texto-xl)', marginBottom: 'var(--espacio-6)' }}>
-        {TEXTOS.acceso.titulo}
-      </h1>
-
+    <main className="pantalla pantalla--angosta">
       {/*
-        El manejador se envuelve en una funcion que NO devuelve la promesa: React
-        espera `void` en `onSubmit`, y devolverle una promesa deja un rechazo sin
-        capturar que no llega a ningun sitio. `void` lo dice explicitamente.
+        El hueco de `.pila` son 21 px, por encima de los 13,6 px de área de
+        resguardo que el manual exige alrededor del logotipo a este tamaño
+        (t × φ² = 30,9 % de su alto). La cuenta está en `global.css`.
       */}
-      <form
-        onSubmit={(evento) => {
-          void enviar(evento);
-        }}
-        style={{ display: 'grid', gap: 'var(--espacio-4)' }}
-      >
-        <label style={{ display: 'grid', gap: 'var(--espacio-1)' }}>
-          {TEXTOS.acceso.correo}
-          <input
-            type="email"
-            name="email"
-            autoComplete="username"
-            required
-            value={correo}
-            onChange={(e) => {
-              setCorreo(e.target.value);
-            }}
-          />
-        </label>
+      <div className="pila">
+        <Logotipo />
 
-        <label style={{ display: 'grid', gap: 'var(--espacio-1)' }}>
-          {TEXTOS.acceso.contrasena}
-          <input
-            type="password"
-            name="contrasena"
-            autoComplete="current-password"
-            required
-            value={contrasena}
-            onChange={(e) => {
-              setContrasena(e.target.value);
-            }}
-          />
-        </label>
+        <p className="nota">{TEXTOS.firma}</p>
 
-        {error !== null && (
-          <p role="alert" style={{ margin: 0, color: 'var(--color-mal)' }}>
-            {error}
-          </p>
-        )}
+        <h1 className="titulo">{TEXTOS.acceso.titulo}</h1>
 
-        <button type="submit" data-variante="primario" disabled={entrando}>
-          {entrando ? TEXTOS.acceso.entrando : TEXTOS.acceso.entrar}
-        </button>
-      </form>
+        {/*
+          El manejador se envuelve en una funcion que NO devuelve la promesa: React
+          espera `void` en `onSubmit`, y devolverle una promesa deja un rechazo sin
+          capturar que no llega a ningun sitio. `void` lo dice explicitamente.
+        */}
+        <form
+          onSubmit={(evento) => {
+            void enviar(evento);
+          }}
+          className="pila pila--apretada"
+        >
+          <label className="campo">
+            {TEXTOS.acceso.correo}
+            <input
+              type="email"
+              name="email"
+              autoComplete="username"
+              required
+              value={correo}
+              onChange={(e) => {
+                setCorreo(e.target.value);
+              }}
+            />
+          </label>
+
+          <label className="campo">
+            {TEXTOS.acceso.contrasena}
+            <input
+              type="password"
+              name="contrasena"
+              autoComplete="current-password"
+              required
+              value={contrasena}
+              onChange={(e) => {
+                setContrasena(e.target.value);
+              }}
+            />
+          </label>
+
+          {error !== null && (
+            <p role="alert" className="mal">
+              {error}
+            </p>
+          )}
+
+          <button type="submit" data-variante="primario" disabled={entrando}>
+            {entrando ? TEXTOS.acceso.entrando : TEXTOS.acceso.entrar}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

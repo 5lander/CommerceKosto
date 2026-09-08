@@ -26,8 +26,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/Estados';
+import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { Marco } from '../../componentes/Marco';
+import { Tabla } from '../../componentes/ui/Tabla';
 import { ErrorDeApi, llamar } from '../../lib/api';
 import { useSucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
@@ -197,7 +198,7 @@ export default function Inventario(): ReactNode {
       ayuda={TEXTOS.inventario.ayuda}
       acciones={
         hoja === null ? null : (
-          <div style={{ display: 'flex', gap: 'var(--espacio-2)' }}>
+          <div className="barra__grupo">
             <button
               type="button"
               disabled={ocupado || confirmado}
@@ -237,7 +238,7 @@ export default function Inventario(): ReactNode {
       )}
 
       {hoja !== null && hoja.filas.length > 0 && (
-        <div style={{ display: 'grid', gap: 'var(--espacio-6)' }}>
+        <div className="pila">
           <HojaDeConteo
             filas={hoja.filas}
             valores={valores}
@@ -270,59 +271,46 @@ function HojaDeConteo({
   readonly teclas: (evento: KeyboardEvent<HTMLInputElement>, indice: number) => void;
 }): ReactNode {
   return (
-    <section>
-      <h2 style={{ fontSize: 'var(--texto-lg)', marginBottom: 'var(--espacio-3)' }}>
-        {TEXTOS.inventario.contar}
-      </h2>
+    <section className="pila pila--apretada">
+      <h2 className="subtitulo">{TEXTOS.inventario.contar}</h2>
 
-      <div style={{ background: 'var(--color-superficie)', border: '1px solid var(--color-borde)', borderRadius: 'var(--radio-lg)', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--color-borde)' }}>
-              <th style={{ textAlign: 'left', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.item}
-              </th>
-              <th style={{ textAlign: 'left', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.unidad}
-              </th>
-              <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.contado}
-              </th>
+      <Tabla>
+        <thead>
+          <tr>
+            <th>{TEXTOS.inventario.item}</th>
+            <th className="izquierda">{TEXTOS.inventario.unidad}</th>
+            <th>{TEXTOS.inventario.contado}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((fila, indice) => (
+            <tr key={fila.itemId}>
+              <td>{fila.nombre}</td>
+              <td className="izquierda tenue">{fila.unidadDeUso}</td>
+              <td className="numero">
+                <input
+                  ref={(elemento) => {
+                    campos.current[indice] = elemento;
+                  }}
+                  className="celda-editable"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  disabled={bloqueada}
+                  aria-label={`${TEXTOS.inventario.contado} · ${fila.nombre}`}
+                  value={valores.get(fila.itemId) ?? ''}
+                  onChange={(e) => {
+                    escribir(fila.itemId, e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    teclas(e, indice);
+                  }}
+                />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {filas.map((fila, indice) => (
-              <tr key={fila.itemId} style={{ borderBottom: '1px solid var(--color-borde)' }}>
-                <td style={{ padding: 'var(--espacio-2) var(--espacio-3)' }}>{fila.nombre}</td>
-                <td style={{ padding: 'var(--espacio-2) var(--espacio-3)', color: 'var(--color-texto-tenue)' }}>
-                  {fila.unidadDeUso}
-                </td>
-                <td style={{ padding: 'var(--espacio-2) var(--espacio-3)', textAlign: 'right' }}>
-                  <input
-                    ref={(elemento) => {
-                      campos.current[indice] = elemento;
-                    }}
-                    className="numero"
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    disabled={bloqueada}
-                    aria-label={`${TEXTOS.inventario.contado} · ${fila.nombre}`}
-                    value={valores.get(fila.itemId) ?? ''}
-                    onChange={(e) => {
-                      escribir(fila.itemId, e.target.value);
-                    }}
-                    onKeyDown={(e) => {
-                      teclas(e, indice);
-                    }}
-                    style={{ width: '8rem', textAlign: 'right' }}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Tabla>
     </section>
   );
 }
@@ -330,69 +318,48 @@ function HojaDeConteo({
 /** La conciliación: solo llega a quien tiene `count.read`. */
 function Conciliada({ conciliacion }: { readonly conciliacion: Conciliacion }): ReactNode {
   return (
-    <section>
-      <h2 style={{ fontSize: 'var(--texto-lg)', marginBottom: 'var(--espacio-3)' }}>
-        {TEXTOS.inventario.diferencia}
-      </h2>
+    <section className="pila pila--apretada">
+      <h2 className="subtitulo">{TEXTOS.inventario.diferencia}</h2>
 
+      {/*
+        La cobertura con el patrón de cifra del manual: etiqueta en versalita
+        encima y el número en Plex Mono debajo. Es el dato del que depende leer
+        bien todo lo demás de esta tabla (D7), así que se lee de un vistazo y no
+        dentro de una frase.
+      */}
       {conciliacion.cobertura !== null && (
-        <p style={{ marginTop: 0, color: 'var(--color-texto-suave)' }}>
-          {TEXTOS.inventario.cobertura}: <span className="numero">{conciliacion.cobertura}</span>
-        </p>
+        <div className="dato">
+          <span className="etiqueta">{TEXTOS.inventario.cobertura}</span>
+          <strong className="cifra cifra--menor">{conciliacion.cobertura}</strong>
+        </div>
       )}
 
-      <div style={{ background: 'var(--color-superficie)', border: '1px solid var(--color-borde)', borderRadius: 'var(--radio-lg)', overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--texto-sm)' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--color-borde)' }}>
-              <th style={{ textAlign: 'left', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.item}
-              </th>
-              <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.teorico}
-              </th>
-              <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.contado}
-              </th>
-              <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.diferencia}
-              </th>
-              <th style={{ textAlign: 'right', padding: 'var(--espacio-3)', color: 'var(--color-texto-suave)', fontWeight: 600 }}>
-                {TEXTOS.inventario.valorizada}
-              </th>
+      <Tabla compacta>
+        <thead>
+          <tr>
+            <th>{TEXTOS.inventario.item}</th>
+            <th>{TEXTOS.inventario.teorico}</th>
+            <th>{TEXTOS.inventario.contado}</th>
+            <th>{TEXTOS.inventario.diferencia}</th>
+            <th>{TEXTOS.inventario.valorizada}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {conciliacion.filas.map((fila) => (
+            <tr key={fila.itemId}>
+              <td>{fila.nombre}</td>
+              <td className="numero">{fila.teorico}</td>
+              <td className={fila.contado === null ? 'numero tenue' : 'numero'}>
+                {fila.contado ?? TEXTOS.inventario.sinContar}
+              </td>
+              <td className="numero">{fila.diferencia ?? TEXTOS.comun.sinDato}</td>
+              <td className="numero">{fila.valorDeDiferencia ?? TEXTOS.comun.sinDato}</td>
             </tr>
-          </thead>
-          <tbody>
-            {conciliacion.filas.map((fila) => (
-              <tr key={fila.itemId} style={{ borderBottom: '1px solid var(--color-borde)' }}>
-                <td style={{ padding: 'var(--espacio-2) var(--espacio-3)' }}>{fila.nombre}</td>
-                <td className="numero" style={{ padding: 'var(--espacio-2) var(--espacio-3)' }}>
-                  {fila.teorico}
-                </td>
-                <td
-                  className="numero"
-                  style={{
-                    padding: 'var(--espacio-2) var(--espacio-3)',
-                    color: fila.contado === null ? 'var(--color-texto-tenue)' : undefined,
-                  }}
-                >
-                  {fila.contado ?? TEXTOS.inventario.sinContar}
-                </td>
-                <td className="numero" style={{ padding: 'var(--espacio-2) var(--espacio-3)' }}>
-                  {fila.diferencia ?? '—'}
-                </td>
-                <td className="numero" style={{ padding: 'var(--espacio-2) var(--espacio-3)' }}>
-                  {fila.valorDeDiferencia ?? '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </Tabla>
 
-      <p style={{ color: 'var(--color-texto-suave)', fontSize: 'var(--texto-sm)' }}>
-        {TEXTOS.inventario.notaSinContar}
-      </p>
+      <p className="nota">{TEXTOS.inventario.notaSinContar}</p>
     </section>
   );
 }

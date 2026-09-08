@@ -368,7 +368,7 @@ export const repoRules = [
       'verdad hace falta el caracter.',
     referencia: 'docs/incidencias/INC-007',
     incluye: [
-      'apps/*/src/**/*.ts',
+      'apps/*/src/**/*.{ts,tsx}',
       'apps/*/test/**/*.ts',
       'tools/**/*.mjs',
       'scripts/**/*.mjs',

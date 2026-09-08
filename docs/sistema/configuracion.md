@@ -130,7 +130,7 @@ Los parámetros de costeo de `DECISIONES.md` D3. Se siembran al crear el tenant 
 
 | Archivo | Contiene | Desde |
 |---|---|---|
-| `config/branding.ts` | Nombre visible del producto (D1) | P1 |
+| `apps/web/src/textos/es.ts` | Nombre visible del producto y firma verbal (D1, cerrada en P14: **Platise**). El `config/branding.ts` que D1 daba por hecho nunca existió: los textos visibles viven donde los pone D11 | P12 · P14 |
 | **`shared/infrastructure/config/periods.ts`** | **La zona horaria del calendario contable (D6, D11)** | **P7 ✅** |
 | `config/plans.ts` | Límites por plan (D5) | P11 |
 | `config/locale.ts` | Idioma, moneda, zona horaria, formatos (D11) | P1 |

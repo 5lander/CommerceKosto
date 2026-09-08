@@ -6,13 +6,25 @@
 
 ---
 
-## D1 — Nombre del proyecto 🟡
+## D1 — Nombre del proyecto ✅
 
-**Valor provisional:** `costeo-saas` como nombre de trabajo del repositorio y los paquetes.
+**Cerrada en P14, el 2026-09-08, leyendo el manual de marca. El producto se llama PLATISE.**
 
-No hay nombre comercial definido. **No inventar branding.** Usar el nombre de trabajo en código y rutas; los textos visibles al usuario que necesiten el nombre del producto leen de `config/branding.ts`, con el valor provisional `"Costeo"`.
+El valor provisional era `"Costeo"`, con esta nota: *«No hay nombre comercial definido. **No inventar branding.**»* Y era falsa desde antes de que empezara el proyecto: `docs/Manual de Marca/platise-brand-book.pdf` se titula **Manual de marca PLATISE**, cierra con «PLATISE · MANUAL DE MARCA V3.0 · AGOSTO 2026» y su capítulo digital lleva el dominio **platise.ec**. El nombre estaba definido; lo que faltaba era abrir el archivo.
 
-Destranca: dominio, marca, correo transaccional. Ver `docs/FASE0-CHECKLIST.md` A1.
+Usarlo no contradice la nota: `CLAUDE.md` §10 declara ese manual **fuente única** de la identidad, así que tomar el nombre de ahí es leerlo, no inventarlo.
+
+| Qué | Valor | Dónde |
+|---|---|---|
+| Nombre del producto | **Platise** | `apps/web/src/textos/es.ts` → `TEXTOS.producto` |
+| Firma verbal | **«El margen, plato por plato.»** | `TEXTOS.firma`. Va **sin cifra**: el manual (p. 11) dice que «un precio caduca y convierte la firma en promoción» |
+| Dominio | `platise.ec` | Manual, capítulo 6 |
+
+**Lo que NO cambia:** el repositorio, los paquetes de npm y las rutas del código siguen siendo `costeo-saas` / `@costeo/*`. Renombrarlos no aporta nada al cliente y tocaría el `docker-compose`, los roles de base de datos (`costeo_app`, `costeo_migrator`, `costeo_backoffice`) y las cadenas de conexión. **El nombre comercial es un texto visible; el nombre de trabajo es infraestructura.**
+
+**Y no existe `config/branding.ts`.** El valor provisional lo daba por hecho; los textos visibles viven en `textos/es.ts` desde la Fase C, que es donde D11 los pone. Se deja dicho para que nadie lo busque.
+
+Sigue destrancado y sigue siendo trabajo de negocio, no de código: el registro en SENADI (clases 9 y 42) está en la lista de pendientes del propio manual, p. 36.
 
 ---
 
@@ -291,5 +303,5 @@ Los textos visibles viven en archivos de recursos desde el primer componente, au
 - Claude Code **usa estos valores sin preguntar** mientras estén en 🟡
 - Si una tarea exige decidir algo que **no está aquí ni en el SPEC** → se agrega a `ESTADO.md` como duda, se elige la opción **más conservadora y configurable**, y se deja registrado
 - El usuario cambia 🟡 → ✅ al confirmar, o corrige el valor
-- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ADR-001) y **D4 en P10** (ADR-014): **no queda ningún 🔴 vivo**
+- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ADR-001), **D4 en P10** (ADR-014) y **D1 en P14** (ADR-019): **no queda ningún 🔴 vivo, y de las doce decisiones solo D6, D7, D9 y D11 siguen en 🟡**
 - D12 (ORM) quedó confirmada en Prisma. Sus cuatro condiciones se verifican al cerrar P1.

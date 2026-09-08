@@ -12,7 +12,23 @@
  */
 
 export const TEXTOS = {
-  producto: 'Costeo',
+  /**
+   * EL NOMBRE SALE DEL MANUAL DE MARCA, no de aquí.
+   *
+   * `DECISIONES.md` D1 puso «Costeo» como valor provisional con este motivo:
+   * «No hay nombre comercial definido. **No inventar branding.**» El manual —que
+   * `CLAUDE.md` §10 declara fuente única de la identidad— se titula *Manual de
+   * marca PLATISE* y cierra con «PLATISE · MANUAL DE MARCA V3.0 · AGOSTO 2026».
+   * El nombre estaba definido; lo que faltaba era haber abierto el archivo.
+   */
+  producto: 'Platise',
+
+  /**
+   * La firma verbal, manual p. 11. Va tal cual, y **sin cifra**: «el tagline no
+   * lleva precio: un precio caduca y convierte la firma en promoción. Las líneas
+   * con cifra son campaña, no firma».
+   */
+  firma: 'El margen, plato por plato.',
 
   acceso: {
     titulo: 'Entrar',
@@ -59,6 +75,9 @@ export const TEXTOS = {
     // El PVP incluye IVA y el food cost se calcula sobre la venta neta (R14).
     // Decirlo evita la pregunta más frecuente frente a una hoja de cálculo.
     notaIva: 'El PVP incluye IVA. El food cost se calcula sobre la venta neta.',
+    // Estaba escrito dentro de la pantalla hasta P14, contra D11. Un texto
+    // visible que no vive aquí es un texto que nadie revisa.
+    sinPrecio: 'Sin precio:',
   },
 
   menu: {
@@ -125,6 +144,8 @@ export const TEXTOS = {
 
   comun: {
     cargando: 'Cargando…',
+    /** La raya para un dato que no aplica. No es «N/A» ni «null». */
+    sinDato: '—',
     reintentar: 'Volver a intentar',
     sinPermiso: 'Tu usuario no tiene acceso a esta pantalla.',
     sinPermisoAyuda: 'Si crees que debería tenerlo, pídeselo a quien administra el sistema.',

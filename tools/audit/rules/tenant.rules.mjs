@@ -14,7 +14,7 @@
  * su consulta no devuelve nada.
  */
 
-const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts'];
 const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 
 /** Los dos unicos archivos autorizados a tocar el cliente crudo. */
