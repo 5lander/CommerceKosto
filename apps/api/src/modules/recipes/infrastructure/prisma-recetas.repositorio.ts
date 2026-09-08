@@ -224,7 +224,12 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
         });
       }
 
-      return datos.recetas.length + datos.combos.length;
+      // SE CUENTAN LAS LINEAS, NO LAS VERSIONES, y la diferencia importa: quien
+      // importa cuenta las filas de su archivo. Devolver «5 recetas» ante 12
+      // lineas de entrada hace pensar que se perdieron 7, y esa duda con datos
+      // de un cliente delante cuesta media hora de comprobaciones.
+      const lineas = datos.recetas.reduce((total, receta) => total + receta.lineas.length, 0);
+      return lineas + datos.combos.length;
     });
   }
 

@@ -131,6 +131,27 @@ function resolver(
   return resueltos;
 }
 
+/**
+ * El artículo resuelto, o el motivo por el que no se puede.
+ *
+ * **ES UNA UNIÓN ETIQUETADA Y NO `Id | string`, Y ESA ES LA LECCIÓN.** La
+ * primera versión devolvía `PurchaseArticleId | null | string` y discriminaba
+ * con `typeof x === 'string'`. Parece razonable hasta que se recuerda que
+ * `PurchaseArticleId` **es un `string` marcado**: en tiempo de ejecución la
+ * marca no existe, así que un artículo ENCONTRADO daba `typeof === 'string'` y
+ * se trataba como mensaje de error.
+ *
+ * El síntoma fue exacto y absurdo: las diez filas de un archivo de precios
+ * rechazadas, cada una con un UUID por «motivo». Lo destapó importar un catálogo
+ * de verdad, no una revisión de código.
+ *
+ * La regla que queda: **`typeof` no discrimina cuando uno de los éxitos también
+ * es una cadena.** Con tipos marcados eso pasa más de lo que parece.
+ */
+type ArticuloResuelto =
+  | { readonly clase: 'ok'; readonly id: PurchaseArticleId | null }
+  | { readonly clase: 'falta'; readonly motivo: string };
+
 /** El precio resuelto, o el motivo por el que no se puede. */
 function resolverUno(
   precio: PrecioDelLote,
@@ -141,14 +162,14 @@ function resolverUno(
   if (item === undefined) return `No existe ningún ítem llamado «${precio.item.trim()}».`;
 
   const articulo = articuloDe(precio, catalogo);
-  if (typeof articulo === 'string') return articulo;
+  if (articulo.clase === 'falta') return articulo.motivo;
 
-  const coherencia = motivoDeIncoherencia(item.tipo, articulo);
+  const coherencia = motivoDeIncoherencia(item.tipo, articulo.id);
   if (coherencia !== null) return coherencia;
 
   return {
     itemId: item.id,
-    purchaseArticleId: articulo,
+    purchaseArticleId: articulo.id,
     precio: precio.precio,
     ivaCompra: precio.ivaCompra ?? ivaPorDefecto,
     origen: precio.origen,
@@ -156,11 +177,20 @@ function resolverUno(
   };
 }
 
-function articuloDe(precio: PrecioDelLote, catalogo: Catalogo): PurchaseArticleId | null | string {
-  if (precio.articulo === null) return null;
+function articuloDe(precio: PrecioDelLote, catalogo: Catalogo): ArticuloResuelto {
+  // Una preparación PRODUCIDA no se compra: su precio es el costo estándar por
+  // unidad de uso y no lleva artículo (R10). Eso es un éxito, no una falta.
+  if (precio.articulo === null) return { clase: 'ok', id: null };
 
   const id = catalogo.articulos.get(clavePorNombre(precio.articulo));
-  return id ?? `No existe ningún artículo de compra llamado «${precio.articulo.trim()}».`;
+  if (id === undefined) {
+    return {
+      clase: 'falta',
+      motivo: `No existe ningún artículo de compra llamado «${precio.articulo.trim()}».`,
+    };
+  }
+
+  return { clase: 'ok', id };
 }
 
 /**
