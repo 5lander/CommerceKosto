@@ -1,0 +1,81 @@
+/*
+ * Estilos globales. Todo valor sale de `tokens.css` — cero literales.
+ */
+
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-fondo);
+  color: var(--color-texto);
+  font-family: var(--fuente);
+  font-size: var(--texto-base);
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+/*
+ * EL FOCO SE VE SIEMPRE, y con contorno propio.
+ *
+ * La rejilla de ventas se recorre con el teclado y sin tocar el ratón: si el
+ * foco no se ve, esa pantalla es inutilizable. Es la razón de que NO exista
+ * ninguna regla `outline: none` en este proyecto.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-foco);
+  outline-offset: 2px;
+}
+
+button {
+  font: inherit;
+  min-height: var(--tactil);
+  padding: 0 var(--espacio-4);
+  border: 1px solid var(--color-borde-fuerte);
+  border-radius: var(--radio);
+  background: var(--color-superficie);
+  color: var(--color-texto);
+  cursor: pointer;
+}
+
+button[data-variante='primario'] {
+  background: var(--color-acento);
+  border-color: var(--color-acento);
+  color: var(--color-acento-texto);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+select {
+  font: inherit;
+  min-height: var(--tactil);
+  padding: 0 var(--espacio-3);
+  border: 1px solid var(--color-borde-fuerte);
+  border-radius: var(--radio);
+  background: var(--color-superficie);
+  color: var(--color-texto);
+}
+
+/* Los decimales llegan como cadena y se muestran como cadena: nunca se parsean
+   (CLAUDE.md §3). Lo único que se hace es alinearlos para poder compararlos. */
+.numero {
+  font-family: var(--fuente-numeros);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}

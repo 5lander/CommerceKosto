@@ -1,0 +1,77 @@
+/*
+ * Tokens — la ÚNICA fuente de color, tipografía, espacio y radio.
+ *
+ * REGLA DE ORO DE CLAUDE.md §10: prohibido escribir un color, tamaño, radio,
+ * sombra o fuente dentro de un componente. Todo sale de aquí.
+ *
+ * VALORES NEUTROS A PROPÓSITO. La identidad visual existe —el manual de marca
+ * está en `docs/Manual de Marca/`— y **no se aplica todavía**: entra en P14, que
+ * está pospuesto. Que estos valores sean sosos es lo que demuestra que la capa
+ * visual se puede reemplazar sin tocar una línea de lógica. Adelantarla
+ * invalidaría el criterio de aceptación de P14.
+ *
+ * La escala de grises es la de Tailwind (slate), usada como valores literales y
+ * no como dependencia: son doce números, no hacen falta 3 MB para tenerlos.
+ */
+
+:root {
+  /* --- Color -------------------------------------------------------------- */
+  --color-fondo: #f8fafc;
+  --color-superficie: #ffffff;
+  --color-borde: #e2e8f0;
+  --color-borde-fuerte: #cbd5e1;
+
+  --color-texto: #0f172a;
+  --color-texto-suave: #475569;
+  --color-texto-tenue: #94a3b8;
+
+  --color-acento: #1e293b;
+  --color-acento-texto: #ffffff;
+
+  /* Los tres estados del semáforo de food cost (SPEC §13). NO son decoración:
+     el umbral verde, el objetivo y el máximo son configuración por company. */
+  --color-bien: #15803d;
+  --color-bien-fondo: #f0fdf4;
+  --color-atencion: #b45309;
+  --color-atencion-fondo: #fffbeb;
+  --color-mal: #b91c1c;
+  --color-mal-fondo: #fef2f2;
+
+  --color-foco: #2563eb;
+
+  /* --- Tipografía --------------------------------------------------------- */
+  --fuente: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* Los NÚMEROS van en tabular para que las columnas de una tabla de costos
+     queden alineadas por la coma. Con proporcional, «1.111» y «8.888» ocupan
+     distinto y la columna baila. */
+  --fuente-numeros: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, monospace;
+
+  --texto-xs: 0.75rem;
+  --texto-sm: 0.875rem;
+  --texto-base: 1rem;
+  --texto-lg: 1.125rem;
+  --texto-xl: 1.5rem;
+  --texto-2xl: 2rem;
+
+  /* --- Espacio ------------------------------------------------------------ */
+  --espacio-1: 0.25rem;
+  --espacio-2: 0.5rem;
+  --espacio-3: 0.75rem;
+  --espacio-4: 1rem;
+  --espacio-6: 1.5rem;
+  --espacio-8: 2rem;
+
+  --radio: 6px;
+  --radio-lg: 10px;
+
+  --sombra: 0 1px 2px rgb(15 23 42 / 6%);
+
+  /* --- Objetivos táctiles -------------------------------------------------- */
+  /*
+   * 44 px es el mínimo de la guía de accesibilidad de Apple y el que WCAG 2.2
+   * recomienda. No es un capricho de diseño: la hoja de conteo y la rejilla de
+   * ventas se usan DE PIE, en una cocina, con las manos ocupadas (CLAUDE.md §10).
+   */
+  --tactil: 44px;
+}

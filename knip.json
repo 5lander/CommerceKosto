@@ -13,6 +13,13 @@
         ".dependency-cruiser.cjs"
       ]
     },
+    "apps/web": {
+      "entry": [
+        "src/app/**/{page,layout,loading,error,not-found,route,template}.tsx",
+        "next.config.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
     "apps/api": {
       "entry": [
         "src/main.ts",

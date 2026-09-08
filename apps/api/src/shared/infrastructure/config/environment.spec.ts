@@ -26,6 +26,54 @@ describe('loadConfiguration', () => {
     expect(config.storageAdapter).toBe('fake');
   });
 
+  /**
+   * `SEGURIDAD.md` §4.4: lista blanca exacta, jamas `*`, y `credentials` solo
+   * con origen verificado. La sesion viaja en cookie, asi que un `*` aqui seria
+   * mandarle la cookie a quien pregunte — el navegador ni siquiera lo permite.
+   */
+  describe('CORS_ORIGENES', () => {
+    it('vacio significa NINGUN origen, que es lo que valia antes del frontend', () => {
+      expect(loadConfiguration(entorno()).corsOrigenes).toEqual([]);
+    });
+
+    it('acepta varios origenes separados por comas, sin espacios de sobra', () => {
+      const config = loadConfiguration(
+        entorno({ CORS_ORIGENES: 'https://app.ejemplo.ec, http://localhost:3001' }),
+      );
+
+      expect(config.corsOrigenes).toEqual(['https://app.ejemplo.ec', 'http://localhost:3001']);
+    });
+
+    it('RECHAZA `*`: no es una URL, y es justo lo que la norma prohibe', () => {
+      expect(() => loadConfiguration(entorno({ CORS_ORIGENES: '*' }))).toThrow(
+        InvalidEnvironmentError,
+      );
+    });
+
+    it('rechaza un origen sin esquema', () => {
+      expect(() => loadConfiguration(entorno({ CORS_ORIGENES: 'app.ejemplo.ec' }))).toThrow(
+        InvalidEnvironmentError,
+      );
+    });
+
+    /**
+     * El navegador manda `Origin: https://app.ejemplo.ec`, **sin barra final**.
+     * Con la barra puesta en la lista, la comparacion falla y el sintoma es un
+     * CORS que no funciona sin decir por que — media tarde.
+     */
+    it('rechaza un origen con barra final', () => {
+      expect(() => loadConfiguration(entorno({ CORS_ORIGENES: 'https://app.ejemplo.ec/' }))).toThrow(
+        InvalidEnvironmentError,
+      );
+    });
+
+    it('un origen malo entre varios buenos tumba la configuracion entera', () => {
+      expect(() =>
+        loadConfiguration(entorno({ CORS_ORIGENES: 'https://bueno.ec,*,https://otro.ec' })),
+      ).toThrow(InvalidEnvironmentError);
+    });
+  });
+
   describe('el usuario de DATABASE_URL', () => {
     it('RECHAZA el rol de migraciones', () => {
       // Es el fallo mas probable del proyecto: copiar la cadena del migrator

@@ -32,3 +32,9 @@ Desktop.ini
 # Registros locales
 *.log
 npm-debug.log*
+
+# Next.js
+apps/web/.next/
+apps/web/next-env.d.ts
+apps/web/AGENTS.md
+apps/web/CLAUDE.md

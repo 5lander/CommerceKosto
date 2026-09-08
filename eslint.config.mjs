@@ -29,6 +29,9 @@ export const IGNORADOS = [
   // que las reglas con tipos se quejarian de todas ellas. Lo verifica `tsc`
   // (audit:types), y `audit:forbidden` controla sus `@ts-expect-error`.
   'apps/*/src/**/*.type-contract.ts',
+  // Lo genera Next en cada arranque, no se versiona y no es nuestro.
+  'apps/web/.next/**',
+  'apps/web/next-env.d.ts',
 ];
 
 export default tseslint.config(
@@ -36,9 +39,65 @@ export default tseslint.config(
 
   js.configs.recommended,
 
+  // --- El FRONTEND: mismas reglas duras, con las de React encima -----------
+  //
+  // `apps/web` NO lleva las 7 fases del protocolo —alli no vive ninguna regla de
+  // negocio, asi que la auditoria de cien verificaciones protege poco y cuesta
+  // mucho—, pero SI lleva las cuatro que no se relajan en ningun sitio: nada de
+  // `any`, dinero y cantidades nunca en punto flotante, decimales como cadena en
+  // las fronteras, y cero logica de negocio.
+  //
+  // `no-restricted-syntax` es lo que convierte la tercera en algo verificable en
+  // vez de en una intencion: `parseFloat` y `Number()` sobre un decimal de la API
+  // rompen el build. Es la unica forma de que la regla sobreviva a la prisa.
+  {
+    files: ['apps/web/src/**/*.ts', 'apps/web/src/**/*.tsx'],
+    extends: [
+      ...tseslint.configs.strictTypeChecked,
+      ...tseslint.configs.stylisticTypeChecked,
+    ],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+      globals: { ...globals.browser, ...globals.node },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'error',
+      '@typescript-eslint/no-unsafe-call': 'error',
+      '@typescript-eslint/no-unsafe-member-access': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.name='parseFloat']",
+          message:
+            'Los decimales de la API llegan como cadena y se muestran como cadena. ' +
+            '`parseFloat` los convierte en punto flotante y 0.1 + 0.2 deja de dar 0.3 ' +
+            '(CLAUDE.md §3). Si hace falta un calculo, va en la API.',
+        },
+        {
+          selector: "CallExpression[callee.object.name='Number'][callee.property.name='parseFloat']",
+          message: 'Mismo motivo que `parseFloat`: los decimales no se parsean en el frontend.',
+        },
+        {
+          selector: "CallExpression[callee.name='Number'] > MemberExpression",
+          message:
+            'Convertir a numero un campo que viene de la API es punto flotante sobre un decimal ' +
+            'exacto. Muestralo como cadena (CLAUDE.md §3).',
+        },
+      ],
+    },
+  },
+
   // --- TypeScript de la aplicacion, con tipos ------------------------------
   {
-    files: ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts'],
+    files: ['apps/api/src/**/*.ts', 'apps/api/test/**/*.ts'],
     extends: [
       ...tseslint.configs.strictTypeChecked,
       ...tseslint.configs.stylisticTypeChecked,

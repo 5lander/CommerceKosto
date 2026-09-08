@@ -120,6 +120,37 @@ const esquema = z
 
     MAIL_ADAPTER: z.enum(['fake', 'real']).default('fake'),
     STORAGE_ADAPTER: z.enum(['fake', 'real']).default('fake'),
+
+    /**
+     * Los origenes que pueden llamar a esta API desde un navegador, separados
+     * por comas. **Vacio significa NINGUNO**, que es lo que valia hasta que
+     * existio el frontend.
+     *
+     * `SEGURIDAD.md` §4.4: lista blanca exacta, jamas `*`, y `credentials` solo
+     * con origen verificado. La validacion va EN EL CAMPO —cada origen tiene
+     * que ser una URL con esquema y sin barra final— y no en un refinamiento
+     * del objeto: un refinamiento no corre si otra variable fallo antes, y
+     * entonces esta comprobacion desapareceria del informe sin que nada avise
+     * (INC-008).
+     */
+    CORS_ORIGENES: z
+      .string()
+      .default('')
+      .transform((crudo) =>
+        crudo
+          .split(',')
+          .map((origen) => origen.trim())
+          .filter((origen) => origen !== ''),
+      )
+      .pipe(
+        z.array(
+          z
+            .url({ message: 'cada origen tiene que ser una URL completa, con http:// o https://' })
+            .refine((origen) => !origen.endsWith('/'), {
+              message: 'un origen no lleva barra final: el navegador nunca la manda',
+            }),
+        ),
+      ),
   })
   .superRefine((valores, ctx) => {
     if (valores.NODE_ENV !== 'production') {
@@ -150,6 +181,8 @@ export interface Configuration {
   readonly rateLimit: { readonly windowMs: number; readonly max: number };
   readonly mailAdapter: 'fake' | 'real';
   readonly storageAdapter: 'fake' | 'real';
+  /** Lista blanca exacta. Vacia = ningun navegador puede llamar a la API. */
+  readonly corsOrigenes: readonly string[];
 }
 
 /** Token de inyeccion de la configuracion ya validada. */
@@ -182,5 +215,6 @@ export function loadConfiguration(source: NodeJS.ProcessEnv): Configuration {
     rateLimit: { windowMs: valores.RATE_LIMIT_WINDOW_MS, max: valores.RATE_LIMIT_MAX },
     mailAdapter: valores.MAIL_ADAPTER,
     storageAdapter: valores.STORAGE_ADAPTER,
+    corsOrigenes: valores.CORS_ORIGENES,
   };
 }
