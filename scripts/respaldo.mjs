@@ -31,7 +31,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { RAIZ, exigir, opcional } from './lib/entorno.mjs';
+import { RAIZ, conexionDeSuperusuario, opcional } from './lib/entorno.mjs';
 import { consultar } from './lib/psql.mjs';
 import { listar, restaurar, volcar } from './lib/pgdump.mjs';
 import { SQL_DE_RECUENTOS, TABLAS_TESTIGO, comoRecuentos } from './lib/testigos.mjs';
@@ -51,17 +51,6 @@ const SQL_CREAR_PRUEBA = 'CREATE DATABASE costeo_verificacion_respaldo';
 
 const MILISEGUNDOS_POR_DIA = 24 * 60 * 60 * 1000;
 
-/** Construye la cadena del superusuario desde las piezas del `.env`. */
-function conexionDeSuperusuario() {
-  const usuario = opcional('POSTGRES_SUPERUSER', 'postgres');
-  const contrasena = exigir('POSTGRES_SUPERUSER_PASSWORD');
-  const puerto = opcional('POSTGRES_PORT', '5432');
-  const host = opcional('POSTGRES_HOST', 'localhost');
-  const base = opcional('POSTGRES_DB', 'costeo');
-
-  const credencial = `${encodeURIComponent(usuario)}:${encodeURIComponent(contrasena)}`;
-  return `postgresql://${credencial}@${host}:${puerto}/${base}`;
-}
 
 /**
  * La misma cadena, apuntando a otra base del mismo servidor.

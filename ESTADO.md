@@ -28,8 +28,8 @@ por pantalla.
 2. **Los datos del tenant real.** `npm run seed:tenant` está escrito y probado; falta el archivo con
    el nombre de la company, sus ubicaciones y sus usuarios. **No se inventan.**
 
-Después: **P15 — endurecimiento**, con las 7 fases completas. Va primero de los pospuestos porque
-habrá datos de un cliente real en una máquina que operamos nosotros.
+**P15 está cerrado** (2026-09-08). Lo siguiente de los pospuestos es **P11 — Back office**, con las
+7 fases completas, y después P13 y P14.
 
 ### Lo hecho en el sprint
 
@@ -256,11 +256,11 @@ Lo implementado:
 | P8 — Vistas analíticas | ✅ Completado | `0067bd1` | 2026-09-04 |
 | P9 — Consolidado y comparativa | ✅ Completado | `47f1e7d` | 2026-09-06 |
 | **P10 — Importación de catálogo, acotada** | ✅ Completado | *(el de este paquete)* | 2026-09-07 |
-| P11 — Back office | ⏸️ **POSPUESTO** | — | Con un cliente, el back office es el usuario |
+| P11 — Back office | 🟡 **SIGUIENTE** | — | Con un cliente el back office es el usuario, pero `audit_log` sigue sin lector |
 | P12 — Frontend app cliente | ✅ **Completado, recortado a 5 pantallas** | Fase C | 2026-09-08 |
 | P13 — Frontend back office | ⏸️ **POSPUESTO** | — | No hay back office que operar |
 | P14 — Capa visual | ⏸️ **POSPUESTO** | — | Frontend sobrio, sin identidad de marca |
-| P15 — Endurecimiento | 🟡 **SIGUIENTE** | — | Va primero: habrá datos de un cliente real en una máquina que operamos nosotros |
+| **P15 — Endurecimiento** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 
 Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto con motivo
 

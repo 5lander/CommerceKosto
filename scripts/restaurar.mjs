@@ -23,7 +23,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { exigir, opcional } from './lib/entorno.mjs';
+import { conexionDeSuperusuario } from './lib/entorno.mjs';
 import { consultar } from './lib/psql.mjs';
 import { listar, restaurar } from './lib/pgdump.mjs';
 import { SQL_DE_RECUENTOS, TABLAS_TESTIGO, comoRecuentos } from './lib/testigos.mjs';
@@ -47,15 +47,6 @@ const BASE_RESTAURADA = 'costeo_restaurado';
 
 const SQL_CREAR_RESTAURADA = 'CREATE DATABASE costeo_restaurado';
 
-function conexionDeSuperusuario() {
-  const usuario = opcional('POSTGRES_SUPERUSER', 'postgres');
-  const contrasena = exigir('POSTGRES_SUPERUSER_PASSWORD');
-  const credencial = `${encodeURIComponent(usuario)}:${encodeURIComponent(contrasena)}`;
-  const host = opcional('POSTGRES_HOST', 'localhost');
-  const puerto = opcional('POSTGRES_PORT', '5432');
-
-  return `postgresql://${credencial}@${host}:${puerto}/${opcional('POSTGRES_DB', 'costeo')}`;
-}
 
 /** @param {string} conexion @param {string} base */
 function apuntandoA(conexion, base) {

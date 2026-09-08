@@ -73,6 +73,20 @@ export interface ContextoDeSesion {
   /** Capacidades efectivas, ya resueltas desde los roles (SPEC §4). */
   readonly permisos: readonly string[];
   readonly alcance: AlcanceDeUsuario;
+  /**
+   * TODAS las ubicaciones de la company, independientemente del alcance.
+   *
+   * NO ES EL ALCANCE Y NO LO SUSTITUYE: es el conjunto contra el que se
+   * comprueba que un `locationId` recibido pertenece siquiera a esta company.
+   * `alcance` responde «puede este usuario»; esto responde «existe esto aqui»,
+   * y son dos preguntas distintas — un OWNER puede con todas las suyas y con
+   * ninguna ajena.
+   *
+   * Viaja en `session_lookup`, que ya se ejecuta en cada peticion, para que la
+   * comprobacion no cueste una consulta mas. Y por eso mismo NO se queda rancio:
+   * una ubicacion creada hace un segundo esta en la siguiente peticion.
+   */
+  readonly ubicacionesDeCompany: readonly LocationId[];
 }
 
 export interface RepositorioDeAutenticacion {

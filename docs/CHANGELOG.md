@@ -4,6 +4,41 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P15 — Endurecimiento · 2026-09-08
+
+**Tres hallazgos, ninguno salido de leer código: los tres salieron de ejecutar algo que hasta ahora
+no se ejecutaba.**
+
+**Un pentest que ataca** (`test/integracion/pentest.spec.ts`, 21 pruebas con dos tenants vivos:
+inyección SQL, IDOR, XSS almacenado, asignación masiva, sesión, fuga por error). Encontró dos
+agujeros reales:
+
+- **Un byte NUL convertía cualquier campo de texto en un 500.** PostgreSQL no puede guardarlo y su
+  rechazo subía como `INTERNAL_ERROR`; era INC-012 otra vez, alcanzable desde cualquier campo por
+  cualquier usuario autenticado. `EsquemaPipe` rechaza ahora los caracteres de control **antes** de
+  Zod — nunca en un refinamiento de objeto, que es la trampa de INC-008 — y por punto de código, no
+  con una regex que obligue a meterlos en el fuente.
+- **`GET /costeo?locationId=<de otra company>` respondía 200.** Sin fuga —RLS aguantó y devolvía los
+  productos del propio usuario— pero con **todos los costos a cero**: un número plausible y falso,
+  que en este producto es peor que un error. `exigirUbicacionEnAlcance` salía temprano para los roles
+  de company. La sesión lleva ahora las ubicaciones de la company (`session_lookup` con un LATERAL,
+  cero consultas nuevas por petición) y los 27 llamantes heredaron la comprobación sin tocar ninguno.
+
+**`npm run bench`, la deuda aplazada desde P9.** Base propia creada y borrada, `grants.sql` antes de
+migrar, volumen sintético realista (219.000 movimientos, 14.000 líneas de receta, 5 companies para
+que RLS filtre), p95 de 30 corridas sobre los casos de uso —no sobre HTTP, INC-016— con el suelo del
+entorno medido al lado, y **salida con código 1** si un presupuesto se pasa.
+
+En su primera corrida: **el consolidado tardaba 1.399 ms contra un límite de 800.** No por ninguna
+consulta lenta, sino por leer cincuenta veces la tabla `item` y calcular veinte veces los mismos
+costos. Se arregló el código, no el umbral: filtro cuadrático en `CostosDeItems` (→1.351), ámbito de
+lecturas de company compartidas por operación (→844) y la carta leída una vez por ubicación en vez de
+dos (→**677**). El inventario de una ubicación bajó de paso de 156 a 110 ms.
+
+Los doce checks en verde. **578 unitarias + 298 de integración.**
+
+---
+
 ## Sprint de salida a cliente — Fases A a D · 2026-09-07 y 08
 
 **Objetivo:** que un restaurante pueda usar el sistema. Alcance recortado por decisión del usuario;

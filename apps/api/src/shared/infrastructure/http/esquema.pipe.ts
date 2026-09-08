@@ -11,6 +11,9 @@
  * El pipe no sabe de dominio: recibe un esquema y devuelve el valor tipado. La
  * unica decision que toma es convertir el fallo de Zod en un error de dominio,
  * para que salga por el mismo formato `{ code, message }` que todo lo demas.
+ *
+ * Y UNA SEGUNDA, ANADIDA EN P15: rechaza los CARACTERES DE CONTROL antes de
+ * validar. Ver `exigirSinCaracteresDeControl`.
  */
 
 import { Injectable, type PipeTransform } from '@nestjs/common';
@@ -21,11 +24,105 @@ import { EntradaInvalidaError } from '../../domain/errors/entrada-invalida';
 /** Cuantos problemas se enumeran. Mas alla es ruido para quien integra. */
 const PROBLEMAS_A_MOSTRAR = 5;
 
+/** Cuanto se baja en un objeto anidado antes de dejar de mirar. */
+const PROFUNDIDAD_MAXIMA = 8;
+
+/**
+ * Caracteres de control C0 y C1, salvo tabulador, salto de linea y retorno.
+ *
+ * El que importa de verdad es el **byte NUL**: PostgreSQL **no puede guardarlo**
+ * en una columna de texto, y su rechazo llega al cliente como
+ * `INTERNAL_ERROR 500` en vez de como un 400 que diga que el nombre no vale.
+ *
+ * Lo encontro el pentest de P15 mandando un NUL (`U+0000`) como nombre de item. Es la
+ * clase exacta de INC-012 —una restriccion de la base que nadie tradujo— y era
+ * alcanzable desde CUALQUIER campo de texto por cualquier usuario autenticado.
+ * Un 500 dispara alertas de operacion, cuenta como caida, y le dice a quien
+ * prueba que encontro algo que rompe el servidor.
+ */
+// Los tres de control que SI son texto legitimo. Un nombre de dos lineas o con
+// una tabulacion pegada desde una hoja de calculo no tiene por que rechazarse.
+const TABULADOR = 0x09;
+const SALTO_DE_LINEA = 0x0a;
+const RETORNO_DE_CARRO = 0x0d;
+
+/** Fin del bloque C0 (el que empieza en NUL) y limites del bloque C1. */
+const FIN_DE_C0 = 0x1f;
+const INICIO_DE_C1 = 0x7f;
+const FIN_DE_C1 = 0x9f;
+
+/**
+ * SE COMPRUEBA POR PUNTO DE CODIGO Y NO CON UNA EXPRESION REGULAR.
+ *
+ * Una regex con estos caracteres dentro obliga a escribirlos —o a escaparlos— en
+ * el fuente, y `no-control-regex` la rechaza precisamente porque casi siempre son
+ * un accidente. Aqui no lo son, pero la respuesta correcta no es silenciar la
+ * regla: es no necesitarla. Comparar numeros dice lo mismo y se lee mejor.
+ */
+function esDeControl(codigo: number): boolean {
+  if (codigo === TABULADOR || codigo === SALTO_DE_LINEA || codigo === RETORNO_DE_CARRO) {
+    return false;
+  }
+  return codigo <= FIN_DE_C0 || (codigo >= INICIO_DE_C1 && codigo <= FIN_DE_C1);
+}
+
+function llevaCaracterDeControl(texto: string): boolean {
+  for (let posicion = 0; posicion < texto.length; posicion += 1) {
+    if (esDeControl(texto.charCodeAt(posicion))) return true;
+  }
+  return false;
+}
+
+/**
+ * Recorre el valor y falla si algun texto lleva un caracter de control.
+ *
+ * VA EN EL PIPE Y NO EN CADA CAMPO, y es deliberado. Ponerlo campo a campo
+ * significa acordarse en el siguiente campo que alguien anada, y ese es
+ * exactamente el olvido que no avisa. Ponerlo en un refinamiento de OBJETO
+ * seria peor: no se ejecuta si otro campo fallo antes (INC-008). Aqui corre
+ * SIEMPRE y antes que nada.
+ *
+ * @param valor lo que llego por el cable, ya parseado como JSON
+ */
+function exigirSinCaracteresDeControl(valor: unknown, profundidad = 0): void {
+  // RENDIRSE AQUI SERIA DEJAR PASAR LO HONDO. Un `return` en el limite de
+  // profundidad convierte el anidamiento en la forma de saltarse la
+  // comprobacion: basta con enterrar la cadena nueve niveles. Ningun cuerpo
+  // legitimo de esta API baja tanto, asi que se rechaza — la opcion mas
+  // restrictiva, que es la que manda ante la duda (CLAUDE.md 4).
+  if (profundidad > PROFUNDIDAD_MAXIMA) {
+    throw new EntradaInvalidaError(['(cuerpo): la peticion esta anidada mas de lo que se acepta.']);
+  }
+
+  if (typeof valor === 'string') {
+    if (llevaCaracterDeControl(valor)) {
+      throw new EntradaInvalidaError([
+        '(cuerpo): hay caracteres de control en un campo de texto. Suelen venir de copiar y ' +
+          'pegar desde otro programa; vuelve a escribir el valor a mano.',
+      ]);
+    }
+    return;
+  }
+
+  if (Array.isArray(valor)) {
+    for (const elemento of valor) exigirSinCaracteresDeControl(elemento, profundidad + 1);
+    return;
+  }
+
+  if (typeof valor === 'object' && valor !== null) {
+    for (const anidado of Object.values(valor)) {
+      exigirSinCaracteresDeControl(anidado, profundidad + 1);
+    }
+  }
+}
+
 @Injectable()
 export class EsquemaPipe<T> implements PipeTransform<unknown, T> {
   public constructor(private readonly esquema: ZodType<T>) {}
 
   public transform(valor: unknown): T {
+    exigirSinCaracteresDeControl(valor);
+
     const resultado = this.esquema.safeParse(valor);
     if (resultado.success) {
       return resultado.data;

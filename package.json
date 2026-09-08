@@ -45,7 +45,8 @@
     "migrate:deploy": "npm run migrate:deploy --workspace @costeo/api",
     "migrate:down": "node scripts/migrate-down.mjs",
     "migrate:verify": "node scripts/migrate-verify.mjs",
-    "audit:complexity:preferencias": "eslint . --config eslint.preferencias.config.mjs --no-inline-config"
+    "audit:complexity:preferencias": "eslint . --config eslint.preferencias.config.mjs --no-inline-config",
+    "bench": "node scripts/bench.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

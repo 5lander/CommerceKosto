@@ -34,6 +34,7 @@ import {
   type DependenciasDeConsumo,
   type VentaDeProducto,
 } from './consumo';
+import type { CartaDeUbicacion } from '../../../recipes/application/casos-de-uso/carta';
 import { LeerConciliacion, type ConciliacionDeConteo, type DependenciasDeConteo } from './conteos';
 
 export class ConsultarAgregadosDelPeriodo {
@@ -118,6 +119,15 @@ export class CalcularConsumoTeorico {
   public constructor(private readonly deps: DependenciasDeConsumo) {}
 
   /** @throws {UbicacionFueraDeAlcanceError} @throws {CicloEnConsumoError} */
+  /**
+   * `yaLeida` evita releer la carta cuando quien llama ya la tiene.
+   *
+   * La analitica costea la carta y acto seguido calcula el consumo con LA MISMA
+   * carta: sin esto son dos lecturas de `recipe_line` —la consulta mas cara del
+   * sistema— con argumentos identicos. Quien no la pase, se lee la suya.
+   *
+   * @throws {UbicacionFueraDeAlcanceError} @throws {CicloEnConsumoError}
+   */
   public async ejecutar(
     sesion: SesionActiva,
     entrada: {
@@ -125,14 +135,16 @@ export class CalcularConsumoTeorico {
       readonly fecha: Date;
       readonly ventas: readonly VentaDeProducto[];
     },
+    yaLeida?: Promise<CartaDeUbicacion>,
   ): Promise<ReadonlyMap<ItemId, Ratio>> {
     exigirUbicacionEnAlcance(sesion, entrada.locationId);
 
     const [carta, items] = await Promise.all([
-      this.deps.leerCarta.ejecutar(sesion, {
-        locationId: entrada.locationId,
-        fecha: entrada.fecha,
-      }),
+      yaLeida ??
+        this.deps.leerCarta.ejecutar(sesion, {
+          locationId: entrada.locationId,
+          fecha: entrada.fecha,
+        }),
       this.deps.listarItems.ejecutar(sesion, false),
     ]);
 

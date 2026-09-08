@@ -171,9 +171,30 @@
 | I5 | Nada de CPU pesada en el proceso HTTP |
 | I6 | Concurrencia acotada en todo `Promise.all` sobre I/O |
 | I7 | Cachés nuevos cumplen las tres condiciones (lectura≫escritura, staleness tolerable, invalidación definida) |
-| I8 | Presupuestos de rendimiento medidos y en verde (p95) |
+| I8 | Presupuestos de rendimiento medidos y en verde (p95) — **`npm run bench`, ver abajo** |
 | I9 | Presupuesto de bundle en verde *(solo P12/P13)* |
 | I10 | Optimizaciones no triviales documentadas con antes/después |
+
+### I8 — `npm run bench` no está en `npm run audit`, y hay que saberlo
+
+**Cuándo es obligatorio ejecutarlo:** en todo paquete que toque el camino de
+LECTURA de `costing`, `analytics`, `inventory` o `pricing`. En los demás, no.
+
+**Por qué está fuera de los doce checks.** Tarda unos dos minutos, casi todos
+sembrando 219.000 movimientos, y eso se pagaría en cada commit y en cada
+pre-commit. Es un compromiso consciente, no un olvido.
+
+**El riesgo que abre, dicho en voz alta:** un medidor fuera del pre-commit puede
+decaer sin que nadie se entere — que es exactamente lo que le pasó al
+presupuesto de §5 entre P9 y P15, cuando la deuda se aplazó tres veces y el
+consolidado acabó incumpliendo su límite en un 75 % sin que ningún check
+protestara. Por eso esta fila está aquí y no en una nota al pie.
+
+**Cómo se lee su salida.** Falla con código 1 si algún presupuesto se pasa.
+Cuando eso ocurra: **el check tiene razón hasta que se demuestre lo contrario, y
+lo que se arregla es la consulta, no el umbral.** El «suelo del entorno» que
+imprime arriba es lo que cuesta un viaje a la base en esa máquina; sin restarlo
+mentalmente, los otros números no significan nada.
 
 ---
 

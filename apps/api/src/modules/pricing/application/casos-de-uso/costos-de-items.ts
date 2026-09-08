@@ -58,11 +58,17 @@ export class CostosDeItems {
     }
 
     const factores = new Map(articulos.map((a) => [a.id, a.factorDeConversion]));
+    // AGRUPAR UNA VEZ, NO FILTRAR POR ITEM. Filtrar la lista completa de precios
+    // dentro del bucle es O(items x precios): con 500 items y 500 precios son
+    // 250.000 comparaciones y 500 arrays nuevos POR LLAMADA, y el consolidado de
+    // diez ubicaciones llama a esto veinte veces. Lo encontro `npm run bench`
+    // con volumen realista; con veinte filas no se ve.
+    const preciosPorItem = agrupadosPorItem(precios);
     const porItem = new Map<ItemId, CostoDelItem>();
     const sinPrecio: ItemId[] = [];
 
     for (const item of items) {
-      const vigente = precioVigenteA(porItemId(precios, item.id), fecha);
+      const vigente = precioVigenteA(preciosPorItem.get(item.id) ?? [], fecha);
       if (vigente === null) {
         sinPrecio.push(item.id);
         continue;
@@ -74,8 +80,18 @@ export class CostosDeItems {
   }
 }
 
-function porItemId(precios: readonly PrecioLeido[], id: ItemId): readonly PrecioLeido[] {
-  return precios.filter((precio) => precio.itemId === id);
+function agrupadosPorItem(
+  precios: readonly PrecioLeido[],
+): ReadonlyMap<ItemId, readonly PrecioLeido[]> {
+  const porItem = new Map<ItemId, PrecioLeido[]>();
+
+  for (const precio of precios) {
+    const suyos = porItem.get(precio.itemId);
+    if (suyos === undefined) porItem.set(precio.itemId, [precio]);
+    else suyos.push(precio);
+  }
+
+  return porItem;
 }
 
 /**

@@ -68,7 +68,7 @@ export class ConsultarMenuEngineering {
   public constructor(private readonly deps: DependenciasDeVistas) {}
 
   public async ejecutar(sesion: SesionActiva, pedido: MesDeUbicacion): Promise<Menu> {
-    return menuDe(await contexto(this.deps, sesion, pedido));
+    return menuDe(await contexto({ deps: this.deps, sesion, pedido }));
   }
 }
 
@@ -76,7 +76,7 @@ export class ConsultarFoodCostReal {
   public constructor(private readonly deps: DependenciasDeVistas) {}
 
   public async ejecutar(sesion: SesionActiva, pedido: MesDeUbicacion): Promise<FoodCostReal> {
-    return foodCostDe(await contexto(this.deps, sesion, pedido));
+    return foodCostDe(await contexto({ deps: this.deps, sesion, pedido }));
   }
 }
 
@@ -87,7 +87,7 @@ export class ConsultarPuntoDeEquilibrio {
     sesion: SesionActiva,
     pedido: MesDeUbicacion,
   ): Promise<PuntoDeEquilibrio> {
-    return equilibrioDe(await contexto(this.deps, sesion, pedido));
+    return equilibrioDe(await contexto({ deps: this.deps, sesion, pedido }));
   }
 }
 
@@ -98,7 +98,7 @@ export class ConsultarInventarioValorizado {
     sesion: SesionActiva,
     pedido: MesDeUbicacion,
   ): Promise<InventarioConNombres> {
-    const datos = await contexto(this.deps, sesion, pedido);
+    const datos = await contexto({ deps: this.deps, sesion, pedido });
     const inventario = inventarioDe(datos);
 
     return {
@@ -123,7 +123,7 @@ export class ConsultarResumen {
   public constructor(private readonly deps: DependenciasDeVistas) {}
 
   public async ejecutar(sesion: SesionActiva, pedido: MesDeUbicacion): Promise<Resumen> {
-    const datos = await contexto(this.deps, sesion, pedido);
+    const datos = await contexto({ deps: this.deps, sesion, pedido });
     const real = foodCostDe(datos);
     const equilibrio = equilibrioDe(datos);
     const inventario = inventarioDe(datos);
@@ -165,7 +165,7 @@ export class ConsultarReposicion {
     sesion: SesionActiva,
     pedido: MesDeUbicacion,
   ): Promise<readonly FilaDeReposicion[]> {
-    const datos = await contexto(this.deps, sesion, pedido);
+    const datos = await contexto({ deps: this.deps, sesion, pedido });
     const inventario = inventarioDe(datos);
 
     return inventario.items.map((item) => ({

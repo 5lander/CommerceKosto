@@ -28,14 +28,12 @@ import type {
 } from '../../../../shared/domain/identity/identificadores';
 import { Money, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import type { CostosDeItems } from '../../../pricing/application/casos-de-uso/costos-de-items';
-import type { LeerCarta, CartaDeUbicacion } from '../../../recipes/application/casos-de-uso/carta';
+import type { CartaDeUbicacion } from '../../../recipes/application/casos-de-uso/carta';
 import type {
   ConfiguracionEnUbicacion,
   ProductoLeido,
   RecetaLeida,
 } from '../../../recipes/application/ports/repositorio-de-recetas.port';
-import type { LeerAjustes } from '../../../pricing/application/casos-de-uso/ajustes';
 import {
   resolverCostos,
   type CatalogoCosteable,
@@ -48,14 +46,13 @@ import {
   type LineaParaCostear,
 } from '../../domain/costeo-de-producto';
 import { ProductoSinCosteoError } from '../../domain/errores';
-import type { ListarItems } from '../../../catalog/application/casos-de-uso/items';
+import {
+  compartidoDeCompany,
+  type CompartidoDeCompany,
+  type LecturasDeCompany,
+} from './compartido';
 
-export interface DependenciasDeCosteo {
-  readonly leerCarta: LeerCarta;
-  readonly costosDeItems: CostosDeItems;
-  readonly listarItems: ListarItems;
-  readonly leerAjustes: LeerAjustes;
-}
+export type DependenciasDeCosteo = LecturasDeCompany;
 
 export interface CosteoDelProducto {
   readonly productId: ProductId;
@@ -85,15 +82,22 @@ const COMBO = 'COMBO';
 export class CostearCarta {
   public constructor(private readonly deps: DependenciasDeCosteo) {}
 
+  /**
+   * `compartido` deja que quien ya haya leido lo de company no lo relea.
+   *
+   * Si no llega, se abre uno propio: el comportamiento de un llamante que no
+   * sabe nada de esto no cambia. Ver `compartido.ts` para el porque.
+   */
   public async ejecutar(
     sesion: SesionActiva,
     entrada: { readonly locationId: LocationId; readonly fecha: Date },
+    compartido: CompartidoDeCompany = compartidoDeCompany(this.deps, sesion),
   ): Promise<CosteoDeLaCarta> {
     const [carta, costosDePrecio, items, ajustes] = await Promise.all([
-      this.deps.leerCarta.ejecutar(sesion, entrada),
-      this.deps.costosDeItems.ejecutar(sesion, entrada.fecha),
-      this.deps.listarItems.ejecutar(sesion, false),
-      this.deps.leerAjustes.ejecutar(sesion),
+      compartido.cartaDe(entrada.locationId, entrada.fecha),
+      compartido.costosAlCorte(entrada.fecha),
+      compartido.items(),
+      compartido.ajustes(),
     ]);
 
     const resueltos = resolverCostos(

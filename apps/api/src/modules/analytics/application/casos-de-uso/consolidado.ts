@@ -43,6 +43,10 @@ import {
   type UbicacionSinDatos,
 } from '../../domain/consolidado';
 import { PeriodoSinDatosError } from '../../domain/errores';
+import {
+  compartidoDeCompany,
+  type CompartidoDeCompany,
+} from '../../../costing/application/casos-de-uso/compartido';
 import { contexto, type ContextoDelPeriodo, type DependenciasDeVistas } from './contexto';
 import { foodCostDe, inventarioDe } from './vistas';
 
@@ -169,9 +173,17 @@ async function recoger(
 ): Promise<Recogida> {
   exigirAlcanceDeCompany(sesion);
 
+  // UN SOLO AMBITO PARA LAS DIEZ UBICACIONES. Lo de company —ajustes, catálogo
+  // y costos al corte— se resuelve una vez y lo comparten todas. Sin esto el
+  // consolidado tardaba 1.351 ms contra los 800 de CLAUDE.md §5, y no por
+  // ninguna consulta lenta: por leer diez veces lo mismo.
+  const compartido = compartidoDeCompany(deps, sesion);
+
   const ubicaciones = await deps.listarUbicaciones.ejecutar(sesion);
   const recogidas = await Promise.all(
-    ubicaciones.map(async (ubicacion) => unaUbicacion({ deps, sesion, pedido, ubicacion })),
+    ubicaciones.map(async (ubicacion) =>
+      unaUbicacion({ deps, compartido, sesion, pedido, ubicacion }),
+    ),
   );
 
   return {
@@ -194,14 +206,20 @@ interface Recogido {
 
 async function unaUbicacion(entrada: {
   readonly deps: DependenciasDelConsolidado;
+  readonly compartido: CompartidoDeCompany;
   readonly sesion: SesionActiva;
   readonly pedido: MesDeCompany;
   readonly ubicacion: UbicacionNombrada;
 }): Promise<Recogido> {
-  const { deps, sesion, pedido, ubicacion } = entrada;
+  const { deps, compartido, sesion, pedido, ubicacion } = entrada;
 
   try {
-    const datos = await contexto(deps, sesion, { ...pedido, locationId: ubicacion.id });
+    const datos = await contexto({
+      deps,
+      sesion,
+      pedido: { ...pedido, locationId: ubicacion.id },
+      compartido,
+    });
     return {
       ubicacion,
       aporte: aporteDe(datos, ubicacion),

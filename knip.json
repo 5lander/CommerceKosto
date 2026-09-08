@@ -18,12 +18,15 @@
         "src/app/**/{page,layout,loading,error,not-found,route,template}.tsx",
         "next.config.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}"]
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
     },
     "apps/api": {
       "entry": [
         "src/main.ts",
         "src/cli.ts",
+        "src/bench.ts",
         "src/hashear.ts",
         "src/**/*.module.ts",
         "src/**/*.spec.ts",
