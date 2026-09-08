@@ -101,13 +101,50 @@ git clone <repo> /opt/costeo && cd /opt/costeo
 bash scripts/vps/desplegar.sh
 ```
 
-Hace seis pasos en este orden, y **el orden no es negociable**: código, imagen, base, espera a que
-esté sana, **migraciones en su propio paso con su propia credencial**, y por último API y proxy.
+Hace siete pasos en este orden, y **el orden no es negociable**: código, **las dos imágenes**, base,
+espera a que esté sana, **migraciones en su propio paso con su propia credencial**, luego API,
+interfaz y proxy, y por último la comprobación.
 
 > Si la aplicación arrancara antes de migrar, atendería tráfico contra un esquema viejo. Si migrara
 > ella misma, tendría en su entorno la credencial del dueño de las tablas y la Barrera 1 sería
 > decorativa. El esquema de entorno lo hace cumplir: la API **no arranca** si encuentra
 > `MIGRATION_DATABASE_URL`.
+
+#### ⚠️ Nunca despliegues con `up -d --build`
+
+El script construye con **`docker compose build` como paso propio** y `set -e` aborta si falla. No es
+manía:
+
+> **`docker compose up -d --build` no aborta cuando el build falla.** Deja el contenedor anterior
+> corriendo, su comprobación de salud sigue en verde y `docker compose ps` dice `healthy`. El
+> despliegue parece haber funcionado y sirve el código de la última vez que el build salió bien.
+
+Pasó de verdad: la imagen de la API llevaba **dos días sin poder construirse** —el `Dockerfile` no
+copiaba `apps/api/parser/`, que P10 añadió— y nada lo dijo. Está en **INC-018**, y ahora lo caza
+también `audit:forbidden` con la regla `dockerfile-no-copia-lo-que-el-codigo-importa`.
+
+#### Qué comprueba el paso 7, y por qué esos tres recursos
+
+Además de `/ready`, el script pide a la interfaz `/entrar`, `/marca/logotipo.svg` y
+`/fuentes/inter-400-latin.woff2`, y a través del proxy `/api/health`.
+
+`output: standalone` de Next **no incluye `public/` ni `.next/static`**: los copia el `Dockerfile` en
+dos líneas aparte. Si se pierden, el servidor arranca, la página responde 200 y **lo que falta son
+los recursos**. El síntoma es parcial y por eso cruel: sin la hoja de estilos la aplicación se ve,
+solo que con otra letra, y eso no se nota hasta que alguien mira de cerca.
+
+#### Un solo origen: la interfaz en `/`, la API en `/api`
+
+Caddy sirve la interfaz en la raíz y manda a la API todo lo que empiece por `/api/`, **quitando el
+prefijo** (`handle_path`). Consecuencias que conviene tener presentes:
+
+- **`CORS_ORIGENES` se queda vacío**, que es su valor más restrictivo. No hay petición cruzada.
+- La cookie de sesión sigue siendo `SameSite=Strict`, que solo se sostiene sin origen cruzado.
+- El prefijo hace falta de verdad: **la interfaz tiene una página en `/costeo` y la API un endpoint
+  en `/costeo`**. Sin separarlos, una de las dos desaparece.
+- `NEXT_PUBLIC_API_URL` es `/api`, una ruta **relativa**, y se hornea en el paquete del navegador en
+  tiempo de build. Ponerla en el `environment:` del compose no hace nada. Al ser relativa, **la misma
+  imagen sirve para cualquier dominio**.
 
 ### 5. El respaldo diario, el mismo día
 

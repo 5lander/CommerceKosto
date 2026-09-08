@@ -8,8 +8,9 @@
 # entera de un vistazo:
 #
 #   1. Caddy delante, con TLS automatico
-#   2. Limites de memoria: la base y la API comparten maquina (ADR-016)
-#   3. Archivado de WAL, para tener PITR y no perder hasta 24 h entre volcados
+#   2. La interfaz (`web`), que solo existe detras del proxy
+#   3. Limites de memoria: la base, la API y la interfaz comparten maquina (ADR-016)
+#   4. Archivado de WAL, para tener PITR y no perder hasta 24 h entre volcados
 #
 # LO QUE NO ESTA AQUI Y CONVIENE SABER: los puertos publicados ya estan atados a
 # 127.0.0.1 en el archivo base. Compose CONCATENA la lista de `ports` al
@@ -81,6 +82,55 @@ services:
         limits:
           memory: 768M
 
+  # --- La interfaz ------------------------------------------------------------
+  #
+  # VIVE SOLO AQUI, no en el archivo base, y por la misma razon que Caddy: solo
+  # tiene sentido detras del proxy. Su `NEXT_PUBLIC_API_URL` es `/api`, una ruta
+  # relativa, asi que da por hecho que algo sirve la API en el mismo origen. En
+  # desarrollo el frontend no se contenedoriza: se corre con `next dev` y su
+  # `.env.local`, que apunta a `http://localhost:3000`.
+  #
+  # NO depende de la API para arrancar. Las cinco pantallas son cliente y piden
+  # sus datos desde el navegador; el servidor de Next no llama a la API ni al
+  # construir ni al servir. Encadenarlas solo haria que una API caida dejara al
+  # usuario sin la pantalla que le explica que la API esta caida.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # SE HORNEA EN EL PAQUETE DEL NAVEGADOR, en tiempo de build. Ponerlo en
+        # `environment:` no haria nada. Se deja explicito aqui —aunque el
+        # Dockerfile ya lo trae por defecto— para que quien lea el compose vea
+        # de donde sale la URL que usa el navegador.
+        NEXT_PUBLIC_API_URL: /api
+    container_name: costeo-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    ports:
+      # En local, para poder mirar la interfaz sin pasar por el proxy cuando
+      # algo va mal. Atado a 127.0.0.1 como todo lo demas.
+      - '127.0.0.1:3001:3001'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/entrar').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          # Next sirviendo paginas ya construidas gasta poco: no hay render de
+          # servidor con datos, solo archivos y el enrutador.
+          memory: 256M
+
   # --- El unico servicio que mira a internet ---------------------------------
   #
   # Caddy y no nginx+certbot por una razon y es la de siempre en este proyecto:
@@ -97,6 +147,8 @@ services:
     restart: unless-stopped
     depends_on:
       api:
+        condition: service_healthy
+      web:
         condition: service_healthy
     environment:
       DOMINIO: ${DOMINIO:?falta DOMINIO}

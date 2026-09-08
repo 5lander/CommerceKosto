@@ -7,6 +7,39 @@
 # REQUISITO: el dominio tiene que resolver a la IP del VPS ANTES de levantar
 # esto. Let's Encrypt valida por HTTP en el puerto 80; si el DNS no ha
 # propagado, el certificado falla y Caddy reintenta con espera creciente.
+#
+# ===========================================================================
+# UN SOLO ORIGEN, Y ES LA DECISION QUE MAS SUPERFICIE AHORRA
+# ===========================================================================
+#
+# La interfaz y la API se sirven desde el MISMO dominio. La alternativa —la
+# interfaz en `platise.ec` y la API en `api.platise.ec`— obliga a tres cosas que
+# aqui sencillamente no existen:
+#
+#   1. CORS con credenciales en la API. `CORS_ORIGENES` puede quedarse VACIO,
+#      que es su valor mas restrictivo y el que trae por defecto.
+#   2. Relajar la cookie de sesion. Hoy es `SameSite=Strict` (`cookies.ts`), y
+#      eso solo se sostiene sin peticion cruzada.
+#   3. Un certificado y un registro DNS mas.
+#
+# El precio es este bloque de enrutado, que son seis lineas.
+#
+# ===========================================================================
+# POR QUE `handle_path` Y NO `handle`
+# ===========================================================================
+#
+# `handle_path` QUITA el prefijo antes de reenviar: el navegador pide
+# `/api/costeo` y a la API le llega `/costeo`. Eso es lo que permite que la API
+# no tenga prefijo global y que sus 313 pruebas de integracion sigan valiendo sin
+# tocar una linea.
+#
+# Y el prefijo hace falta de verdad, no es orden: **la interfaz tiene una pagina
+# en `/costeo` y la API un endpoint en `/costeo`**. Sin separarlos, una de las
+# dos gana y la otra desaparece.
+#
+# `/health` y `/ready` quedan DENTRO de `/api/`, o sea publicados como
+# `/api/health`. La comprobacion de salud de compose no pasa por aqui: va
+# directa al contenedor.
 
 {
 	email {$CORREO_TLS}
@@ -18,7 +51,17 @@
 	# `audit:sec-headers`). Ponerlas tambien aqui las duplicaria y crearia dos
 	# sitios que mantener en sincronia — y el dia que difieran, gana la que no
 	# esta probada.
-	reverse_proxy api:3000
+
+	# La API. El orden importa: este bloque se evalua antes que el general.
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	# Todo lo demas es la interfaz: las paginas, la hoja de estilos, las
+	# tipografias autoalojadas de `/fuentes/` y los dos SVG de `/marca/`.
+	handle {
+		reverse_proxy web:3001
+	}
 
 	# El registro va a stdout, que es de donde `docker compose logs` lo lee.
 	log {

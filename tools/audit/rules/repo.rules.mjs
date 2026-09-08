@@ -45,6 +45,66 @@ const DOLAR = String.fromCharCode(36);
 /** Archivos que un interprete POSIX va a ejecutar: no toleran CRLF. */
 const ARCHIVOS_POSIX = ['.githooks/*', '**/*.sh', 'docker/**/*.sql'];
 
+
+/** Un `.ts` de `apps/<algo>/src/`. */
+const FUENTE_DE_APP = /^apps\/[^/]+\/src\/.+\.tsx?$/;
+
+const SALTO = String.fromCharCode(SALTO_DE_LINEA);
+
+/** `from '../../x/y'` o `import('../../x/y')`, con la ruta relativa capturada. */
+const IMPORT_RELATIVO = /from\s+'(\.\.?\/[^']+)'/g;
+
+/**
+ * Las carpetas de fuera de `src/` que un archivo importa, con su linea.
+ *
+ * Resuelve la ruta relativa a mano —sin `path`, para no depender del separador
+ * de la plataforma— y se queda con el PRIMER segmento por debajo de la app:
+ * `apps/api/src/a/b/c.ts` importando `../../../../parser/lector.mjs` da
+ * `parser`. Lo que no sale de `src/` no interesa: ya esta copiado.
+ *
+ * @param {string} contenido @param {string} desde @param {string} app
+ * @returns {{carpeta: string, linea: number, extracto: string}[]}
+ */
+function carpetasDeFuera(contenido, desde, app) {
+  const encontradas = [];
+
+  for (const [indice, texto] of contenido.split(SALTO).entries()) {
+    for (const [, relativa] of texto.matchAll(IMPORT_RELATIVO)) {
+      const resuelta = resolverRelativa(desde, relativa ?? '');
+      if (resuelta === null || !resuelta.startsWith(`${app}/`)) continue;
+
+      const resto = resuelta.slice(app.length + 1);
+      const carpeta = resto.slice(0, resto.indexOf('/'));
+      if (carpeta === '' || carpeta === 'src') continue;
+
+      encontradas.push({ carpeta, linea: indice + 1, extracto: texto.trim() });
+    }
+  }
+
+  return encontradas;
+}
+
+/**
+ * `a/b/c` + `../../x` -> `a/x`. Devuelve `null` si sube por encima de la raiz.
+ *
+ * @param {string} desde @param {string} relativa @returns {string | null}
+ */
+function resolverRelativa(desde, relativa) {
+  const partes = desde.split('/');
+
+  for (const paso of relativa.split('/')) {
+    if (paso === '.' || paso === '') continue;
+    if (paso !== '..') {
+      partes.push(paso);
+      continue;
+    }
+    if (partes.length === 0) return null;
+    partes.pop();
+  }
+
+  return partes.join('/');
+}
+
 const ES_COMPOSE = /^docker-compose(\.[\w-]+)?\.ya?ml$/;
 const ES_DOCKERFILE = /(^|\/)Dockerfile$/;
 
@@ -263,6 +323,53 @@ export const repoRules = [
         .flatMap((ruta) =>
           prismaConRangoFlojo(leer(ruta)).map((extracto) => ({ ruta, linea: 0, extracto })),
         );
+    },
+  },
+  {
+    id: 'dockerfile-no-copia-lo-que-el-codigo-importa',
+    descripcion: 'El codigo importa una carpeta de fuera de `src/` que el Dockerfile no copia',
+    porQue:
+      'La imagen se construye solo con lo que el Dockerfile COPIA. Si el codigo importa algo que vive ' +
+      'fuera de `src/` y esa carpeta no se copia, el `tsc` de dentro de la imagen falla con un ' +
+      '"Cannot find module" que en la maquina de desarrollo no pasa nunca, porque ahi el archivo esta. ' +
+      'Y el fallo se esconde: `docker compose up -d --build` deja el contenedor ANTERIOR corriendo y su ' +
+      'comprobacion de salud sigue en verde, asi que el despliegue parece haber funcionado mientras ' +
+      'sirve codigo viejo. Paso con `apps/api/parser/` desde P10 y se descubrio en el ensayo de ' +
+      'despliegue, dos dias despues. Ver INC-018.',
+    referencia: 'INC-018 · docs/runbooks/despliegue.md',
+    desde: 'P14b',
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      /** @type {Hallazgo[]} */
+      const hallazgos = [];
+
+      for (const ruta of archivos.filter((candidata) => FUENTE_DE_APP.test(candidata))) {
+        const app = ruta.slice(0, ruta.indexOf('/src/'));
+        const dockerfile = `${app}/Dockerfile`;
+        if (!archivos.includes(dockerfile)) continue;
+
+        // SIN LOS COMENTARIOS, y no es un detalle: el propio Dockerfile
+        // explica por que copia el parser y al hacerlo escribe su ruta. Mirando
+        // el texto crudo, ese comentario haria pasar la regla aunque alguien
+        // borrase el `COPY` que hay debajo. Es el mismo enmascarado que
+        // `forbidden.mjs` aplica a las reglas de codigo, y por el mismo motivo:
+        // la prosa que EXPLICA una regla contiene lo que la regla busca.
+        const copiado = leer(dockerfile)
+          .split(SALTO)
+          .filter((linea) => !linea.trimStart().startsWith('#'))
+          .join(SALTO);
+        const desde = ruta.slice(0, ruta.lastIndexOf('/'));
+
+        for (const { carpeta, linea, extracto } of carpetasDeFuera(leer(ruta), desde, app)) {
+          if (copiado.includes(`${app}/${carpeta}`)) continue;
+          hallazgos.push({ ruta, linea, extracto });
+        }
+      }
+
+      return hallazgos;
     },
   },
   {

@@ -28,6 +28,7 @@ import type { ReactNode } from 'react';
 import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { Marco } from '../../componentes/Marco';
 import { llamar } from '../../lib/api';
+import { comoImporte } from '../../lib/decimales';
 import { useSucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
 
@@ -143,12 +144,12 @@ function Referencia({ menu }: { readonly menu: Menu }): ReactNode {
     <section className="panel panel--relleno pila pila--apretada">
       <div className="dato">
         <span className="etiqueta">{TEXTOS.menu.referencia}</span>
-        <strong className="cifra cifra--menor">{menu.mcPromedio}</strong>
+        <strong className="cifra cifra--menor">{comoImporte(menu.mcPromedio)}</strong>
       </div>
 
       <p className="nota">
         Es el <strong>promedio ponderado por unidades vendidas</strong>, no el promedio simple de los
-        platos: <span className="numero">{menu.mcTotal}</span> de margen total entre{' '}
+        platos: <span className="numero">{comoImporte(menu.mcTotal)}</span> de margen total entre{' '}
         <span className="numero">{menu.unidadesConMargen}</span> unidades. Un plato caro que se vende
         una vez al mes no cuenta lo mismo que uno que se vende cien veces.
       </p>
@@ -217,8 +218,16 @@ function Cuadrante({
             <tr key={producto.productId}>
               <td>{nombres.get(producto.productId) ?? producto.productId}</td>
               <td className="numero">{producto.unidades}</td>
-              <td className="numero">{producto.margenContribucion ?? TEXTOS.comun.sinDato}</td>
-              <td className="numero">{producto.indicePopularidad ?? TEXTOS.comun.sinDato}</td>
+              <td className="numero">
+                {producto.margenContribucion === null
+                  ? TEXTOS.comun.sinDato
+                  : comoImporte(producto.margenContribucion)}
+              </td>
+              <td className="numero">
+                {producto.indicePopularidad === null
+                  ? TEXTOS.comun.sinDato
+                  : comoImporte(producto.indicePopularidad)}
+              </td>
             </tr>
           ))}
         </tbody>

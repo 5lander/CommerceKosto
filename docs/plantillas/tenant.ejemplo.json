@@ -1,0 +1,79 @@
+{
+  "_lee_esto_primero": [
+    "PLANTILLA. Los datos son FALSOS a proposito: 'ensayo.invalid' no es un dominio",
+    "real y ninguna de estas contrasenas vale. Copia este archivo FUERA del clon,",
+    "rellenalo con los datos del cliente y borralo en cuanto termines: lleva",
+    "contrasenas en claro.",
+    "",
+    "Uso:  npm run seed:tenant -- --archivo=/ruta/tenant.json",
+    "",
+    "El script imprime el id de la company y el de cada ubicacion. Anotalos: son",
+    "los que pide 'npm run importar'.",
+    "",
+    "Este bloque se ignora. El script solo mira 'company', 'ubicaciones' y",
+    "'usuarios'."
+  ],
+
+  "_company": "El nombre COMERCIAL, tal como el cliente lo dice. Es texto libre.",
+  "company": "Restaurante de Ejemplo",
+
+  "_ubicaciones": [
+    "Al menos una. 'tipo' es LOCAL o BODEGA, y nada mas.",
+    "",
+    "LOCAL vende; BODEGA solo guarda. La diferencia importa: el inventario es POR",
+    "UBICACION y no se mezcla nunca (R2), y un usuario con rol de ubicacion solo",
+    "ve la suya.",
+    "",
+    "El nombre es el que va a leer el cliente en el selector de sucursal, asi que",
+    "'Local Centro' y no 'LOC-001'."
+  ],
+  "ubicaciones": [
+    { "nombre": "Local Centro", "tipo": "LOCAL" },
+    { "nombre": "Bodega Norte", "tipo": "BODEGA" }
+  ],
+
+  "_usuarios": [
+    "Al menos uno, y al menos uno con rol OWNER.",
+    "",
+    "LOS CINCO ROLES:",
+    "  OWNER          manda en la company entera. NO lleva 'ubicacion'",
+    "  ADMIN          igual, sin poder borrar la company. NO lleva 'ubicacion'",
+    "  LECTURA        ve y no toca, en toda la company. NO lleva 'ubicacion'",
+    "  GERENTE_LOCAL  manda en UNA ubicacion. LLEVA 'ubicacion'",
+    "  BODEGA         cuenta y registra en UNA ubicacion. LLEVA 'ubicacion'",
+    "",
+    "'ubicacion' es el NOMBRE de la ubicacion de arriba, no un id.",
+    "",
+    "Un rol de ubicacion sin 'ubicacion' es un usuario que no puede hacer nada, y",
+    "uno de company con 'ubicacion' es una contradiccion. El script rechaza las",
+    "dos antes de escribir.",
+    "",
+    "CONTRASENAS: 12 caracteres como minimo. Se hashean con Argon2id, el mismo",
+    "que usa el login. Ponlas provisionales y que el cliente las cambie al entrar.",
+    "",
+    "Y LO QUE HAY QUE SABER DE BODEGA (CLAUDE.md §4.3): ese rol NO recibe recetas,",
+    "ni costos, ni stock teorico, ni diferencias. No es que la pantalla se los",
+    "esconda: el backend no se los manda. Es a proposito — con el stock teorico y",
+    "las compras se despeja el consumo, y del consumo sale la receta, que es el",
+    "secreto de negocio del cliente."
+  ],
+  "usuarios": [
+    {
+      "correo": "duena@ejemplo.invalid",
+      "rol": "OWNER",
+      "contrasena": "cambiala-al-entrar"
+    },
+    {
+      "correo": "gerente@ejemplo.invalid",
+      "rol": "GERENTE_LOCAL",
+      "ubicacion": "Local Centro",
+      "contrasena": "cambiala-al-entrar"
+    },
+    {
+      "correo": "bodeguero@ejemplo.invalid",
+      "rol": "BODEGA",
+      "ubicacion": "Bodega Norte",
+      "contrasena": "cambiala-al-entrar"
+    }
+  ]
+}

@@ -243,4 +243,22 @@ export const coreRules = [
     desde: 'P0',
     referencia: 'ADR-003 · CLAUDE.md §2',
   },
+  {
+    id: 'no-comparar-decimales-con-localecompare',
+    descripcion: '`localeCompare` con `numeric: true` para comparar decimales',
+    porQue:
+      'NO COMPARA DECIMALES: compara tramos de digitos. "0.1673" se parte en 0, ".", 1673 y "0.28" en ' +
+      '0, ".", 28; empatan los dos primeros y entonces compara 1673 contra 28, asi que dice que 0,1673 ' +
+      'es MAYOR que 0,32. Estuvo en la pantalla de costeo desde la Fase C pintando un food cost del ' +
+      '16,7 % con el color de la perdida y —lo peligroso— uno del 40 % de verde. Parecia correcto: ' +
+      'llevaba `numeric: true` y un comentario diciendo que evitaba el punto flotante. Lo evitaba, y lo ' +
+      'que hacia en su lugar estaba mal. Para comparar decimales estan `menorOIgual` de ' +
+      '`apps/web/src/lib/decimales.ts` en el frontend y los tipos `Money`/`Ratio` en el backend. ' +
+      '`localeCompare` SIN `numeric` sigue valiendo: ordenar nombres alfabeticamente esta bien.',
+    patron: /localeCompare\s*\([^)]*numeric\s*:\s*true/g,
+    incluye: CODIGO,
+    excluye: META,
+    desde: 'P14b',
+    referencia: 'INC-020 · CLAUDE.md §3',
+  },
 ];

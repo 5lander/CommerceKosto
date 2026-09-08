@@ -4,6 +4,64 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P14b — La cadena de despliegue del frontend, y los tres fallos que destapó el ensayo · 2026-09-08
+
+**`apps/web` ya se despliega, y la pila entera se levantó y se recorrió en local antes de tocar
+ningún servidor.** `Dockerfile` multi-stage con salida autocontenida de Next, servicio en
+`docker-compose.prod.yml`, enrutado en Caddy y comprobación de recursos estáticos en `desplegar.sh`.
+
+**Un solo origen, y es la decisión que más superficie ahorra.** Caddy sirve la interfaz en `/` y la
+API en `/api/*` con `handle_path`, que quita el prefijo antes de reenviar. Con eso `CORS_ORIGENES` se
+queda **vacío** —su valor más restrictivo—, la cookie de sesión sigue siendo `SameSite=Strict`, y no
+hace falta un segundo certificado. El prefijo hace falta de verdad: la interfaz tiene una página en
+`/costeo` y la API un endpoint en `/costeo`.
+
+**Las fuentes se autoalojan y `NEXT_PUBLIC_API_URL` es una ruta relativa**, así que la misma imagen
+sirve para cualquier dominio. Esa variable **se hornea en el paquete del navegador en tiempo de
+build**: ponerla en `environment:` no hace nada, y está dicho donde se pone.
+
+---
+
+**El ensayo encontró tres fallos. Los tres llevaban días con los doce checks en verde encima, y
+ninguno lo habría visto una revisión de código.**
+
+**INC-018 — la imagen de la API llevaba dos días sin poder construirse, y el despliegue salía
+`healthy`.** P10 creó `apps/api/parser/` y el `Dockerfile` nunca lo copió. Lo grave no es eso: es que
+**`docker compose up -d --build` no aborta cuando el build falla** — deja el contenedor anterior
+corriendo, su comprobación de salud sigue en verde, y sirve el código de dos días antes. Se descubrió
+porque un endpoint devolvía menos campos de los que su DTO declara. Ahora se construye en un paso
+propio, y `audit:forbidden` lo caza con `dockerfile-no-copia-lo-que-el-codigo-importa`.
+
+**INC-019 — el respaldo volcaba una base vacía.** Regresión de P15: `jscpd` empujó a extraer
+`conexionDeSuperusuario()` y la base de destino quedó fijada a `postgres`, que es lo que necesitaban
+`bench` y `restaurar` pero no `respaldo`. Volcaba 1 KiB. Corregido, vuelca 343 MB y las cinco tablas
+testigo cuadran sobre 13.475.504 movimientos. **Cuando `jscpd` empuje a extraer algo, la pregunta no
+es si las copias son iguales: es si significan lo mismo.**
+
+**INC-020 — el semáforo de food cost decidía al revés, desde la Fase C.** `localeCompare` con
+`numeric: true` **no compara decimales**: compara tramos de dígitos, así que `"0.1673"` contra
+`"0.28"` acaba comparando 1673 contra 28. En pantalla, un food cost del **16,7 % con el color de la
+pérdida** y —lo peligroso— uno del **40 % en verde**. Sobrevivió porque con la misma cantidad de
+decimales a los dos lados acierta: cualquier prueba con `0.30` contra `0.28` habría pasado. Lo
+encontró mirar una captura con datos reales. Prevención: `no-comparar-decimales-con-localecompare`.
+
+---
+
+**Y lo que el ensayo confirmó que está bien:** el costeo del ceviche se rehízo a mano y con IVA de
+compra recuperable al 15 % (D3/R13) da 1,4478 contra los 1,45 que reporta el motor; `mcTotal /
+unidadesConMargen` reproduce exactamente el promedio ponderado que ADR-015 prometía; y la cadena de
+respaldo restaura de verdad y compara recuentos.
+
+**Además:** los decimales de presentación se centralizan en `apps/web/src/lib/decimales.ts` —el
+multiplicador y el margen de referencia ya no salen con doce decimales—, el lote de ítems valida que
+la unidad **exista en el catálogo** en vez de dejar que reviente como clave foránea (`fila 5: La
+unidad "l" no está en el catálogo. Las válidas son: …`), y hay guía de puesta en marcha
+(`docs/runbooks/puesta-en-marcha.md`) con plantilla de tenant.
+
+Auditoría: OK · **36 reglas sobre 360 archivos** · 585 unitarias + 313 de integración.
+
+---
+
 ## P14 — Capa visual · 2026-09-08
 
 **La identidad de `docs/Manual de Marca/platise-brand-book.pdf` entra en `apps/web`, y ni una línea

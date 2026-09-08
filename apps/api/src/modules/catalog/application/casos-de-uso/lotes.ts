@@ -57,6 +57,8 @@ export class CrearItemsEnLote {
     const problemas = problemasDelLoteDeItems(items);
     if (problemas.length > 0) throw new LoteDeCatalogoInvalidoError(problemas);
 
+    await this.exigirUnidadesConocidas(items);
+
     const resultado = await this.deps.repositorio.crearItemsEnLote({
       companyId: sesion.companyId,
       items: items.map((item) => ({
@@ -84,6 +86,43 @@ export class CrearItemsEnLote {
 
     await auditarLote({ auditoria: this.deps.auditoria, sesion, eventType: 'catalog.items.bulk_created', filas: resultado.filas });
     return resultado.filas;
+  }
+
+  /**
+   * Que cada unidad EXISTA en el catálogo, no solo que esté bien escrita.
+   *
+   * `problemasDelLoteDeItems` ya comprueba la FORMA del código —minúsculas,
+   * corto, sin espacios— y eso deja pasar `"l"`, que está perfectamente formado
+   * y no existe: el litro es `lt`. La fila llegaba entonces hasta el `INSERT` y
+   * reventaba con `Foreign key constraint violated on the constraint:
+   * "item_unit_of_use_fkey"`, un mensaje que no dice qué fila ni qué columna ni
+   * cuáles son las unidades buenas.
+   *
+   * **Es INC-012 —la base rechaza y el dominio no explica— y apareció cargando
+   * un catálogo de verdad, no en una prueba.** Con un archivo de cliente delante
+   * es el fallo más probable de todos: `l`, `Kg`, `litro`, `und`.
+   *
+   * Se comprueban TODAS las filas antes de lanzar, no la primera: quien importa
+   * un catálogo quiere la lista completa para corregir el archivo de una vez.
+   * Y la lectura del catálogo es UNA para todo el lote, como en `conFactor`.
+   */
+  private async exigirUnidadesConocidas(items: readonly ItemDelLote[]): Promise<void> {
+    const catalogo = await this.deps.repositorio.unidades();
+    const conocidas = new Set<string>(catalogo.map((unidad) => unidad.codigo));
+    const validas = [...conocidas].sort().join(', ');
+
+    const problemas = items.flatMap((item, indice) =>
+      conocidas.has(item.unidadDeUso)
+        ? []
+        : [
+            {
+              posicion: indice + PRIMERA_POSICION,
+              motivo: `La unidad "${item.unidadDeUso}" no está en el catálogo. Las válidas son: ${validas}.`,
+            },
+          ],
+    );
+
+    if (problemas.length > 0) throw new LoteDeCatalogoInvalidoError(problemas);
   }
 }
 

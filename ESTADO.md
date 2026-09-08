@@ -8,8 +8,8 @@
 
 ## Estado actual
 
-**Fase en curso:** ninguna. **El plan P0–P15 está completo.**
-**Último commit:** `P14: Capa visual`
+**Fase en curso:** ninguna. **El plan P0–P15 está completo y el sistema se ha desplegado entero en local.**
+**Último commit:** `P14b: la cadena de despliegue del frontend, y los tres fallos que destapó el ensayo`
 **Fecha de última actualización:** 2026-09-08
 
 ### EL PROYECTO CAMBIÓ DE MODO — leer esto antes que nada
@@ -21,18 +21,20 @@ por pantalla.
 
 ### Dónde se retoma exactamente
 
-**No queda código pendiente del plan.** P0–P15 están cerrados; P14 fue el último, el 2026-09-08.
+**No queda código pendiente, y el hueco del despliegue del frontend está cerrado.** `apps/web` tiene
+su `Dockerfile`, su servicio en `docker-compose.prod.yml` y su enrutado en Caddy, y la pila entera
+—base, pooler, API, interfaz y proxy— **se levantó y se recorrió de punta a punta en local**: login,
+catálogo importado, costeo mirado en pantalla, ventas cargadas y respaldo restaurado.
 
-**Lo que falta para que el cliente use el sistema son DOS cosas, y ninguna es código:**
+**Lo que falta son cinco cosas, y ninguna es código:** el DNS, el VPS, los secretos, el archivo del
+tenant y el catálogo del cliente. La secuencia exacta, con su comprobación por paso, está en
+**`docs/runbooks/puesta-en-marcha.md`**. La plantilla del tenant, en
+`docs/plantillas/tenant.ejemplo.json`.
 
-1. **Aprovisionar el VPS.** Todo está escrito y probado en local; hace falta la cuenta de Hostinger.
-   `scripts/vps/preparar.sh` y `desplegar.sh`, más `docs/runbooks/despliegue.md`.
-   ⚠️ **Y hay un hueco conocido: `apps/web` no tiene cadena de despliegue.** Ni `Dockerfile`, ni
-   servicio en `docker-compose.prod.yml`, ni una línea en el runbook; `npm run build` de la raíz solo
-   construye la API. Se descubrió en P14 y **no se arregló ahí** porque es trabajo de despliegue, no
-   de capa visual. Es lo primero que hay que escribir antes de subir nada.
-2. **Los datos del tenant real.** `npm run seed:tenant` está escrito y probado; falta el archivo con
-   el nombre de la company, sus ubicaciones y sus usuarios. **No se inventan.**
+> **Y lo más importante que dejó el ensayo:** encontró **tres fallos** —INC-018, INC-019, INC-020—
+> que llevaban días puestos con los doce checks en verde encima. Ninguno lo habría visto una revisión
+> de código. **Hay una clase de fallo que solo aparece ejecutando el sistema entero como se va a
+> ejecutar de verdad**, y por eso el paso 0 del runbook de puesta en marcha es repetir el ensayo.
 
 ### El producto se llama PLATISE
 
@@ -87,6 +89,73 @@ El origen con barra final es el que cuesta media tarde: el navegador nunca la ma
 **6. Next escribe un `CLAUDE.md` dentro de `apps/web` en cada arranque.** Desactivado con
 `agentRules: false`. Un segundo archivo con ese nombre, generado por una herramienta y sin revisar,
 es justo la ambigüedad que el `CLAUDE.md` del proyecto existe para impedir.
+
+### Lo que un «tú» futuro necesita saber del ENSAYO DE DESPLIEGUE (P14b)
+
+**Se levantó la pila de producción entera en local —`docker-compose.prod.yml` con `DOMINIO=localhost`—
+y se recorrió el camino completo del cliente.** Encontró tres fallos. Los tres llevaban días puestos,
+con los doce checks en verde, y ninguno lo habría visto leer el código.
+
+**1. La imagen de la API llevaba DOS DÍAS sin poder construirse, y el despliegue salía «healthy».**
+P10 creó `apps/api/parser/` y el `Dockerfile` nunca lo copió, así que el `tsc` de dentro de la imagen
+moría con `Cannot find module`. Lo grave no es eso: es que **`docker compose up -d --build` no aborta
+cuando el build falla** — deja el contenedor anterior corriendo, su comprobación de salud sigue en
+verde y el despliegue parece haber funcionado mientras sirve el código de dos días antes.
+
+Se descubrió por la puerta de atrás: un endpoint devolvía menos campos de los que su DTO declara.
+**INC-018.** Prevención automatizada: `dockerfile-no-copia-lo-que-el-codigo-importa`.
+
+> **Nunca despliegues con `up -d --build`.** El script construye con `docker compose build` en su
+> propio paso, y `set -e` aborta si falla.
+
+**2. `npm run respaldo` volcaba la base `postgres`, que está vacía.**
+Regresión de P15: `jscpd` empujó a extraer `conexionDeSuperusuario()` a `lib/entorno.mjs` y la base de
+destino se fijó a `postgres`, que es lo que necesitaban `bench` y `restaurar` —los dos reapuntan a su
+base desechable— pero no `respaldo`, que la usaba tal cual. **INC-019.**
+
+Lo salvó que las tablas testigo sean de negocio: falló ruidosamente porque `inventory_movement` no
+existe allí. Con tablas creadas y vacías habría dicho «0 filas, cuadra» cinco veces.
+
+> **Cuando `jscpd` empuje a extraer algo, la pregunta no es si las tres copias son iguales: es si
+> SIGNIFICAN lo mismo.**
+
+**3. El semáforo de food cost decidía al revés, y llevaba así desde la Fase C.**
+`localeCompare` con `numeric: true` **no compara decimales**: compara tramos de dígitos. `"0.1673"`
+contra `"0.28"` acaba comparando 1673 contra 28. En pantalla: un food cost del **16,7 % pintado con
+el color de la pérdida**, y —lo peligroso— uno del **40 % en verde**. **INC-020.**
+
+Sobrevivió porque **con la misma cantidad de decimales a los dos lados acierta**: cualquier prueba
+escrita con `0.30` contra `0.28` habría pasado. Lo encontró mirar una captura con datos reales.
+Prevención automatizada: `no-comparar-decimales-con-localecompare`.
+
+**4. Cómo se mira la aplicación sin manos, y merece la pena saberlo.**
+Chrome sin cabeza sirve para verificar de verdad, y es lo que encontró el fallo 3:
+
+```sh
+chrome --headless=new --disable-gpu --ignore-certificate-errors   --virtual-time-budget=10000 --screenshot=x.png --window-size=1280,700 https://localhost/...
+```
+
+Para entrar con sesión sin automatizar un formulario: una página estática en `public/` que hace
+`fetch('/api/auth/login')`, pone `localStorage` y navega. **Next cachea la lista de archivos de
+`public/` al arrancar**, así que tras un `docker cp` hay que reiniciar el contenedor.
+
+**5. Un solo origen, y por qué.**
+Caddy sirve la interfaz en `/` y la API en `/api/*` con `handle_path`, que **quita el prefijo**. Con
+eso: `CORS_ORIGENES` se queda vacío, la cookie sigue siendo `SameSite=Strict`, y no hace falta un
+segundo certificado. **El prefijo hace falta de verdad**: la interfaz tiene una página en `/costeo` y
+la API un endpoint en `/costeo`.
+
+`NEXT_PUBLIC_API_URL` es `/api` y **se hornea en el paquete del navegador en tiempo de build** —
+ponerla en `environment:` no hace nada. Al ser relativa, la misma imagen sirve para cualquier dominio.
+
+**6. El orden de la importación no es arbitrario.**
+`ITEMS → ARTICULOS → PRECIOS → PRODUCTOS → RECETAS`. Los precios de un ítem comprado **exigen** su
+artículo: un importe sin presentación no dice cuánto cuesta la unidad de uso. Y `unidades` viaja como
+**cadena**, no como número, igual que todo decimal en este sistema.
+
+**7. Y una comprobación que salió bien y conviene repetir.**
+El costeo del ceviche se rehízo a mano: con IVA de compra recuperable al 15 % (D3/R13) da **1,4478**
+y el motor reportó **1,45**. No es plausible-pero-falso; es correcto, y R13 se ve aplicada.
 
 ### Lo que un «tú» futuro necesita saber de P14
 
@@ -298,7 +367,7 @@ Lo implementado:
 |---|---|---|
 | `audit:types` | ✅ | Cuatro proyectos: API, interfaz del back office, tooling y `apps/web` |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | 34 reglas sobre **359 archivos**. **En P14 pasó de 346: los `.tsx` no los miraba nadie** |
+| `audit:forbidden` | ✅ | **36 reglas sobre 360 archivos.** En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie) y P14b añadió dos: `dockerfile-no-copia-lo-que-el-codigo-importa` (INC-018) y `no-comparar-decimales-con-localecompare` (INC-020) |
 | `audit:arch` | ✅ | 291 módulos, 1284 dependencias |
 | `audit:deadcode` | ✅ | Sin lista blanca |
 | `audit:complexity` | ✅ | |
@@ -424,8 +493,8 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto co
 
 | 3 | **Los alias del dialecto real del cliente** en los descriptores de importación | P10 | Cuando llegue su archivo. La pasada de análisis **no escribe nada** y ya reporta columnas no reconocidas y obligatorias ausentes: ajustarlo es media hora sin tocar el camino de escritura |
 | 4 | **Prueba de similitud dominio ↔ `pg_trgm`** — el dominio quita tildes y `pg_trgm` no. Medido: `similarity('tomate riñón','tomate rinon') = 0.53`, por encima del umbral de 0.3, así que el criterio de aceptación se sostiene; lo que no está probado es que coincidan siempre | P10 | Después del lanzamiento |
-| 5 | **`apps/web` no tiene cadena de despliegue**: ni `Dockerfile`, ni servicio en `docker-compose.prod.yml`, ni línea en el runbook. El `build` de la raíz solo construye la API | P14 | **Antes de subir nada.** Es lo primero del despliegue, y P14 no lo tocó porque es trabajo de infraestructura, no de capa visual |
-| 6 | **El margen de referencia se muestra con 12 decimales** (`5.482000000000`): la API lo manda a escala de almacenamiento sin el par `mostrar`/`exacto` que sí trae el DTO de costeo | P14 | Cuando se pueda tocar la API. Arreglarlo en el frontend obligaría a repetir el redondeo medio-hacia-arriba que ya vive en `costeo/page.tsx`, y eso lo para `audit:duplication`. **Lo limpio es que la API publique `mostrar`** |
+| ~~5~~ | ~~**`apps/web` no tiene cadena de despliegue**~~ | ~~P14~~ | ✅ **Cerrada en P14b.** `Dockerfile` multi-stage con salida autocontenida, servicio en el compose de producción, enrutado en Caddy con un solo origen, y comprobación de los recursos estáticos en `desplegar.sh` |
+| ~~6~~ | ~~**El margen de referencia se muestra con 12 decimales**~~ | ~~P14~~ | ✅ **Cerrada en P14b**, y en el sitio correcto: la API manda la escala exacta **a propósito** —«quien la muestre decide cuántos decimales pinta»— así que redondear es trabajo del frontend. Vive en `apps/web/src/lib/decimales.ts`, con el comparador y el porcentaje |
 | 7 | **La pantalla de menú tiene prosa interpolada dentro del componente**, contra D11 | P14 | Cuando haya un ayudante de formato. No es visual, y por eso P14 no lo tocó |
 | 8 | **No hay pruebas automatizadas de la capa visual** | P14 | Se verifica con Chrome sin cabeza y capturas, que es lo que encontró los dos fallos reales de P14. Una prueba de regresión visual es un paquete propio |
 

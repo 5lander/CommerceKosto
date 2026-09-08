@@ -134,7 +134,19 @@ function marcaDeTiempo() {
 }
 
 function main() {
-  const origen = conexionDeSuperusuario();
+  // LA BASE DE VERDAD, NO LA ADMINISTRATIVA.
+  //
+  // `conexionDeSuperusuario()` apunta a `postgres` —la base administrativa que
+  // existe siempre y que hace falta para crear y tirar otras—, no a la del
+  // producto. Volcar esa conexion tal cual **respalda una base vacia**: el
+  // volcado sale de 1 KiB y el script muere comparando recuentos porque
+  // `inventory_movement` no existe alli.
+  //
+  // Paso cuando P15 extrajo la funcion a `lib/entorno.mjs` para quitar una
+  // duplicacion. `bench` y `restaurar` no lo notaron porque los dos reapuntan a
+  // su propia base desechable; este era el unico que usaba la cadena tal cual.
+  // Ver INC-019.
+  const origen = apuntandoA(conexionDeSuperusuario(), opcional('POSTGRES_DB', 'costeo'));
   const directorio = join(RAIZ, opcional('RESPALDO_DIRECTORIO', '.respaldos'));
   const retencion = Number(opcional('RESPALDO_RETENCION_DIAS', '14'));
 
