@@ -155,6 +155,10 @@ module.exports = {
           '[.](spec|test)[.]ts$',
           '[.]type-contract[.]ts$',
           '(^|/)vitest[.]config[.]ts$',
+          // El guion del back office: lo carga el NAVEGADOR con una etiqueta
+          // `<script>`, asi que ningun modulo lo importa y nunca lo hara. Se
+          // compila con `tsconfig.ui.json`, el unico proyecto con `lib: DOM`.
+          '(^|/)navegador/[^/]+[.]ts$',
         ],
       },
       to: {},

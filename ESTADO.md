@@ -28,8 +28,8 @@ por pantalla.
 2. **Los datos del tenant real.** `npm run seed:tenant` está escrito y probado; falta el archivo con
    el nombre de la company, sus ubicaciones y sus usuarios. **No se inventan.**
 
-**P15 y P11 están cerrados** (2026-09-08). Lo siguiente es **P13 — Frontend del back office**, y
-después **P14 — capa visual**, los dos con las 7 fases completas.
+**P15, P11 y P13 están cerrados** (2026-09-08). Solo queda **P14 — la capa visual**, con las 7 fases
+completas. Es el último paquete del plan.
 
 ### Lo hecho en el sprint
 
@@ -258,8 +258,8 @@ Lo implementado:
 | **P10 — Importación de catálogo, acotada** | ✅ Completado | *(el de este paquete)* | 2026-09-07 |
 | **P11 — Back office** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 | P12 — Frontend app cliente | ✅ **Completado, recortado a 5 pantallas** | Fase C | 2026-09-08 |
-| P13 — Frontend back office | 🟡 **SIGUIENTE** | — | Ya hay back office que operar: hoy se usa con `curl` por el túnel |
-| P14 — Capa visual | ⏸️ **POSPUESTO** | — | Frontend sobrio, sin identidad de marca |
+| **P13 — Frontend back office** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
+| P14 — Capa visual | 🟡 **SIGUIENTE** | — | El último. Aplica `docs/Manual de Marca/` a `apps/web`; el back office se queda sobrio a propósito |
 | **P15 — Endurecimiento** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 
 Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto con motivo

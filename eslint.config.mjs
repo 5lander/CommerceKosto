@@ -98,6 +98,7 @@ export default tseslint.config(
   // --- TypeScript de la aplicacion, con tipos ------------------------------
   {
     files: ['apps/api/src/**/*.ts', 'apps/api/test/**/*.ts'],
+    ignores: ['apps/api/src/navegador/**'],
     extends: [
       ...tseslint.configs.strictTypeChecked,
       ...tseslint.configs.stylisticTypeChecked,

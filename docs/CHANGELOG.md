@@ -4,6 +4,41 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P13 — Frontend del back office · 2026-09-08
+
+**La interfaz la sirve el propio proceso del back office (ADR-018).** Cuatro vistas —entrar,
+cartera, ficha de una company y «quién ha mirado qué»— servidas por las mismas rutas que la API.
+
+La alternativa era una segunda app de Next.js, y se descartó por lo que implica: el navegador
+tendría que hablar con la API privilegiada **desde otro origen**, lo que obliga a habilitar CORS con
+credenciales justo en el proceso que ve todos los tenants. Sirviéndola desde el mismo proceso no hay
+petición cruzada que permitir, y lo que se despliega no cambia respecto de P11: un proceso, un
+puerto, un túnel.
+
+**Sin framework y sin empaquetado, pero con TypeScript estricto.** Un archivo en `src/navegador/`,
+compilado por `tsconfig.ui.json` — **el único proyecto del repositorio con `lib: DOM`**, para que un
+endpoint no pueda usar `document` y compilar. Y para que esa separación no deje un agujero de
+verificación: `audit:types` compila los dos proyectos y `eslint.config.mjs` tiene un bloque propio
+para esa carpeta. Antes de añadirlo, `audit:lint` fallaba con «was not found by the project service»
+— la veía y no podía analizarla.
+
+**El motivo es un campo permanente arriba, no un diálogo al pulsar.** Un motivo que se pide *después*
+de decidir mirar se rellena para pasar el trámite; uno que está delante mientras se decide, se
+piensa. Con contador de caracteres que faltan, y sin `localStorage`: el motivo muere con la pestaña.
+
+**Nada en línea, y hay prueba que lo fija.** Con `script-src 'self'` sin nonce, un `<script>` con
+cuerpo no se ejecutaría; el guion y los estilos van como recursos propios. Todo el DOM se construye
+con `createElement`/`append`, que crea nodos de TEXTO: el nombre de una company no puede
+interpretarse como marcado ni queriendo.
+
+Tres cosas que costaron y quedan escritas: Nest **aborta el proceso** si un proveedor lanza al
+construirse —lo que salía era un volcado nativo sin mensaje—; la ruta del guion difiere entre `dist`
+y `src`; y **dos aplicaciones HTTP de Nest en el mismo worker de vitest revientan Node**.
+
+Los doce checks en verde, **cero dependencias nuevas**. 585 unitarias + 313 de integración.
+
+---
+
 ## P11 — Back office · 2026-09-08
 
 **El rol que puentea RLS, con las cuatro condiciones que lo hacen gestionable (ADR-017).**

@@ -16,7 +16,7 @@
     "prepare": "node tools/setup-hooks.mjs && npm run db:generate",
     "doctor": "node tools/doctor.mjs",
     "audit": "npm run audit:types && npm run audit:lint && npm run audit:forbidden && npm run audit:arch && npm run audit:deadcode && npm run audit:complexity && npm run audit:duplication && npm run audit:migrations && npm run audit:secrets && npm run audit:deps && npm run audit:sec-headers && npm run audit:tests",
-    "audit:types": "tsc -p apps/api/tsconfig.json && tsc -p tools/tsconfig.json && npm run typecheck --workspace @costeo/web",
+    "audit:types": "tsc -p apps/api/tsconfig.json && tsc -p apps/api/tsconfig.ui.json --noEmit && tsc -p tools/tsconfig.json && npm run typecheck --workspace @costeo/web",
     "audit:lint": "eslint . --max-warnings=0 --no-inline-config",
     "audit:forbidden": "node tools/audit/forbidden.mjs",
     "audit:arch": "node tools/audit/arch.mjs",

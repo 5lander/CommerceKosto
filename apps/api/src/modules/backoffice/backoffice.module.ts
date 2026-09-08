@@ -17,7 +17,7 @@
  * falta de `shared` —el reloj— se declara aquí, que son tres líneas.
  */
 
-import { Module } from '@nestjs/common';
+import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
 import { RELOJ, type Reloj } from '../../shared/application/ports/reloj.port';
@@ -50,6 +50,7 @@ import {
 import { BackofficeConnection } from './infrastructure/backoffice-connection';
 import { PrismaBackofficeRepositorio } from './infrastructure/prisma-backoffice.repositorio';
 import { ErrorFilter } from '../../shared/infrastructure/http/error.filter';
+import { securityHeaders } from '../../shared/infrastructure/http/security-headers';
 import {
   BackofficeController,
   LaCartera,
@@ -163,4 +164,20 @@ const DE_SESION = { inject: [REPOSITORIO_DE_BACKOFFICE, HASHER_DE_CONTRASENAS, R
     LosRegistros,
   ],
 })
-export class BackofficeModule {}
+export class BackofficeModule implements NestModule {
+  /**
+   * LAS CABECERAS DE SEGURIDAD SON DEL MODULO, NO DEL LANZADOR.
+   *
+   * Estaban en `backoffice.ts` y funcionaban, pero eso dejaba la CSP fuera de lo
+   * que el modulo garantiza: una prueba que monta el modulo no las veia, y un
+   * segundo lanzador podria olvidarlas. Aqui viajan con el modulo alla donde se
+   * monte, y la prueba mide lo mismo que sirve el proceso.
+   *
+   * Importan mas que en la app cliente por un detalle: **este proceso sirve
+   * HTML**. `script-src 'self'` sin nonce es lo que obliga a que el guion y los
+   * estilos vayan como recursos propios en vez de en linea.
+   */
+  public configure(consumidor: MiddlewareConsumer): void {
+    consumidor.apply(...securityHeaders()).forRoutes('*');
+  }
+}

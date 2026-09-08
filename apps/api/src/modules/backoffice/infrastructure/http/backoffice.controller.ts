@@ -24,7 +24,9 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { resolve } from 'node:path';
 
 import type { CompanyId } from '../../../../shared/domain/identity/identificadores';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
@@ -62,6 +64,7 @@ import {
   type CuerpoDeLoginDeOperador,
   type CuerpoDeNuevaCompany,
 } from './backoffice.dto';
+import { CSS, HTML } from './pagina';
 import {
   COOKIE_DE_OPERADOR,
   PublicoEnBackoffice,
@@ -98,13 +101,89 @@ export class LosRegistros {
   @Inject(LeerAccesosDelBackoffice) public readonly accesos!: LeerAccesosDelBackoffice;
 }
 
+/**
+ * El JavaScript de la interfaz.
+ *
+ * **LA RUTA SUBE HASTA `apps/api` Y BAJA A `dist`, y esa vuelta es a propósito.**
+ * Este archivo vive en `.../modules/backoffice/infrastructure/http`, y `__dirname`
+ * apunta a `dist/...` cuando corre compilado y a `src/...` cuando lo cargan las
+ * pruebas. Cinco niveles arriba es `apps/api` en los dos casos; desde ahí,
+ * `dist/ui/backoffice.js` siempre existe si se compiló. Calcularlo solo para
+ * `dist` hacía que las pruebas leyeran una ruta inexistente.
+ *
+ * **SE LEE UNA VEZ, EN LA PRIMERA PETICIÓN, Y NO EN EL CONSTRUCTOR.** Un `throw`
+ * mientras Nest instancia un proveedor no sube como excepción normal: el manejador
+ * de arranque de Nest **aborta el proceso**, y lo que sale es un volcado nativo sin
+ * mensaje. Cuesta más entender ese volcado que el problema que lo causó.
+ *
+ * Quien sí falla en alto es el proceso: `backoffice.ts` comprueba que el guion
+ * está **antes de escuchar**. Un back office que sirve una página en blanco porque
+ * nadie compiló la interfaz es peor que uno que no arranca.
+ */
+export const RUTA_DEL_GUION = resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  '..',
+  'dist',
+  'ui',
+  'backoffice.js',
+);
+
+export function guionDeLaInterfaz(): string {
+  try {
+    return readFileSync(RUTA_DEL_GUION, 'utf8');
+  } catch {
+    throw new Error(
+      `No está compilada la interfaz del back office (${RUTA_DEL_GUION}). ` +
+        'Ejecuta `npm run build --workspace @costeo/api`.',
+    );
+  }
+}
+
 @Controller()
 export class BackofficeController {
+  private guionCacheado: string | null = null;
+
   public constructor(
     private readonly sesion: SesionDelOperador,
     private readonly cartera: LaCartera,
     private readonly registros: LosRegistros,
   ) {}
+
+  /**
+   * LOS TRES RECURSOS DE LA INTERFAZ SON PÚBLICOS, y tienen que serlo: sin
+   * ellos no hay pantalla donde escribir la contraseña. No llevan ningún dato:
+   * son el armazón, la hoja de estilos y el guion, iguales para todo el mundo.
+   *
+   * Y VAN COMO TRES RECURSOS Y NO EN LÍNEA por la CSP: `script-src 'self'`
+   * acepta `/ui/app.js` sin nonce, y un `<script>` dentro del HTML no.
+   */
+  @PublicoEnBackoffice()
+  @Get()
+  public pagina(@Res({ passthrough: true }) respuesta: ServerResponse): string {
+    respuesta.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return HTML;
+  }
+
+  @PublicoEnBackoffice()
+  @Get('ui/estilos.css')
+  public estilos(@Res({ passthrough: true }) respuesta: ServerResponse): string {
+    respuesta.setHeader('Content-Type', 'text/css; charset=utf-8');
+    return CSS;
+  }
+
+  @PublicoEnBackoffice()
+  @Get('ui/app.js')
+  public guionDeLaPagina(@Res({ passthrough: true }) respuesta: ServerResponse): string {
+    respuesta.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+    // Se cachea tras la primera lectura: es un archivo pequeño y fijo, y un
+    // `readFileSync` por petición sería E/S bloqueante a cambio de nada.
+    this.guionCacheado ??= guionDeLaInterfaz();
+    return this.guionCacheado;
+  }
 
   @PublicoEnBackoffice()
   @Post('sesion')

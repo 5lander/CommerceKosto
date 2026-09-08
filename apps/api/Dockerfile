@@ -34,7 +34,9 @@ COPY apps/api/prisma apps/api/prisma
 RUN npm ci
 
 COPY tsconfig.base.json ./
-COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/
+# `tsconfig.ui.json` tambien: desde P13 el build emite ademas `dist/ui/`, el
+# guion del back office. Sin el, `npm run build` falla dentro de la imagen.
+COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/tsconfig.ui.json apps/api/
 COPY apps/api/src apps/api/src
 
 RUN npm run build --workspace @costeo/api

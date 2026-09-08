@@ -38,10 +38,12 @@
  */
 
 import { morirCon } from './shared/infrastructure/proceso/morir-con';
+import { resolve } from 'node:path';
+
 import { NestFactory } from '@nestjs/core';
 
 import { BackofficeModule } from './modules/backoffice/backoffice.module';
-import { securityHeaders } from './shared/infrastructure/http/security-headers';
+import { guionDeLaInterfaz } from './modules/backoffice/infrastructure/http/backoffice.controller';
 
 const PUERTO_POR_DEFECTO = 3101;
 
@@ -67,10 +69,35 @@ function puerto(): number {
   return valor;
 }
 
+/**
+ * Carga el `.env` de la raiz, igual que `cli.ts`.
+ *
+ * EXPLICITO Y NO HEREDADO. `prisma.config.ts` lo carga para el CLI de Prisma y
+ * `main.ts` lo recibe del entorno del contenedor; un binario que dependa de que
+ * alguien mas lo haya cargado antes funciona hasta el dia que se lanza solo. En
+ * produccion no hay `.env` y las variables vienen del gestor de secretos: por
+ * eso la ausencia del archivo no es un error.
+ */
+function cargarArchivoDeEntorno(): void {
+  try {
+    process.loadEnvFile(resolve(__dirname, '..', '..', '..', '.env'));
+  } catch {
+    // Sin `.env`: se usan las variables que ya esten en el entorno.
+  }
+}
+
 async function main(): Promise<void> {
+  cargarArchivoDeEntorno();
+
+  // ANTES DE NADA: si la interfaz no está compilada, no se arranca. Servir una
+  // página en blanco es peor que no arrancar — el segundo se arregla en el acto.
+  guionDeLaInterfaz();
+
   const app = await NestFactory.create(BackofficeModule, { cors: false });
 
-  app.use(...securityHeaders());
+  // Las cabeceras de seguridad ya las aplica `BackofficeModule` como middleware:
+  // van con el modulo, no con este lanzador, para que una prueba que lo monte
+  // mida exactamente lo que sirve este proceso.
   app.enableShutdownHooks();
 
   await app.listen(puerto(), INTERFAZ);

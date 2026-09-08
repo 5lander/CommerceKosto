@@ -28,6 +28,7 @@
         "src/cli.ts",
         "src/bench.ts",
         "src/backoffice.ts",
+        "src/navegador/backoffice.ts",
         "src/hashear.ts",
         "src/**/*.module.ts",
         "src/**/*.spec.ts",

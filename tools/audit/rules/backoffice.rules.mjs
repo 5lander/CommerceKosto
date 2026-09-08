@@ -25,9 +25,13 @@ const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 const EL_BACKOFFICE = [
   'apps/*/src/modules/backoffice/**',
   'apps/*/src/backoffice.ts',
-  // La prueba que verifica el criterio de aceptacion tiene que poder nombrarla:
-  // comprobar que `AppModule` NO la tiene exige mencionarla.
-  'apps/*/test/integracion/backoffice.spec.ts',
+  // Las pruebas del propio back office tienen que poder nombrarlo: comprobar
+  // que `AppModule` NO tiene la conexion exige mencionarla, y probar la
+  // interfaz exige montar el modulo. El patron es deliberadamente estrecho —
+  // `backoffice*` bajo `test/integracion/` y nada mas—: una exencion de
+  // `test/**` dejaria la regla sin cazar la prueba que un dia importe el modulo
+  // desde la suite de la aplicacion cliente.
+  'apps/*/test/integracion/backoffice*.spec.ts',
 ];
 
 export const backofficeRules = [

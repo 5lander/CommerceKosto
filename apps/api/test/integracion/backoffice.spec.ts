@@ -78,8 +78,14 @@ describe('back office', () => {
 
     // `NestFactory` y no `@nestjs/testing`: montar el modulo de verdad no
     // necesita una dependencia mas, y ademas prueba el mismo camino que usa
-    // `backoffice.ts` en produccion. Sin HTTP porque estas pruebas llaman a los
-    // casos de uso: la superficie HTTP la cubre el guard y sus DTO.
+    // `backoffice.ts` en produccion.
+    //
+    // SIN HTTP, y es obligatorio: esta suite ya monta la aplicacion CLIENTE
+    // —para comprobar que no tiene la conexion privilegiada— y **dos
+    // aplicaciones HTTP de Nest en el mismo worker de vitest hacen que Node
+    // reviente con un fallo nativo**, sin mensaje. La superficie HTTP del back
+    // office se prueba en `backoffice-interfaz.spec.ts`, que corre en su propio
+    // worker por ser otro archivo.
     backoffice = await NestFactory.createApplicationContext(BackofficeModule, { logger: false });
 
     // Un operador de verdad, con el hasher de verdad.
