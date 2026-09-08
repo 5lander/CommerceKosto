@@ -8,50 +8,74 @@
 
 ## Estado actual
 
-**Paquete en curso:** ninguno — **P10 cerrado.**
-**Fase del protocolo:** CIERRE de P10
-**Último commit:** `P10: Importación de catálogo` (P9 `47f1e7d`, P8 `0067bd1`, P7 `72f0ba1`, P6 `16200e5`, P5 `e5e3f7d`, P4 `1529f5d`, P3 `6f4a3be`, P2 `1cd10a5`, P1 `3555c9c`, P0 `0f2d606`)
-**Fecha de última actualización:** 2026-09-07
+**Fase en curso:** ninguna — **Fases A, B, C y D cerradas.**
+**Último commit:** `Pantalla 5: inventario y conteo físico` (`61d64e4`)
+**Fecha de última actualización:** 2026-09-08
 
 ### EL PROYECTO CAMBIÓ DE MODO — leer esto antes que nada
 
-**Hay fecha comercial: la semana que viene un restaurante tiene que estar usando el sistema.** Eso
-cambió el ALCANCE, no el estándar del motor. Decisión del usuario, no negociable:
-
-| Pospuesto | Motivo |
-|---|---|
-| **P11 y P13** (back office, API y frontend) | Con un cliente, el back office es el usuario. Crear el tenant es un seed |
-| **P10 como autoservicio** | Sin UI de subida, previsualización, deduplicación ni confirmación en dos pasos. Lo que se construyó es un comando |
-| **P14** (capa visual / manual de marca) | Frontend sobrio y consistente, sin identidad de marca |
-| **P15 completo** | Las tres barreras y la confidencialidad de BODEGA siguen vigentes en el motor. El endurecimiento de escala se pospone |
-
-**Y lo que cambió del protocolo, solo esto:** `apps/api` conserva las 7 fases, la auditoría completa
-y un commit por paquete. **El frontend no lleva las 7 fases** —allí no hay lógica de negocio, así que
-la auditoría de ~100 verificaciones protege poco y cuesta mucho—: tipos, lint, y que la pantalla haga
-lo que dice. **Un commit por PANTALLA**, no por paquete.
-
-Lo que NO cambia en ningún sitio: nada de `any`, dinero y cantidades nunca en punto flotante,
-decimales cruzando fronteras como string, cero lógica de negocio en el frontend, sin dependencias
-nuevas sin autorización, sin `--no-verify`.
+**Hay fecha comercial: un restaurante tiene que estar usando el sistema.** Eso cambió el ALCANCE, no
+el estándar del motor. `apps/api` conserva las 7 fases, la auditoría completa y un commit por
+paquete; **el frontend no** —allí no vive ninguna regla de negocio— y va con tipos, lint y un commit
+por pantalla.
 
 ### Dónde se retoma exactamente
 
-**Once paquetes cerrados: P0 a P10.** Lo siguiente es la **Fase B — desplegar**, y empieza con una
-**parada entera**: no se ejecuta nada de infraestructura hasta que el usuario apruebe opciones con
-coste mensual real.
+**Lo que falta para que el cliente use el sistema el lunes son DOS cosas, y ninguna es código:**
 
-**Hecho en P10 — completo**
+1. **Aprovisionar el VPS.** Todo está escrito y probado en local; hace falta la cuenta de Hostinger.
+   `scripts/vps/preparar.sh` y `desplegar.sh`, más `docs/runbooks/despliegue.md`.
+2. **Los datos del tenant real.** `npm run seed:tenant` está escrito y probado; falta el archivo con
+   el nombre de la company, sus ubicaciones y sus usuarios. **No se inventan.**
 
-| # | Entregable | Estado |
+Después: **P15 — endurecimiento**, con las 7 fases completas. Va primero de los pospuestos porque
+habrá datos de un cliente real en una máquina que operamos nosotros.
+
+### Lo hecho en el sprint
+
+| Fase | Qué | Commits |
 |---|---|---|
-| 1 | Migración `p10_importaciones`: `import_job` + `import_job_status`, RLS deny-by-default y FORCE | ✅ |
-| 2 | **Escritura EN LOTE en los cuatro módulos dueños**, una transacción por lote | ✅ |
-| 3 | **Escritura de `combo_component`** — la tabla existía desde P4 y nadie la había escrito nunca | ✅ |
-| 4 | Descriptor `PRECIOS` y columnas `empaque` / `activo` en `PRODUCTOS` | ✅ |
-| 5 | `npm run importar`, con guarda de producción y sesión por el camino del login | ✅ |
-| 6 | **D4 cerrada** — ADR-014. No quedan decisiones 🔴 | ✅ |
-| 7 | **ADR-013** (parser aislado) y **ADR-014** (`LNK` era un componente de combo) | ✅ |
-| 8 | **835 pruebas**: 558 unitarias con la base apagada + 277 de integración | ✅ |
+| **A** | P10 — importación acotada, y el MC de referencia | `b9c4403`, `a7d6aa1` |
+| **B** | Despliegue decidido (ADR-016) y cadena de respaldo probada | `1e71e7f` |
+| **C** | Las cinco pantallas | `2813068`, `851f3ad`, `e04b761`, `8d9d24d`, `61d64e4` |
+| **D** | Guion de la sesión y comprobación previa | con este |
+
+### Lo que un «tú» futuro necesita saber del sprint
+
+**1. Dos fallos serios aparecieron SOLO al usar el sistema de verdad, no en las pruebas.**
+
+| Fallo | Cómo se veía | Por qué ninguna prueba lo vio |
+|---|---|---|
+| `SugerirPreciosEnLote` rechazaba TODAS las filas, cada una con un UUID por «motivo» | `articuloDe` devolvía `PurchaseArticleId \| null \| string` y discriminaba con `typeof === 'string'` — pero **`PurchaseArticleId` ES un string marcado**, así que un artículo ENCONTRADO se trataba como error | Ninguna prueba importaba precios con artículo |
+| `combo_component` llevaba seis paquetes con lectura y sin escritura | Un combo se creaba y jamás se componía: costaba cero | `audit:deadcode` mira exports de TypeScript, **no rutas de escritura a la base** |
+
+**La lección del primero, que vale para todo el proyecto: `typeof` no discrimina cuando uno de los
+éxitos también es una cadena.** Con tipos marcados eso pasa más de lo que parece.
+
+**2. Un check de CÓDIGO MUERTO encontró un agujero de SEGURIDAD.**
+knip señaló `MAXIMO_BYTES` y `MAXIMO_DE_FILAS` como exports sin usar. No eran código muerto: eran los
+topes de `SEGURIDAD.md` §5.1 **declarados y desconectados**. **Cuando knip señale una constante de
+configuración, pregunta si es que sobra o es que no se aplicó.**
+
+**3. El respaldo es nuestro, y por eso se prueba restaurándolo.**
+`npm run respaldo` vuelca, **restaura sobre una base desechable y compara los recuentos** de cinco
+tablas testigo. Si no cuadra, **no guarda el archivo**. Probado con 4.812.678 filas del libro. Los
+respaldos de Hostinger son semanales; los nuestros, diarios con WAL — y el script sale con error si
+`RESPALDO_COMANDO_SUBIDA` está vacío, porque un respaldo en la máquina que puede morir no es un
+respaldo.
+
+**4. El frontend tiene una regla de ESLint que hace cumplir «los decimales son cadenas».**
+`parseFloat` y `Number()` sobre un campo de la API **rompen el build**. Es la única forma de que esa
+regla sobreviva a la prisa. Ya cazó un caso real: la conversión a porcentaje truncaba, y `0.2799`
+salía «27,9 %» pintado de verde con el umbral en 28 %.
+
+**5. CORS estaba desactivado con el comentario «en P0 no hay frontend».** Ahora lo hay. Lista blanca
+exacta desde `CORS_ORIGENES`, validada **campo a campo** y no en un refinamiento del objeto (INC-008).
+El origen con barra final es el que cuesta media tarde: el navegador nunca la manda.
+
+**6. Next escribe un `CLAUDE.md` dentro de `apps/web` en cada arranque.** Desactivado con
+`agentRules: false`. Un segundo archivo con ese nombre, generado por una herramienta y sin revisar,
+es justo la ambigüedad que el `CLAUDE.md` del proyecto existe para impedir.
 
 ### Lo que un «tú» futuro necesita saber de P10
 
@@ -233,10 +257,10 @@ Lo implementado:
 | P9 — Consolidado y comparativa | ✅ Completado | `47f1e7d` | 2026-09-06 |
 | **P10 — Importación de catálogo, acotada** | ✅ Completado | *(el de este paquete)* | 2026-09-07 |
 | P11 — Back office | ⏸️ **POSPUESTO** | — | Con un cliente, el back office es el usuario |
-| P12 — Frontend app cliente | 🟡 **Siguiente, recortado a 5 pantallas** | — | Fase C del sprint |
+| P12 — Frontend app cliente | ✅ **Completado, recortado a 5 pantallas** | Fase C | 2026-09-08 |
 | P13 — Frontend back office | ⏸️ **POSPUESTO** | — | No hay back office que operar |
 | P14 — Capa visual | ⏸️ **POSPUESTO** | — | Frontend sobrio, sin identidad de marca |
-| P15 — Endurecimiento | ⏸️ **POSPUESTO** | — | El aislamiento sigue vigente; la escala se pospone |
+| P15 — Endurecimiento | 🟡 **SIGUIENTE** | — | Va primero: habrá datos de un cliente real en una máquina que operamos nosotros |
 
 Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto con motivo
 

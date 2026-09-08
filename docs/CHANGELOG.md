@@ -4,6 +4,53 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Sprint de salida a cliente — Fases A a D · 2026-09-07 y 08
+
+**Objetivo:** que un restaurante pueda usar el sistema. Alcance recortado por decisión del usuario;
+el estándar del motor, intacto.
+
+### Fase A — P10, importación acotada
+
+Escritura en lote en los cuatro módulos dueños (antes, 200 ítems eran 200 transacciones y la fila 150
+mala dejaba escritas las 149 buenas). `combo_component` tiene por fin una ruta de escritura: llevaba
+seis paquetes con lectura y sin escritura. **D4 cerrada** leyendo el Excel: `LNK` era el apaño con el
+que la hoja armaba un combo (ADR-014). `npm run importar` con guarda de producción. Y el **MC de
+referencia visible y reproducible** (ADR-015).
+
+### Fase B — desplegar
+
+**ADR-016 cierra D10**: un VPS en Hostinger con PostgreSQL propio, no gestionado. El hook `initdb`
+que crea `costeo_migrator` y `costeo_app` solo existe si la base es nuestra. Lo que se pierde queda
+escrito: sin failover, parches nuestros, respaldo nuestro. **Cadena de respaldo que restaura y
+compara**, probada con 4.812.678 filas del libro. Cuatro runbooks completos.
+
+### Fase C — cinco pantallas
+
+`apps/web` con Next.js 16.3.4, React 19.2.8 y TypeScript. Sin librería de UI, sin gestor de estado,
+sin cliente HTTP. Login y sucursal · costeo · ingeniería de menú con el MC de referencia · rejilla de
+ventas navegable por teclado · inventario con la hoja **a ciegas** y la conciliación tras otro
+permiso. CORS habilitado con lista blanca exacta.
+
+### Fase D — la sesión
+
+`docs/runbooks/sesion-con-el-cliente.md`: el guion en seis pasos, la comprobación previa, y **las
+tres diferencias conocidas con las palabras exactas para explicarlas antes de que el cliente las
+vea** — los céntimos frente a Excel, los ítems sin contar al teórico, y el MC ponderado.
+
+### Lo que apareció al usar el sistema de verdad
+
+Dos fallos serios que ninguna prueba vio: `SugerirPreciosEnLote` rechazaba todas las filas porque
+`typeof x === 'string'` no discrimina cuando el éxito es un tipo marcado —que en ejecución es una
+cadena—, y `combo_component` no tenía escritura. Y un tercero cazado por el linter del frontend: la
+conversión a porcentaje truncaba, y `0.2799` salía «27,9 %» pintado de verde con el umbral en 28 %.
+
+### Pendiente
+
+Aprovisionar el VPS (necesita la cuenta de Hostinger), los datos del tenant real, y el destino de
+`RESPALDO_COMANDO_SUBIDA`. Después, **P15**.
+
+---
+
 ## P10b — El MC de referencia, visible y reproducible · 2026-09-07
 
 **Objetivo:** cerrar la única contradicción encontrada entre el SPEC y el Excel del que sale, y que
