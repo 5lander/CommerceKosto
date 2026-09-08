@@ -27,13 +27,20 @@ import {
 } from '../../../shared/domain/identity/identificadores';
 import { Ratio } from '../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../shared/domain/unidad/unidad-de-uso';
-import type { ResultadoDeLote } from '../../../shared/application/lote';
+import type {
+  ResultadoDeLote,
+  ResultadoDeLoteConLimite,
+} from '../../../shared/application/lote';
 import {
   clavePorNombre,
   nombresQueChocan,
   nombresUnicos,
 } from '../../../shared/domain/lote/problemas';
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
+import {
+  excedeElLimite,
+  limitesBloqueados,
+} from '../../../shared/infrastructure/persistence/limites-del-plan';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
   ArticuloLeido,
@@ -46,6 +53,7 @@ import type {
   ItemLeido,
   RepositorioDeCatalogo,
   ResultadoDeAlta,
+  ResultadoDeAltaDeItem,
 } from '../application/ports/repositorio-de-catalogo.port';
 import type { Dimension, UnidadDelCatalogo } from '../domain/conversion';
 
@@ -127,8 +135,17 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
     });
   }
 
-  public async crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAlta<ItemId>> {
+  public async crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAltaDeItem> {
     return this.transaccion.run(datos.companyId, async (tx) => {
+      // EL LIMITE DEL PLAN, DENTRO DE LA MISMA TRANSACCION QUE INSERTA (D5).
+      // Contar fuera seria un TOCTOU; ver `limites-del-plan.ts`.
+      const maximo = excedeElLimite({
+        actuales: await tx.item.count({ where: { companyId: datos.companyId } }),
+        nuevos: 1,
+        maximo: (await limitesBloqueados(tx, datos.companyId)).items,
+      });
+      if (maximo !== null) return { clase: 'limite', maximo };
+
       try {
         const fila = await tx.item.create({
           data: {
@@ -294,8 +311,18 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
   public async crearItemsEnLote(datos: {
     readonly companyId: CompanyId;
     readonly items: readonly DatosDeItemEnLote[];
-  }): Promise<ResultadoDeLote> {
+  }): Promise<ResultadoDeLoteConLimite> {
     return this.transaccion.run(datos.companyId, async (tx) => {
+      // El lote entero contra el limite, antes de mirar los nombres: importar
+      // trescientos items sobre un limite de quinientos con cuatrocientos ya
+      // dentro no puede escribir los cien primeros.
+      const maximo = excedeElLimite({
+        actuales: await tx.item.count({ where: { companyId: datos.companyId } }),
+        nuevos: datos.items.length,
+        maximo: (await limitesBloqueados(tx, datos.companyId)).items,
+      });
+      if (maximo !== null) return { clase: 'limite', maximo };
+
       const existentes = await tx.item.findMany({
         where: { companyId: datos.companyId },
         select: { name: true },

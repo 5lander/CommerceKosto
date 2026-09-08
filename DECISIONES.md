@@ -146,13 +146,25 @@ margen—, e **INS-090** está marcada `LNK` sin enlazar nada, así que es un `I
 
 ---
 
-## D5 — Modelo de suscripción y precios 🟡
+## D5 — Modelo de suscripción y precios ✅ *(implementada en P11)*
 
-**Valor provisional:** suscripción mensual por company con límite de ubicaciones incluidas. Estructura de tres planes, sin precios definidos.
+**Cerrada en la parte que es código; los precios siguen sin definir, que es otra decisión.**
 
-En código: la company tiene un `plan_id` y el plan declara límites (`max_locations`, `max_items`, `max_products`). Los límites se **verifican en el backend** desde el primer paquete que los toque, con valores generosos por defecto.
+La tabla `plan` existe con los tres planes —`BASICO`, `PROFESIONAL`, `CADENA`— y `company.plan_code` apunta a ella. **`company.max_locations` desapareció:** dos sitios donde vive el mismo límite son dos sitios que un día dejan de coincidir.
 
-No implementar cobro, pasarela ni facturación en este proyecto. Ver D9.
+Los tres límites que esta decisión nombraba **se verifican de verdad**, y eso era la mitad que faltaba:
+
+| Límite | Dónde se hace cumplir |
+|---|---|
+| `max_locations` | `CrearUbicacion` (desde P1, ahora leyendo del plan) |
+| `max_items` | `CrearItem` y `CrearItemsEnLote` |
+| `max_products` | `CrearProducto` y `CrearProductosEnLote` |
+
+Los tres con candado sobre la fila de `company` dentro de la transacción que inserta (`shared/infrastructure/persistence/limites-del-plan.ts`). Una columna de límite que nadie comprueba aparenta una garantía que no existe, y ningún check la delata — es lo que le pasó a `combo_component` durante seis paquetes.
+
+`BASICO` lleva **exactamente 10 ubicaciones** a propósito: era el `DEFAULT` de la columna que sustituye, así que ninguna company existente vio cambiar su límite.
+
+No hay cobro, pasarela ni facturación, y sigue sin haberlos. Ver D9.
 
 ---
 

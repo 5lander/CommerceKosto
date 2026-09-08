@@ -23,7 +23,7 @@ import type {
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { GrafoDeItems } from '../../domain/ciclos';
-import type { ResultadoDeLote } from '../../../../shared/application/lote';
+import type { ResultadoDeLoteConLimite } from '../../../../shared/application/lote';
 import type { BaseDeLinea, EstadoDeLinea, TipoDeProducto } from '../../domain/linea-de-receta';
 
 // Se reexporta para que quien ya lo importaba de aqui no tenga que cambiar: el
@@ -160,7 +160,9 @@ export interface DatosDePropagacionRegistrada {
 
 export type ResultadoDeAltaDeProducto =
   | { readonly clase: 'creado'; readonly id: ProductId }
-  | { readonly clase: 'nombre_en_uso' };
+  | { readonly clase: 'nombre_en_uso' }
+  /** El limite de productos del plan (D5), comprobado con candado al insertar. */
+  | { readonly clase: 'limite'; readonly maximo: number };
 
 /**
  * Un producto dentro de un LOTE, con su configuracion en la ubicacion pegada.
@@ -216,7 +218,7 @@ export interface RepositorioDeRecetas {
     readonly companyId: CompanyId;
     readonly locationId: LocationId;
     readonly productos: readonly DatosDeProductoEnLote[];
-  }): Promise<ResultadoDeLote>;
+  }): Promise<ResultadoDeLoteConLimite>;
 
   listarProductos(companyId: CompanyId): Promise<readonly ProductoLeido[]>;
 

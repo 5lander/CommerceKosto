@@ -18,6 +18,7 @@ import type { ItemGroupId, ItemId } from '../../../../shared/domain/identity/ide
 import { Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
+import { LimiteDelPlanError } from '../../../iam/domain/errores';
 import { ConflictoDeCatalogoError, EntradaDeCatalogoInvalidaError, ItemNoEncontradoError } from '../../domain/errores';
 import {
   mensajeDelProblemaDeItem,
@@ -66,6 +67,11 @@ export class CrearItem {
 
     if (resultado.clase === 'nombre_en_uso') {
       throw new ConflictoDeCatalogoError('Ya existe un ítem con ese nombre.');
+    }
+    // El plan, no el permiso: por eso es `LimiteDelPlanError` (409) y no un 403.
+    // Quien lo recibe tiene que ampliar el plan, no revisar roles.
+    if (resultado.clase === 'limite') {
+      throw new LimiteDelPlanError('ítems', resultado.maximo);
     }
 
     await this.deps.auditoria.record({

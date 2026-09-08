@@ -19,11 +19,10 @@
  * Se ejecuta desde `dist/`, nunca desde el fuente (INC-017).
  */
 
+import { morirCon } from './shared/infrastructure/proceso/morir-con';
 import 'reflect-metadata';
 
 import { Argon2Hasher } from './modules/iam/infrastructure/argon2-hasher';
-
-const SALIDA_CON_ERROR = 1;
 
 /**
  * Se acumula el texto y no los buffers: `process.stdin` entrega `Buffer<any>` y
@@ -45,7 +44,4 @@ async function main(): Promise<void> {
   process.stdout.write(`${await new Argon2Hasher().hash(contrasena)}\n`);
 }
 
-main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = SALIDA_CON_ERROR;
-});
+main().catch(morirCon);

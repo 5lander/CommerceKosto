@@ -30,6 +30,7 @@ import {
   exigirUbicacionEnAlcance,
   type SesionActiva,
 } from '../../../iam/application/casos-de-uso/validar-sesion';
+import { LimiteDelPlanError } from '../../../iam/domain/errores';
 import { RecetaInvalidaError } from '../../domain/errores';
 import {
   problemasDelLoteDeProductos,
@@ -78,6 +79,12 @@ export class CrearProductosEnLote {
       throw new RecetaInvalidaError(
         `Estos productos ya existen en tu company: ${resultado.nombres.join(', ')}.`,
       );
+    }
+
+    // El lote ENTERO se para: escribir los que caben dejaria media importación
+    // dentro, que es justo lo que un lote existe para impedir.
+    if (resultado.clase === 'limite') {
+      throw new LimiteDelPlanError('productos', resultado.maximo);
     }
 
     await auditarLote({ auditoria: this.deps.auditoria, sesion, eventType: 'product.bulk_created', filas: resultado.filas });

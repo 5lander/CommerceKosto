@@ -34,6 +34,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?falta POSTGRES_SUPERUSER_PASSWORD}
       COSTEO_MIGRATOR_PASSWORD: ${COSTEO_MIGRATOR_PASSWORD:?falta COSTEO_MIGRATOR_PASSWORD}
       COSTEO_APP_PASSWORD: ${COSTEO_APP_PASSWORD:?falta COSTEO_APP_PASSWORD}
+      COSTEO_BACKOFFICE_PASSWORD: ${COSTEO_BACKOFFICE_PASSWORD:?falta COSTEO_BACKOFFICE_PASSWORD}
       # Detecta corrupcion silenciosa en disco. En una base que guarda el libro
       # de inventario, un bit cambiado sin aviso es peor que una caida.
       POSTGRES_INITDB_ARGS: --data-checksums

@@ -27,6 +27,7 @@ import type {
   RecipeId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { LeerItem } from '../../../catalog/application/casos-de-uso/items';
+import { LimiteDelPlanError } from '../../../iam/domain/errores';
 import {
   exigirUbicacionEnAlcance,
   type SesionActiva,
@@ -65,6 +66,10 @@ export class CrearProducto {
 
     if (resultado.clase === 'nombre_en_uso') {
       throw new RecetaInvalidaError('Ya existe un producto con ese nombre.');
+    }
+    // El plan, no el permiso: 409, no 403 (ver `LimiteDelPlanError`).
+    if (resultado.clase === 'limite') {
+      throw new LimiteDelPlanError('productos', resultado.maximo);
     }
 
     await this.deps.auditoria.record({

@@ -20,3 +20,17 @@ export type ResultadoDeLote =
    * decidir de una vez si renombra, si omite o si aborta.
    */
   | { readonly clase: 'nombres_en_uso'; readonly nombres: readonly string[] };
+
+/**
+ * El desenlace de un lote que ADEMAS puede toparse con el limite del plan.
+ *
+ * **ES UN TIPO APARTE Y NO UNA VARIANTE MAS DE `ResultadoDeLote`.** Solo dos de
+ * los cuatro modulos que reciben lotes tienen limite —`catalog` por los items y
+ * `recipes` por los productos—; anadir la variante al tipo compartido obligaria
+ * a `pricing` y a `inventory` a tratar un caso que en ellos no puede ocurrir, y
+ * una rama muerta que el compilador exige es peor que no tenerla: se lee como
+ * si pudiera pasar.
+ */
+export type ResultadoDeLoteConLimite =
+  | ResultadoDeLote
+  | { readonly clase: 'limite'; readonly maximo: number };

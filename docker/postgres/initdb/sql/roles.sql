@@ -39,6 +39,34 @@ ALTER ROLE costeo_migrator SET lock_timeout      = '10s';
 ALTER ROLE costeo_migrator SET search_path       = 'public';
 ALTER ROLE costeo_migrator CONNECTION LIMIT 4;
 
--- `costeo_backoffice` (docs/sistema/seguridad.md) NO se crea aqui. Un rol con
--- login y contrasena que nadie usa es superficie de ataque sin contrapartida:
--- se crea en P11, con su propio ADR. El nombre queda reservado.
+-- Rol del BACK OFFICE (P11, ADR-017). ES EL UNICO ROL QUE PUENTEA RLS, y esa
+-- frase es toda la razon por la que este bloque lleva tanto comentario.
+--
+-- BYPASSRLS significa que ninguna politica se le aplica: un `SELECT` suyo ve
+-- todos los tenants a la vez. SPEC 1 lo eligio a sabiendas, por encima de la
+-- alternativa —una cuenta de usuario dentro de cada tenant— y con tres
+-- condiciones que NO son recomendaciones:
+--
+--   1. La conexion vive SOLO en el proceso del back office. `audit:forbidden` y
+--      `audit:arch` impiden que la app cliente la importe, y una prueba de
+--      integracion lo comprueba sobre el contenedor de Nest ya construido.
+--   2. Pool separado del de la app cliente. Son dos procesos distintos.
+--   3. Todo acceso cross-tenant en un log append-only con MOTIVO OBLIGATORIO,
+--      que la base exige con un CHECK de longitud.
+--
+-- Lo que NO tiene, y es tan importante como lo que tiene: no es superusuario,
+-- no es dueno de ninguna tabla, no puede crear roles ni bases, no hereda de
+-- nadie, y sus GRANT son tabla por tabla —concedidos en la migracion de P11—,
+-- nunca por DEFAULT PRIVILEGES. No tiene DELETE en ninguna tabla del sistema.
+CREATE ROLE costeo_backoffice
+  LOGIN PASSWORD :'backoffice_password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS NOINHERIT;
+
+-- Limites mas duros que los de la aplicacion, a proposito: el back office lo
+-- usa una persona a mano, no una pantalla con miles de peticiones. Un rol que
+-- lo ve todo no necesita cuarenta conexiones ni consultas largas.
+ALTER ROLE costeo_backoffice SET statement_timeout                  = '30s';
+ALTER ROLE costeo_backoffice SET idle_in_transaction_session_timeout = '10s';
+ALTER ROLE costeo_backoffice SET lock_timeout                        = '3s';
+ALTER ROLE costeo_backoffice SET search_path                         = 'public';
+ALTER ROLE costeo_backoffice CONNECTION LIMIT 4;

@@ -28,8 +28,8 @@ por pantalla.
 2. **Los datos del tenant real.** `npm run seed:tenant` está escrito y probado; falta el archivo con
    el nombre de la company, sus ubicaciones y sus usuarios. **No se inventan.**
 
-**P15 está cerrado** (2026-09-08). Lo siguiente de los pospuestos es **P11 — Back office**, con las
-7 fases completas, y después P13 y P14.
+**P15 y P11 están cerrados** (2026-09-08). Lo siguiente es **P13 — Frontend del back office**, y
+después **P14 — capa visual**, los dos con las 7 fases completas.
 
 ### Lo hecho en el sprint
 
@@ -193,7 +193,7 @@ P6 le negó el saldo, P7 la conciliación, P8 las seis vistas. Y las tres veces 
 3. ~~El coste de armar el contexto no tiene medición propia~~ ✅ **Medido en P9: 734 ms de 800 con diez ubicaciones.** Cumple al 92 % y escala lineal, así que **doce ubicaciones lo rompen**. Es el aviso que P10 y P11 heredan.
 4. ~~El consolidado puede sumar meses cerrados con abiertos~~ ✅ **Resuelto en P9:** la respuesta trae `estadoDelPeriodo` por ubicación y los contadores `cerradas` / `abiertas`.
 5. **D4 (`LNK`) sigue en 🔴.** No ha bloqueado nada; bloquea la migración de datos del Excel.
-6. **Nadie puede leer `audit_log`** — pendiente estructural de P11, sin cambios desde P7.
+6. ~~**Nadie puede leer `audit_log`**~~ ✅ **Resuelto en P11:** `costeo_backoffice` tiene `SELECT` y `LeerAuditoria` la sirve, pidiendo motivo como cualquier acceso cross-tenant.
 
 ### Lo que la limpieza de la base destapó — leer antes de tocar una prueba de rendimiento
 
@@ -256,9 +256,9 @@ Lo implementado:
 | P8 — Vistas analíticas | ✅ Completado | `0067bd1` | 2026-09-04 |
 | P9 — Consolidado y comparativa | ✅ Completado | `47f1e7d` | 2026-09-06 |
 | **P10 — Importación de catálogo, acotada** | ✅ Completado | *(el de este paquete)* | 2026-09-07 |
-| P11 — Back office | 🟡 **SIGUIENTE** | — | Con un cliente el back office es el usuario, pero `audit_log` sigue sin lector |
+| **P11 — Back office** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 | P12 — Frontend app cliente | ✅ **Completado, recortado a 5 pantallas** | Fase C | 2026-09-08 |
-| P13 — Frontend back office | ⏸️ **POSPUESTO** | — | No hay back office que operar |
+| P13 — Frontend back office | 🟡 **SIGUIENTE** | — | Ya hay back office que operar: hoy se usa con `curl` por el túnel |
 | P14 — Capa visual | ⏸️ **POSPUESTO** | — | Frontend sobrio, sin identidad de marca |
 | **P15 — Endurecimiento** | ✅ Completado | *(el de este paquete)* | 2026-09-08 |
 
@@ -347,7 +347,9 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto co
 | 3 | **Los alias del dialecto real del cliente** en los descriptores de importación | P10 | Cuando llegue su archivo. La pasada de análisis **no escribe nada** y ya reporta columnas no reconocidas y obligatorias ausentes: ajustarlo es media hora sin tocar el camino de escritura |
 | 4 | **Prueba de similitud dominio ↔ `pg_trgm`** — el dominio quita tildes y `pg_trgm` no. Medido: `similarity('tomate riñón','tomate rinon') = 0.53`, por encima del umbral de 0.3, así que el criterio de aceptación se sostiene; lo que no está probado es que coincidan siempre | P10 | Después del lanzamiento |
 
-> **Pendiente estructural, no deuda:** nadie puede leer `audit_log` porque no existe rol con `SELECT` sobre ella. Es lo que SEGURIDAD.md §10 pide, no un olvido, y se resolvía en **P11 — que está pospuesto**. Con un solo cliente el back office es el usuario, pero conviene saber que el log se escribe y no se lee.
+> **Resuelto en P11.** `audit_log` ya tiene lector: `costeo_backoffice` tiene `SELECT` sobre ella y `LeerAuditoria` la sirve. Leer la auditoría de un tenant es un acceso cross-tenant como cualquier otro — pide motivo y deja su línea. Estuvo diez paquetes escribiéndose sin que nadie pudiera leerla: cumplía la letra de SEGURIDAD.md §10 y no su propósito.
+
+> **Pendiente nuevo, y con fecha de revisión: el back office no tiene segundo factor.** Con un operador y acceso por túnel SSH —que ya exige una clave— añadirlo ahora sería proteger la segunda cerradura antes que la primera. **En cuanto haya un segundo operador, se reevalúa.** Está en ADR-017 y aquí para que no se pierda.
 
 > **Una tabla con lectura y sin escritura no la ve ningún check.** `combo_component` llevó seis paquetes así. `audit:deadcode` mira exports de TypeScript, no rutas de escritura a la base.
 

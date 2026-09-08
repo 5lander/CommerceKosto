@@ -16,7 +16,7 @@ Las tres son independientes: si una falla, las otras dos siguen de pie.
 |---|---|---|
 | `costeo_migrator` | Migraciones (solo el CLI de Prisma) | Dueño del esquema y de las tablas. `NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT` |
 | `costeo_app` | Aplicación cliente | **No superusuario, no dueño.** Sujeto a RLS. Sin `CREATE`, sin `TEMPORARY`, sin membresías. Timeouts fijados en el rol |
-| `costeo_backoffice` | Back office | **No existe todavía.** El nombre está reservado; se crea en P11. Un rol con login que nadie usa es superficie de ataque sin contrapartida |
+| `costeo_backoffice` | Back office (P11) | **El único rol con `BYPASSRLS`: ve todos los tenants a la vez.** No superusuario, no dueño, `NOCREATEROLE`, `NOINHERIT`, `CONNECTION LIMIT 4`. Sus privilegios se conceden **tabla por tabla** en la migración de P11, nunca por `DEFAULT PRIVILEGES`, y no incluyen `DELETE` en ninguna ni `SELECT` sobre recetas o precios. Vive **solo** en el proceso del back office. El riesgo asumido y sus cuatro condiciones, en **ADR-017** |
 
 Los `DEFAULT PRIVILEGES` conceden `SELECT` e `INSERT`, **nunca `UPDATE` ni `DELETE`**: esos se conceden tabla por tabla, en la migración que la crea. El orden inverso tiene el fallo invertido — si alguien olvidara un `REVOKE`, el libro de inventario dejaría de ser append-only **en silencio**.
 

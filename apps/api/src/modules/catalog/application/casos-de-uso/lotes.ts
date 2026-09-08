@@ -25,6 +25,7 @@ import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/
 import type { ProblemaDelLote } from '../../../../shared/domain/lote/problemas';
 import { PRIMERA_POSICION } from '../../../../shared/domain/lote/problemas';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
+import { LimiteDelPlanError } from '../../../iam/domain/errores';
 import {
   ConversionInvalidaError,
   factorDeConversion,
@@ -73,6 +74,12 @@ export class CrearItemsEnLote {
       throw new ConflictoDeCatalogoError(
         `Estos ítems ya existen en tu company: ${resultado.nombres.join(', ')}.`,
       );
+    }
+    // El lote ENTERO se para. Escribir los que caben y callar el resto dejaría
+    // media importación dentro, que es justo lo que `crearItemsEnLote` existe
+    // para impedir.
+    if (resultado.clase === 'limite') {
+      throw new LimiteDelPlanError('ítems', resultado.maximo);
     }
 
     await auditarLote({ auditoria: this.deps.auditoria, sesion, eventType: 'catalog.items.bulk_created', filas: resultado.filas });

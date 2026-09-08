@@ -133,12 +133,14 @@ model Company {
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  /// Limite de plan (D5). El plan como entidad llega en P11; hasta entonces el
-  /// limite vive aqui con un valor generoso. Se verifica en el backend desde el
-  /// primer paquete que lo toca, que es este.
-  maxLocations Int @default(10) @map("max_locations")
+  /// El plan que declara los limites (D5). Llego en P11 y SUSTITUYE al antiguo
+  /// `max_locations` de la company: dos sitios donde vive el mismo limite son
+  /// dos sitios que un dia dejan de coincidir.
+  planCode String @default("BASICO") @map("plan_code")
 
   estado                CompanyStatus         @relation(fields: [status], references: [code])
+  plan                  Plan                  @relation(fields: [planCode], references: [code])
+  accesosDeBackoffice   BackofficeAccessLog[]
   settings              CompanySettings?
   locations             Location[]
   usuarios              AppUser[]
@@ -165,6 +167,25 @@ model Company {
   importaciones         ImportJob[]
 
   @@map("company")
+}
+
+/// Los planes de suscripcion y, sobre todo, SUS LIMITES (D5).
+///
+/// LOS TRES LIMITES SE VERIFICAN. Una columna de limite que nadie comprueba es
+/// peor que no tenerla: aparenta una garantia que no existe, y ningun check la
+/// delata — es la leccion de `combo_component`, que estuvo seis paquetes con
+/// lectura y sin escritura sin que nada protestara.
+model Plan {
+  code String @id
+  name String
+
+  maxLocations Int @map("max_locations")
+  maxItems     Int @map("max_items")
+  maxProducts  Int @map("max_products")
+
+  companies Company[]
+
+  @@map("plan")
 }
 
 /// ACTIVE - SUSPENDED - CLOSED
@@ -1474,4 +1495,72 @@ model ImportJob {
 
   @@index([companyId, createdAt(sort: Desc)])
   @@map("import_job")
+}
+
+// ============================================================================
+// BACK OFFICE (P11)
+//
+// TRES TABLAS QUE LA APLICACION CLIENTE NO PUEDE TOCAR NI PARA LEER. No es una
+// cuestion de permisos de aplicacion: `costeo_app` no tiene politica RLS ni
+// GRANT sobre ninguna de ellas, asi que la barrera es de base de datos.
+//
+// Y NO LLEVAN `company_id` COMO LLAVE DE AISLAMIENTO, a diferencia de todas las
+// demas: un operador de back office no pertenece a ningun tenant. Que no
+// pertenezca es justamente lo que le permite mirar a todos, y lo que obliga a
+// que cada mirada quede registrada con su motivo.
+// ============================================================================
+
+/// Un operador del back office. NO es un `AppUser`: no tiene company.
+model BackofficeUser {
+  id           String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  status       String
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sesiones BackofficeSession[]
+  accesos  BackofficeAccessLog[]
+
+  @@map("backoffice_user")
+}
+
+model BackofficeSession {
+  id         String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  ip         String?   @db.Inet
+  userAgent  String?   @map("user_agent")
+
+  usuario BackofficeUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, expiresAt])
+  @@map("backoffice_session")
+}
+
+/// El registro append-only de TODO acceso cross-tenant (CLAUDE.md §4.2).
+///
+/// `reason` es NOT NULL con longitud minima en un CHECK, y eso es el corazon de
+/// la tabla: un motivo opcional se deja vacio, y un registro sin motivo no
+/// responde la unica pregunta que un log de acceso privilegiado existe para
+/// responder. La base lo exige; no es una convencion de la aplicacion.
+model BackofficeAccessLog {
+  id         String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+  operatorId String   @map("operator_id") @db.Uuid
+  /// `null` solo en las acciones que no miran a un tenant concreto (listar).
+  companyId  String?  @map("company_id") @db.Uuid
+  action     String
+  reason     String
+  ip         String?  @db.Inet
+
+  operador BackofficeUser @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+  company  Company?       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([at(sort: Desc)])
+  @@index([companyId, at(sort: Desc)])
+  @@map("backoffice_access_log")
 }

@@ -46,9 +46,17 @@ export const tenantRules = [
       'ya viene atado a una transaccion con su tenant.',
     patron: /from\s+['"][^'"]*generated\/prisma['"]/g,
     incluye: CODIGO,
-    excluye: [...META, 'apps/*/src/shared/infrastructure/persistence/**'],
+    // El back office construye SU PROPIO cliente, con otro rol y otro pool, y
+    // eso es justo lo que SPEC §1 exige: dos procesos que no comparten conexion.
+    // Que pueda instanciarlo no lo deja suelto — `backoffice.rules.mjs` impide
+    // que esa clase se nombre fuera de su modulo.
+    excluye: [
+      ...META,
+      'apps/*/src/shared/infrastructure/persistence/**',
+      'apps/*/src/modules/backoffice/infrastructure/backoffice-connection.ts',
+    ],
     desde: 'P1',
-    referencia: 'CLAUDE.md §4.1 · ADR-006',
+    referencia: 'CLAUDE.md §4.1 · ADR-006 · ADR-017',
   },
   {
     id: 'sin-set-local-a-mano',

@@ -18,7 +18,10 @@ import type {
   ItemId,
   PurchaseArticleId,
 } from '../../../../shared/domain/identity/identificadores';
-import type { ResultadoDeLote } from '../../../../shared/application/lote';
+import type {
+  ResultadoDeLote,
+  ResultadoDeLoteConLimite,
+} from '../../../../shared/application/lote';
 import type { UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { UnidadDelCatalogo } from '../../domain/conversion';
 import type { ConfianzaDePrecio, TipoDeItem } from '../../domain/item';
@@ -60,6 +63,17 @@ export interface GrupoLeido {
 export type ResultadoDeAlta<T> =
   | { readonly clase: 'creado'; readonly id: T }
   | { readonly clase: 'nombre_en_uso' };
+
+/**
+ * El alta de un ITEM, que ademas puede toparse con el limite del plan (D5).
+ *
+ * Grupos y articulos no llevan limite y por eso no comparten este tipo: una
+ * variante que nunca ocurre obliga a escribir una rama muerta que se lee como
+ * si pudiera ocurrir.
+ */
+export type ResultadoDeAltaDeItem =
+  | ResultadoDeAlta<ItemId>
+  | { readonly clase: 'limite'; readonly maximo: number };
 
 export interface DatosParaCrearItem {
   readonly companyId: CompanyId;
@@ -136,7 +150,7 @@ export interface RepositorioDeCatalogo {
 
   listarGrupos(companyId: CompanyId): Promise<readonly GrupoLeido[]>;
 
-  crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAlta<ItemId>>;
+  crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAltaDeItem>;
 
   /** @returns `false` si el ítem no existe en esa company. */
   actualizarItem(datos: DatosParaActualizarItem): Promise<boolean>;
@@ -165,7 +179,7 @@ export interface RepositorioDeCatalogo {
   crearItemsEnLote(datos: {
     readonly companyId: CompanyId;
     readonly items: readonly DatosDeItemEnLote[];
-  }): Promise<ResultadoDeLote>;
+  }): Promise<ResultadoDeLoteConLimite>;
 
   crearArticulo(datos: DatosParaCrearArticulo): Promise<ResultadoDeAlta<PurchaseArticleId>>;
 

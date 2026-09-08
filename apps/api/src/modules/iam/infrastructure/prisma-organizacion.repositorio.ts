@@ -257,13 +257,22 @@ export class PrismaOrganizacionRepositorio implements RepositorioDeOrganizacion 
   }
 
   /**
-   * Toma el candado de la fila de la company y devuelve su limite.
+   * Toma el candado de la fila de la company y devuelve su limite de ubicaciones.
    *
    * El `FOR UPDATE` es la pieza entera: sin el, esto seria un `count` y un `if`
    * con una ventana de carrera en medio.
+   *
+   * DESDE P11 EL LIMITE VIVE EN EL PLAN, no en la company. El candado se sigue
+   * tomando sobre la fila de `company` —que es la que decide cual es su plan— y
+   * no sobre la de `plan`, que es un catalogo compartido: bloquear ahi serializaria
+   * la creacion de ubicaciones de TODAS las companies del mismo plan.
    */
   private async limiteBloqueado(tx: ClienteDeTransaccion, company: CompanyId): Promise<number> {
-    const filas = await tx.$queryRaw`SELECT max_locations FROM "company" WHERE "id" = ${company}::uuid FOR UPDATE`;
+    const filas = await tx.$queryRaw`SELECT p."max_locations"
+                                       FROM "company" c
+                                       JOIN "plan" p ON p."code" = c."plan_code"
+                                      WHERE c."id" = ${company}::uuid
+                                        FOR UPDATE OF c`;
     const [fila] = FILA_DE_LIMITE.parse(filas);
 
     if (fila === undefined) {

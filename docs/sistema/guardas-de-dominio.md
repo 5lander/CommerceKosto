@@ -243,6 +243,27 @@ Tampoco comprueba que lo escrito coincida con lo analizado. **No puede**: las fi
 
 ---
 
+## `20260908171210_p11_backoffice`
+
+| Restricción | | Guarda |
+|---|---|---|
+| `plan_codigo_conocido` | ⚪ | `plan` es catálogo sembrado en la migración. La app cliente tiene `SELECT` y nada más; el back office ni siquiera eso |
+| `plan_limites_positivos` | ⚪ | Igual: no hay ruta que escriba un plan |
+| `backoffice_user_estado_conocido` | ⚪ | Los operadores se crean con `npm run operador:backoffice`, que fija el estado. No hay endpoint de alta |
+| `backoffice_user_email_con_forma` | ⚪ | Mismo script, mismo motivo. El correo se valida antes con Zod |
+| `backoffice_session_caduca_despues_de_nacer` | ⚪ | Las dos fechas las pone el repositorio de sesiones |
+| `backoffice_access_log_accion_conocida` | ⚪ | La acción la fija el caso de uso, jamás el cuerpo de la petición |
+| `backoffice_access_log_at_no_es_futuro` | ⚪ | La fecha es `DEFAULT now()` de la base |
+| **`backoffice_access_log_motivo_con_sustancia`** | 🔴 | **`exigirMotivoSuficiente`** en `backoffice/domain/motivo.ts`, con `MotivoInsuficienteError` → 400 |
+
+**La única 🔴 es la que de verdad escribe una persona**, y es además la razón de ser de la tabla. El motivo llega en una cabecera de cada petición cross-tenant y lo teclea el operador: veinte caracteres es una regla que se incumple **escribiendo**, no programando.
+
+Sale como 400 con el mensaje explicando cuántos caracteres faltan, no como 500. Y se comprueba **en el campo del esquema y también en el dominio**: el esquema rechaza la forma, el dominio rechaza el contenido, y ninguno de los dos es un refinamiento de objeto (INC-008).
+
+**Nota sobre el `RAISE EXCEPTION` del `DO $$` de la migración:** no es una guarda de dominio, es una **guarda de despliegue**. Comprueba que el rol `costeo_backoffice` existe antes de conceder privilegios sobre él, y su destinatario es quien migra, no quien usa la API. Falla en alto a propósito: la alternativa —saltarse los `GRANT` en silencio— dejaría el back office sin acceso y se descubriría en producción.
+
+---
+
 ## Cómo se mantiene
 
 Al añadir una migración con `CHECK` o `RAISE EXCEPTION`:

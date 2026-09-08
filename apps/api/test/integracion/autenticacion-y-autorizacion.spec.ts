@@ -78,7 +78,7 @@ describe('autenticacion y autorizacion', () => {
     const hash = await hasher.hash(CONTRASENA);
 
     const company = await unaFila(
-      `INSERT INTO company (name, status, max_locations) VALUES ($1, 'ACTIVE', 10) RETURNING id`,
+      `INSERT INTO company (name, status, plan_code) VALUES ($1, 'ACTIVE', 'BASICO') RETURNING id`,
       [`${prefijo} ${sufijo}`],
     );
 
@@ -335,7 +335,28 @@ describe('autenticacion y autorizacion', () => {
   describe('limite de ubicaciones del plan', () => {
     it('al llegar al maximo, crear devuelve 409 y no crea', async () => {
       const cookie = await entrar(correoDe('otra-admin'));
-      await duena.query(`UPDATE company SET max_locations = 2 WHERE id = $1`, [otra.companyId]);
+
+      // DESDE P11 EL LIMITE VIVE EN EL PLAN, no en una columna de la company que
+      // una prueba pueda bajar a 2. Se llena hasta el tope REAL del plan, que
+      // ademas prueba el camino de verdad: el `FOR UPDATE` sobre la fila de
+      // `company` con el `JOIN` al plan.
+      const { rows: limites } = await duena.query<{ max_locations: number }>(
+        `SELECT p.max_locations FROM company c JOIN plan p ON p.code = c.plan_code WHERE c.id = $1`,
+        [otra.companyId],
+      );
+      const maximo = limites[0]?.max_locations ?? 0;
+
+      const { rows: actuales } = await duena.query<{ total: string }>(
+        `SELECT count(*) AS total FROM location WHERE company_id = $1`,
+        [otra.companyId],
+      );
+      for (let n = Number(actuales[0]?.total ?? '0'); n < maximo; n += 1) {
+        await duena.query(
+          `INSERT INTO location (company_id, name, type, status)
+           VALUES ($1, $2, 'LOCAL', 'ACTIVE')`,
+          [otra.companyId, `Relleno ${String(n)}`],
+        );
+      }
 
       const respuesta = await request(servidor())
         .post('/ubicaciones')
@@ -349,7 +370,7 @@ describe('autenticacion y autorizacion', () => {
         `SELECT count(*) AS total FROM location WHERE company_id = $1`,
         [otra.companyId],
       );
-      expect(rows[0]?.total).toBe('2');
+      expect(Number(rows[0]?.total)).toBe(maximo);
     });
   });
 

@@ -36,6 +36,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { RAIZ, conexionDeSuperusuario, exigir } from './lib/entorno.mjs';
+import { hashDe } from './lib/hashear.mjs';
 import { correr, correrCli } from './lib/proceso.mjs';
 import { aplicarSql, consultar } from './lib/psql.mjs';
 
@@ -49,7 +50,6 @@ const RUTA_GRANTS = resolve(RAIZ, 'docker', 'postgres', 'initdb', 'sql', 'grants
 const RUTA_VOLUMEN = resolve(RAIZ, 'scripts', 'lib', 'volumen.sql');
 const RUTA_INFORME = resolve(RAIZ, 'docs', 'pasos', 'P15');
 const RUTA_MEDIDOR = resolve(RAIZ, 'apps', 'api', 'dist', 'bench.js');
-const RUTA_HASHEADOR = resolve(RAIZ, 'apps', 'api', 'dist', 'hashear.js');
 
 const MS_POR_SEGUNDO = 1000;
 const BYTES_DE_CONTRASENA = 24;
@@ -107,28 +107,6 @@ function anunciar(texto) {
   process.stdout.write(`\n· ${texto}\n`);
 }
 
-/**
- * El hash de la contrasena de bench, calculado con el hasher REAL.
- *
- * No se copia un hash a mano en el SQL del volumen: los parametros de Argon2id
- * viven en un solo sitio (`Argon2Hasher`) y duplicarlos aqui seria tener dos
- * verdades que un dia dejarian de coincidir.
- *
- * @param {string} contrasena
- * @returns {string}
- */
-function hashDe(contrasena) {
-  const resultado = correr(process.execPath, [RUTA_HASHEADOR], {
-    cwd: RAIZ,
-    encoding: 'utf8',
-    input: contrasena,
-  });
-
-  if (resultado.status !== 0) {
-    throw new Error(`No se pudo calcular el hash: ${resultado.stderr ?? ''}`);
-  }
-  return String(resultado.stdout).trim();
-}
 
 /**
  * Base nueva con EXACTAMENTE los privilegios de produccion, antes de migrar.

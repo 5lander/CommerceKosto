@@ -30,10 +30,14 @@ import {
   type UserId,
 } from '../../../shared/domain/identity/identificadores';
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
+import {
+  excedeElLimite,
+  limitesBloqueados,
+} from '../../../shared/infrastructure/persistence/limites-del-plan';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type { GrafoDeItems } from '../domain/ciclos';
 import type { BaseDeLinea, EstadoDeLinea } from '../domain/linea-de-receta';
-import type { ResultadoDeLote } from '../../../shared/application/lote';
+import type { ResultadoDeLoteConLimite } from '../../../shared/application/lote';
 import { clavePorNombre, nombresQueChocan } from '../../../shared/domain/lote/problemas';
 import type {
   ComponenteDeCombo,
@@ -130,6 +134,15 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     readonly categoria: string | null;
   }): Promise<ResultadoDeAltaDeProducto> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
+      // EL LIMITE DEL PLAN, DENTRO DE LA TRANSACCION QUE INSERTA (D5). Contar
+      // fuera seria un TOCTOU; ver `limites-del-plan.ts`.
+      const maximo = excedeElLimite({
+        actuales: await tx.product.count({ where: { companyId: entrada.companyId } }),
+        nuevos: 1,
+        maximo: (await limitesBloqueados(tx, entrada.companyId)).productos,
+      });
+      if (maximo !== null) return { clase: 'limite', maximo };
+
       try {
         const fila = await tx.product.create({
           data: {
@@ -164,8 +177,18 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     readonly companyId: CompanyId;
     readonly locationId: LocationId;
     readonly productos: readonly DatosDeProductoEnLote[];
-  }): Promise<ResultadoDeLote> {
+  }): Promise<ResultadoDeLoteConLimite> {
     return this.transaccion.run(datos.companyId, async (tx) => {
+      // El lote entero contra el limite, antes que nada: importar cien
+      // productos sobre un limite de trescientos con doscientos cincuenta ya
+      // dentro no puede escribir los cincuenta primeros.
+      const maximo = excedeElLimite({
+        actuales: await tx.product.count({ where: { companyId: datos.companyId } }),
+        nuevos: datos.productos.length,
+        maximo: (await limitesBloqueados(tx, datos.companyId)).productos,
+      });
+      if (maximo !== null) return { clase: 'limite', maximo };
+
       const existentes = await tx.product.findMany({
         where: { companyId: datos.companyId },
         select: { name: true },

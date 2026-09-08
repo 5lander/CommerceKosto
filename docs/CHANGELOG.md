@@ -4,6 +4,47 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P11 — Back office · 2026-09-08
+
+**El rol que puentea RLS, con las cuatro condiciones que lo hacen gestionable (ADR-017).**
+
+`costeo_backoffice` es el único rol del sistema con `BYPASSRLS`: una consulta suya ve todos los
+tenants a la vez. SPEC §1 lo eligió a sabiendas por encima de la alternativa —una cuenta dentro de
+cada tenant— y puso tres condiciones. Están las tres, más una cuarta:
+
+1. **Vive solo en su proceso.** `src/backoffice.ts` es un segundo binario; `AppModule` no importa
+   `BackofficeModule`. Montarlo dentro con un guard delante pondría la conexión sin filtro en el
+   mismo contenedor que todos los controladores del cliente, y el guard sería lo único entre eso y
+   una fuga total. Lo verifican 3 reglas de `audit:forbidden`, 2 de `audit:arch` y **una prueba que
+   le pregunta al contenedor de `AppModule` ya construido si la tiene** — con su pareja, que
+   comprueba que el back office **sí**, porque si no la primera pasaría aunque la clase no existiera.
+2. **Pool separado.** Otro proceso, otro cliente, otra cadena, 4 conexiones, sin PgBouncer.
+3. **Registro append-only con motivo obligatorio.** `CHECK` de 20 caracteres en la base, mensaje que
+   dice cuántos faltan en el dominio, y **escrito ANTES de leer y en la misma transacción**: si el
+   INSERT falla, la lectura se revierte. El puerto no tiene un `registrarAcceso()` suelto a
+   propósito — sería una llamada que se puede olvidar.
+4. **Privilegios tabla por tabla y mínimos.** Sin `DELETE` en ninguna, y **sin `SELECT` sobre
+   recetas, precios ni movimientos**: contar ítems no es leer la receta de un cliente (§4.3).
+
+**`audit_log` tiene por fin lector.** Se escribía desde P0 y ningún rol podía leerlo: diez paquetes
+acumulando evidencia sin destinatario, cumpliendo la letra de SEGURIDAD.md §10 y no su propósito.
+
+**D5 cerrada, y con los tres límites VERIFICADOS.** `plan` con `max_locations`, `max_items` y
+`max_products`; `company.max_locations` desaparece. Los tres se hacen cumplir con candado sobre la
+fila de `company` dentro de la transacción que inserta — contar fuera es un TOCTOU. Una columna de
+límite que nadie comprueba aparenta una garantía que no existe, que es lo que le pasó a
+`combo_component` durante seis paquetes.
+
+**La migración se reordenó a mano.** Prisma emitía el `DROP COLUMN "max_locations"` en la primera
+línea, antes de que existiera un plan al que mover el límite; el dato se habría perdido y la pérdida
+habría sido silenciosa porque el valor por defecto coincide. Ahora se crea el plan, se siembra, se
+mueve cada company al plan que de verdad la cubre —fallando en alto si ninguno lo hace— y solo
+entonces se suelta la columna.
+
+Los doce checks en verde, **cero dependencias nuevas**. 585 unitarias + 308 de integración.
+
+---
+
 ## P15 — Endurecimiento · 2026-09-08
 
 **Tres hallazgos, ninguno salido de leer código: los tres salieron de ejecutar algo que hasta ahora

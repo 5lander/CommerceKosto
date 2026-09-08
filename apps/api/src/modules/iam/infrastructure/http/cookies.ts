@@ -55,11 +55,21 @@ export function leerCookie(cabecera: string | undefined, nombre: string): string
   return null;
 }
 
+/**
+ * `nombre` existe desde P11, y por una razon de seguridad y no de comodidad.
+ *
+ * El back office corre en OTRO PROCESO pero, en desarrollo, en el mismo host que
+ * la aplicacion cliente. Dos cookies con el mismo nombre en el mismo host se
+ * pisan: entrar al back office cerraria la sesion de la app y al reves. Peor: la
+ * cookie de un sistema viajaria a las peticiones del otro. Nombres distintos son
+ * lo que mantiene separadas dos identidades que NO deben tocarse.
+ */
 export function cookieDeSesion(entrada: {
   readonly token: string;
   readonly expiraEn: Date;
   readonly ahora: Date;
   readonly seguro: boolean;
+  readonly nombre?: string;
 }): string {
   const segundos = Math.max(
     0,
@@ -67,15 +77,15 @@ export function cookieDeSesion(entrada: {
   );
 
   return atributos([
-    `${COOKIE_DE_SESION}=${encodeURIComponent(entrada.token)}`,
+    `${entrada.nombre ?? COOKIE_DE_SESION}=${encodeURIComponent(entrada.token)}`,
     `Max-Age=${String(segundos)}`,
     entrada.seguro,
   ]);
 }
 
 /** La misma cookie, vaciada y caducada: es como se cierra sesion en el cliente. */
-export function cookieBorrada(seguro: boolean): string {
-  return atributos([`${COOKIE_DE_SESION}=`, 'Max-Age=0', seguro]);
+export function cookieBorrada(seguro: boolean, nombre: string = COOKIE_DE_SESION): string {
+  return atributos([`${nombre}=`, 'Max-Age=0', seguro]);
 }
 
 function atributos(partes: readonly [string, string, boolean]): string {
