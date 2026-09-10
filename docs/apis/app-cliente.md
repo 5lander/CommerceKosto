@@ -26,9 +26,10 @@
 | `CONFLICTO` | 409 | La petición está bien formada; lo que choca es el estado que ya hay (un nombre repetido) |
 | `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos. Escala: 1 → 5 → 15 → 60 min |
 | `TOO_MANY_REQUESTS` | 429 | El limitador de peticiones. **No es lo mismo** que el anterior |
+| `LIMITE_DE_SOLICITUDES` | 429 | Demasiadas veces la **misma solicitud**: olvido, restablecimiento, invitar o reenviar, por IP o por destinatario. Trae `Retry-After` en segundos y el minuto en el mensaje *(P16-A1)* |
 | `INTERNAL_ERROR` | 5xx | Fallo inesperado. Cita `x-correlation-id` en el ticket |
 
-Los dos 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dice «espera un momento», el otro «tu cuenta está bloqueada».
+Los tres 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dice «espera un momento», otro «tu cuenta está bloqueada» y el tercero «ya pediste esto demasiadas veces». **La IP que cuenta es la del cliente, no la del proxy**: detrás de Caddy se toma el último salto de `X-Forwarded-For` solo porque Caddy está en `PROXY_DE_CONFIANZA`; una cabecera falseada desde fuera no cambia nada (D-16.49).
 
 ---
 
@@ -44,7 +45,7 @@ Los dos 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dic
 
 **El token no viaja en el cuerpo.** Devolverlo además en el JSON anularía el `HttpOnly`: cualquier script de la página podría leerlo de la respuesta.
 
-**401** con el mismo cuerpo exista o no la cuenta, y con el mismo coste en tiempo. **429** `ACCESO_BLOQUEADO` tras cinco fallos de la cuenta en quince minutos.
+**401** con el mismo cuerpo exista o no la cuenta, y con el mismo coste en tiempo. **429** `ACCESO_BLOQUEADO` tras cinco fallos de la cuenta en quince minutos. Con el quinto fallo se **encola** un aviso al titular (`email_outbox`, plantilla `BLOQUEO`, sin enlace y sin datos); lo entrega el despachador, como los demás correos *(P16-A1; antes salía de la API por `MailerPort`, que en producción es `fake`)*.
 
 ### `POST /auth/logout` — sesión
 
@@ -59,6 +60,28 @@ Los dos 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dic
 **200** → `{ "sesionesRevocadas": 3 }`. Revoca **todas** las sesiones, la que hace la petición incluida: hay que volver a entrar. La contraseña actual se exige aunque ya haya sesión, para que una sesión robada no deje al titular fuera de su cuenta.
 
 La nueva debe tener 12–128 caracteres, no estar en la lista de filtradas y no contener la parte local del correo. **No hay reglas de composición**: `Password1!` está en cualquier diccionario.
+
+### `POST /auth/password/olvido` — público *(P16-A1)*
+
+```json
+{ "email": "ana@snacklab.ec" }
+```
+
+**202, siempre, con cuerpo vacío** — exista o no el correo, y con el mismo trabajo en los dos casos: la API genera el token, calcula la caducidad y llama a la base; es la función `password_reset_request` la que decide, sin decirlo, si hay un usuario **activo** detrás. Si lo hay, se crea el token (hasheado) y se **encola** un correo con el enlace `APP_URL/restablecer?token=…`, que caduca en `HORAS_DE_RESTABLECIMIENTO` (1 por defecto) y sirve **una sola vez**. Un invitado que aún no activó no recibe nada: no tiene contraseña que restablecer, tiene una invitación.
+
+El correo lo entrega el despachador, no esta petición: un 202 dice «encolado», no «enviado». **400** `ENTRADA_INVALIDA` ante cualquier clave de más. **429** `LIMITE_DE_SOLICITUDES` a partir del undécimo por IP en una hora o del cuarto para el mismo correo (exista o no), con `Retry-After`; el golpe cuenta aunque la respuesta sea 202 (D-16.50).
+
+**Lo que el tiempo sí delata, y cuánto.** La respuesta es idéntica y el trabajo en Node también; lo que difiere es lo que la base hace por dentro: con usuario, dos `INSERT` más (milisegundos). Ese residuo no se disimula: lo acota el límite de tasa (10/h por IP, 3/h por destinatario), que impide muestrearlo, y una prueba fija que la diferencia de medianas se queda por debajo de lo que cuesta un hash (ADR-025).
+
+### `POST /auth/password/restablecimiento` — público *(P16-A1)*
+
+```json
+{ "token": "…", "contrasena": "pimientos del piquillo asados" }
+```
+
+**204.** Gasta el token, guarda la contraseña nueva y **revoca todas las sesiones** del usuario (SEGURIDAD.md §2.2): la que hubiera abierta en otro navegador deja de valer en la siguiente petición. No devuelve cuántas eran; quien restablece no tenía sesión.
+
+**400** `ENTRADA_INVALIDA` con el mismo mensaje para token vacío, inexistente, **ya usado** o **caducado** — los cuatro son indistinguibles a propósito. El mismo código, con su mensaje propio, si la contraseña no cumple la política (las mismas reglas que en `POST /auth/password`). **El token se gasta antes de mirar la contraseña**: una contraseña débil obliga a pedir otro enlace. Es el orden que impide reutilizar un token contra el que ya se falló. **429** `LIMITE_DE_SOLICITUDES` a partir del undécimo intento por IP en una hora, cuenten como cuenten los anteriores (diez tokens inválidos son diez golpes), y **antes** de tocar el token.
 
 ---
 
@@ -86,7 +109,13 @@ La nueva debe tener 12–128 caracteres, no estar en la lista de filtradas y no 
 { "email": "nuevo@snacklab.ec" }
 ```
 
-**202**, siempre, con cuerpo vacío. **No dice si el correo ya existe**: la unicidad es global, y una respuesta franca convertiría el endpoint en un oráculo para averiguar quién más usa el sistema. Si el correo estaba libre, se envía una invitación con un código de un solo uso que caduca en siete días.
+**202**, siempre, con cuerpo vacío. **No dice si el correo ya existe**: la unicidad es global, y una respuesta franca convertiría el endpoint en un oráculo para averiguar quién más usa el sistema. Si el correo estaba libre, se crea el invitado y **se encola** —en la misma transacción, `email_outbox`— una invitación con el enlace `APP_URL/activacion?token=…`, de un solo uso, que caduca en siete días *(desde P16-A1; antes el correo llevaba el token pelado y se enviaba fuera de la transacción)*. Si el correo no estaba libre no se encola nada. **429** `LIMITE_DE_SOLICITUDES` a partir de la trigésimo primera invitación por IP en una hora o de la cuarta al mismo correo, aunque haya sesión: un administrador con la cuenta robada es justamente quien inundaría un buzón (D-16.50).
+
+### `POST /usuarios/:id/reenvio-de-invitacion` — `user.invite` *(P16-A1)*
+
+Sin cuerpo. **202**: el invitado recibe un enlace **nuevo** y **el anterior deja de servir** (el token se sustituye; `app_user` tiene como mucho una invitación viva). Se encola otro correo, con la misma caducidad de siete días contada desde ahora.
+
+**404** `RECURSO_NO_ENCONTRADO` si el usuario no está **invitado en tu company**: ya activó, no existe, o existe en otra company — los tres iguales. **400** `BAD_REQUEST` si `:id` no es un UUID. Mismo permiso que invitar: es la misma acción, repetida. **429** `LIMITE_DE_SOLICITUDES` a partir del trigésimo primer reenvío por IP en una hora (los 404 también cuentan) o del cuarto al mismo invitado.
 
 ### `POST /usuarios/activacion` — público
 
@@ -159,7 +188,7 @@ Los ítems de la company. Por defecto solo los activos.
 
 ### `GET /catalogo/articulos?itemId=…` — `catalog.read`
 
-Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem.
+Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem. Cada uno trae su `ivaTarifa` *(P16-A1)*.
 
 ### `POST /catalogo/articulos` — `catalog.create`
 
@@ -171,9 +200,12 @@ Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina so
   "proveedor": null,
   "presentacion": "2",
   "unidadDePresentacion": "kg",
-  "factorExplicito": null
+  "factorExplicito": null,
+  "ivaTarifa": "0"
 }
 ```
+
+**`ivaTarifa` es obligatoria y es DEL ARTÍCULO** *(P16-A1, D-16.9)*: la factura del saco de harina dice 0 % y la del detergente 15 %, y ninguna company tiene «una» tarifa. Es una fracción —`"0.15"`, nunca `"15"`— y se valida en el campo: **400** si falta o no está entre 0 y 1. Los artículos anteriores a P16-A1 nacieron con `0.15` de **semilla, no de verdad**: se corrigen con el `PUT` de abajo.
 
 **`factorDeConversion` no se manda: lo calcula el servidor.** Cuando la presentación y la unidad de uso del ítem comparten dimensión —kg y g— el factor sale de la física: 2 kg medidos en gramos son 2000. Mandar uno explícito en ese caso es **400**, no una preferencia: un saco de 2 kg con «factor 1500» escrito a mano produce un costo por gramo un 33 % más alto y el número es plausible en pantalla.
 
@@ -181,13 +213,29 @@ Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina so
 
 **201** con `{ id }`. **404** si el ítem no existe en tu company. **409** si el nombre ya existe.
 
+### `PUT /catalogo/articulos/:id` — `catalog.update` *(P16-A1)*
+
+```json
+{ "nombre": "Harina Ya 2kg", "marca": "Ya", "proveedor": null, "ivaTarifa": "0", "estado": "ACTIVE" }
+```
+
+**204.** Estado completo de lo editable, como en los ítems. **La presentación, su unidad y el factor no se cambian**: son lo que convierte cada compra histórica a unidades de uso, y cambiarlos reescribiría meses cerrados. Si el saco pasa de 2 kg a 2,5 kg, es otro artículo. **400** tarifa fuera de 0..1 · **404** no existe en tu company · **409** nombre repetido.
+
 ### `GET /catalogo/grupos` · `POST /catalogo/grupos` — `catalog.read` / `catalog.create`
 
 ```json
-{ "nombre": "Lácteos" }
+{ "nombre": "Lácteos", "ivaTarifa": "0" }
 ```
 
-**201** con `{ id }`. **409** si ya existe.
+**201** con `{ id }`. **409** si ya existe. `ivaTarifa` es opcional (`null` u omitida = «el grupo no define»): es la tarifa que heredan las **compras sin artículo** de los ítems del grupo. La lista devuelve `{ id, nombre, ivaTarifa }`.
+
+### `PUT /catalogo/grupos/:id` — `catalog.update` *(P16-A1)*
+
+```json
+{ "nombre": "Lácteos y huevos", "ivaTarifa": null }
+```
+
+**204.** Aquí `ivaTarifa` es obligatoria (anulable): es un `PUT`. **404** · **409** como arriba.
 
 ---
 
@@ -231,9 +279,11 @@ El historial completo de un ítem, del más reciente al más antiguo, con estado
 
 **201** con `{ id }`. Nace en estado `SUGGESTED`: **no cuenta para ningún costo** hasta que alguien lo confirme.
 
-**`ivaCompra` es la tasa de ESE precio, no la de la company.** El SPEC nombra `iva_compra` en la fórmula de §12 y no dice dónde vive; vive aquí porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %: una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. Si se omite, se usa la de `company_settings` como valor por defecto.
+**`ivaCompra` es la tasa de ESE precio, no la de la company.** El SPEC nombra `iva_compra` en la fórmula de §12 y no dice dónde vive; vive aquí porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %: una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. **Con `null` se toma la del artículo o, sin artículo, la del grupo del ítem; sin ninguna, 400** *(P16-A1, D-16.43: ya no hay valor por defecto de company)*.
 
 **`purchaseArticleId` es obligatorio para un ítem `COMPRADO` y prohibido para uno `PRODUCIDO`** — **400** en los dos casos, con el motivo. Un importe sin presentación no dice nada: «2.30» solo significa algo junto a «el saco de 2 kg». Una preparación producida no se compra: su precio es el costo estándar por unidad de uso (**R10**).
+
+**Y una preparación no lleva IVA de compra** *(P16-A1, D-16.51)*: su `ivaCompra` nace **`"0"`** ignore lo que diga su grupo —el costo estándar ya es neto, y netearlo otra vez subcostearía el plato—, y mandar cualquier tarifa distinta de cero es **400** con el motivo. `null` y `"0"` son las dos formas válidas. Lo mismo en el CSV `PRECIOS`: la columna `iva` de una preparación va vacía o en `0`.
 
 **`origen`**: `MANUAL` · `ULTIMA_COMPRA` · `EXTERNO`. El tercero existe y no se usa: deja la puerta abierta sin acoplar nada (D8).
 
@@ -470,7 +520,14 @@ El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
       "id": "…",
       "tipo": "COMPRA",
       "cantidad": "10.000000000000",
-      "costoTotal": "25.000000000000",
+      "costoTotal": "100.000000000000",     // en una COMPRA con desglose, el NETO
+      // P16-A1: los cuatro importes de una COMPRA nueva (D-16.10). Una fila
+      // anterior, o una MERMA/AJUSTE, trae "desglose": "SIN_DESGLOSE" y NINGUNO
+      // de los tres campos siguientes — ausentes, no en null.
+      "desglose": "CONOCIDO",
+      "totalBruto": "115.000000000000",
+      "ivaTarifaAplicada": "0.150000000000",
+      "ivaRecuperableAplicado": true,
       // Cuándo ocurrió en el negocio, y cuándo entró al libro. La diferencia
       // dice cuánto se tardó en registrar, que es dato de auditoría.
       "occurredAt": "2026-03-15T00:00:00.000Z",
@@ -496,8 +553,9 @@ Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el si
   "itemId": "…",
   "tipo": "COMPRA",              // COMPRA · MERMA · AJUSTE
   "cantidad": "10",              // "-2" solo válido en AJUSTE
-  "costoTotal": "25.00",         // obligatorio en COMPRA; de ahí sale SPEC §16
+  "costoTotal": "115.00",        // obligatorio en COMPRA: EL TOTAL DE LA FACTURA, CON IVA
   "purchaseArticleId": "…",      // solo en COMPRA: en qué presentación se compró
+  "ivaTarifa": null,             // solo en COMPRA, opcional: manda sobre artículo y grupo
   "occurredAt": "2026-03-15T00:00:00.000Z",
   "note": null
 }
@@ -505,9 +563,11 @@ Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el si
 
 → `201 { "id": "…" }` — **y nada más.** Ver la nota de cabecera.
 
+**Una `COMPRA` se netea al entrar** *(P16-A1, D-16.9, D-16.10)*. El bodeguero teclea el total de la factura; la tarifa sale de **cuerpo > artículo > grupo del ítem**, la recuperabilidad de `GET /ajustes`, y el libro guarda los cuatro importes: bruto, tarifa aplicada, recuperabilidad aplicada y `total_cost` = neto (`neto = recuperable ? bruto / (1 + tarifa) : bruto`, SPEC §12). Son la foto del momento: cambiar el ajuste después no reescribe el libro. **Nunca se asume una tarifa**: sin ninguna, **400** con el mensaje que dice dónde ponerla.
+
 | Error | Cuándo |
 |---|---|
-| `400` | cantidad cero · signo contrario al tipo · fecha futura (con un minuto de holgura de reloj) · `COMPRA` sin importe |
+| `400` | cantidad cero · signo contrario al tipo · fecha futura (con un minuto de holgura de reloj) · `COMPRA` sin importe · **`COMPRA` sin tarifa de IVA en ningún nivel** · `ivaTarifa` fuera de 0..1 o en un tipo que no es `COMPRA` · artículo de otro ítem |
 | `403` | la ubicación no está en tu alcance |
 | `404` | el ítem no existe en tu company |
 
@@ -515,7 +575,7 @@ Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el si
 
 **R3, la única forma de deshacer.** Inserta un movimiento **del mismo tipo**, de cantidad e importe invertidos, con la **fecha del original** — corregir es decir «esto que registré el día 3 no pasó», y ponerle fecha de hoy dejaría el saldo del día 3 mal para siempre.
 
-Que conserve el tipo no es un detalle: es lo que hace que `compras_del_mes` (SPEC §16) se cancele sola.
+Que conserve el tipo no es un detalle: es lo que hace que `compras_del_mes` (SPEC §16) se cancele sola. **Y copia el desglose entero** *(P16-A1, D-16.41)*: la corrección de una compra con los cuatro importes lleva los cuatro, así Σ(bruto) del mes se cancela igual que Σ(neto).
 
 ```jsonc
 { "note": "me equivoqué de bodega" }

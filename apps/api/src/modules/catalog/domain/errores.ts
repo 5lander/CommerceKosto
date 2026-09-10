@@ -47,3 +47,19 @@ export class LoteDeCatalogoInvalidoError extends EntradaDeCatalogoInvalidaError 
     super(mensajeDeProblemas(problemas));
   }
 }
+
+export class ArticuloNoEncontradoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+
+  public constructor() {
+    super('Ese artículo de compra no existe en tu company.');
+  }
+}
+
+export class GrupoNoEncontradoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+
+  public constructor() {
+    super('Ese grupo no existe en tu company.');
+  }
+}

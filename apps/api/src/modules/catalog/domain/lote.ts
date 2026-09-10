@@ -20,6 +20,7 @@
  * ES DOMINIO PURO.
  */
 
+import { motivoDeTarifaInvalida } from '../../../shared/domain/iva/tarifa';
 import {
   PRIMERA_POSICION,
   clavePorNombre,
@@ -103,6 +104,11 @@ export interface ArticuloDelLote {
   readonly presentacion: string;
   readonly unidadDePresentacion: string;
   readonly factorExplicito: string | null;
+  /**
+   * La tarifa de IVA de la fila (D-16.44). `null` = el archivo no la trae, y
+   * entonces manda la del grupo del ítem; sin ninguna, la fila se rechaza.
+   */
+  readonly ivaTarifa: string | null;
 }
 
 /**
@@ -154,5 +160,6 @@ function motivoDelArticulo(articulo: ArticuloDelLote): string | null {
     return `El factor de conversión «${articulo.factorExplicito}» no es un número.`;
   }
 
-  return null;
+  // Una tarifa es una fracción: 0.15, no 15 (`purchase_article_iva_tarifa_es_fraccion`).
+  return articulo.ivaTarifa === null ? null : motivoDeTarifaInvalida(articulo.ivaTarifa);
 }

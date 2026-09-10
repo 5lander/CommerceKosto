@@ -63,6 +63,7 @@ export function comoArticulo(fila: FilaValida): ArticuloDelLote {
     presentacion: leer(fila.valores, 'presentacion'),
     unidadDePresentacion: leer(fila.valores, 'unidadDePresentacion'),
     factorExplicito: opcional(fila.valores, 'factorExplicito'),
+    ivaTarifa: opcional(fila.valores, 'ivaTarifa'),
   };
 }
 
@@ -104,6 +105,7 @@ export function comoMovimiento(fila: FilaValida): MovimientoDelLote {
     tipo: leer(fila.valores, 'tipo').toUpperCase() as TipoDeMovimiento,
     cantidad: leer(fila.valores, 'cantidad'),
     costoTotal: opcional(fila.valores, 'costoTotal'),
+    ivaTarifa: opcional(fila.valores, 'ivaTarifa'),
     occurredAt: comoInstante(leer(fila.valores, 'fecha')),
     note: null,
   };

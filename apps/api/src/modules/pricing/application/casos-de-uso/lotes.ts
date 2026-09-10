@@ -9,8 +9,12 @@
  * pasa por los puertos que `catalog` publica —`ListarItems`, `ListarArticulos`—,
  * que es exactamente la razón de que existan.
  *
- * **DOS LECTURAS PARA TODO EL LOTE, NO DOS POR FILA.** Con 149 precios, la
- * versión ingenua son 298 consultas.
+ * **TRES LECTURAS PARA TODO EL LOTE, NO TRES POR FILA.** Con 149 precios, la
+ * versión ingenua son 447 consultas.
+ *
+ * **LA TARIFA DE IVA: FILA > ARTÍCULO > GRUPO, Y SIN NINGUNA LA FILA SE
+ * RECHAZA** (D-16.43, D-16.44). El default de la company desapareció en P16-A1.
+ * Una preparación no entra en esa precedencia: su tarifa es cero (D-16.51).
  */
 
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
@@ -21,16 +25,21 @@ import {
   type ProblemaDelLote,
 } from '../../../../shared/domain/lote/problemas';
 import type { ItemId, PurchaseArticleId } from '../../../../shared/domain/identity/identificadores';
+import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import type { ListarArticulos } from '../../../catalog/application/casos-de-uso/articulos';
-import type { ListarItems } from '../../../catalog/application/casos-de-uso/items';
+import type { ListarGrupos, ListarItems } from '../../../catalog/application/casos-de-uso/items';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { LoteDePreciosInvalidoError } from '../../domain/errores';
-import { ivaDeLaCompany } from './precios';
 import { problemasDelLoteDePrecios, type PrecioDelLote } from '../../domain/lote';
+import { TARIFA_DE_PREPARACION, motivoDeIvaEnPreparacion } from '../../domain/preparacion';
 import type {
   DatosDePrecioEnLote,
   RepositorioDePrecios,
 } from '../ports/repositorio-de-precios.port';
+
+/** El tipo de ítem cuyo precio es un costo estándar, no una compra (R10). */
+const PRODUCIDO = 'PRODUCIDO';
 
 export interface DependenciasDeLotesDePrecios {
   readonly repositorio: RepositorioDePrecios;
@@ -38,6 +47,7 @@ export interface DependenciasDeLotesDePrecios {
   readonly reloj: Reloj;
   readonly listarItems: ListarItems;
   readonly listarArticulos: ListarArticulos;
+  readonly listarGrupos: ListarGrupos;
 }
 
 export interface DatosDelLoteDePrecios {
@@ -51,9 +61,21 @@ export interface DatosDelLoteDePrecios {
   readonly confirmar: boolean;
 }
 
+interface ItemDelCatalogo {
+  readonly id: ItemId;
+  readonly tipo: string;
+  /** La tarifa del grupo del ítem; `null` sin grupo o si el grupo no define. */
+  readonly ivaTarifaDelGrupo: string | null;
+}
+
+interface ArticuloDelCatalogo {
+  readonly id: PurchaseArticleId;
+  readonly ivaTarifa: string;
+}
+
 interface Catalogo {
-  readonly items: ReadonlyMap<string, { readonly id: ItemId; readonly tipo: string }>;
-  readonly articulos: ReadonlyMap<string, PurchaseArticleId>;
+  readonly items: ReadonlyMap<string, ItemDelCatalogo>;
+  readonly articulos: ReadonlyMap<string, ArticuloDelCatalogo>;
 }
 
 export class SugerirPreciosEnLote {
@@ -64,11 +86,7 @@ export class SugerirPreciosEnLote {
     if (problemas.length > 0) throw new LoteDePreciosInvalidoError(problemas);
 
     const catalogo = await this.leerCatalogo(sesion);
-    // La tasa de la company es solo el valor POR DEFECTO: la de la factura
-    // manda sobre ella. En Ecuador el alimento sin procesar es 0 % y el
-    // detergente 15 %, así que una única tasa estaría mal para uno de los dos.
-    const iva = await ivaDeLaCompany(this.deps.repositorio, sesion.companyId);
-    const resueltos = resolver(datos.precios, catalogo, iva);
+    const resueltos = resolver(datos.precios, catalogo);
 
     const filas = await this.deps.repositorio.sugerirEnLote({
       companyId: sesion.companyId,
@@ -94,12 +112,27 @@ export class SugerirPreciosEnLote {
   }
 
   private async leerCatalogo(sesion: SesionActiva): Promise<Catalogo> {
-    const items = await this.deps.listarItems.ejecutar(sesion, false);
-    const articulos = await this.deps.listarArticulos.ejecutar(sesion, null);
+    const [items, articulos, grupos] = await Promise.all([
+      this.deps.listarItems.ejecutar(sesion, false),
+      this.deps.listarArticulos.ejecutar(sesion, null),
+      this.deps.listarGrupos.ejecutar(sesion),
+    ]);
+    const tarifaDeGrupo = new Map<string, string | null>(grupos.map((g) => [g.id, g.ivaTarifa]));
 
     return {
-      items: new Map(items.map((i) => [clavePorNombre(i.nombre), { id: i.id, tipo: i.tipo }])),
-      articulos: new Map(articulos.map((a) => [clavePorNombre(a.nombre), a.id])),
+      items: new Map(
+        items.map((i) => [
+          clavePorNombre(i.nombre),
+          {
+            id: i.id,
+            tipo: i.tipo,
+            ivaTarifaDelGrupo: i.grupoId === null ? null : (tarifaDeGrupo.get(i.grupoId) ?? null),
+          },
+        ]),
+      ),
+      articulos: new Map(
+        articulos.map((a) => [clavePorNombre(a.nombre), { id: a.id, ivaTarifa: a.ivaTarifa }]),
+      ),
     };
   }
 }
@@ -113,13 +146,12 @@ export class SugerirPreciosEnLote {
 function resolver(
   precios: readonly PrecioDelLote[],
   catalogo: Catalogo,
-  ivaPorDefecto: string,
 ): readonly DatosDePrecioEnLote[] {
   const problemas: ProblemaDelLote[] = [];
   const resueltos: DatosDePrecioEnLote[] = [];
 
   for (const [indice, precio] of precios.entries()) {
-    const resuelto = resolverUno(precio, catalogo, ivaPorDefecto);
+    const resuelto = resolverUno(precio, catalogo);
     if (typeof resuelto === 'string') {
       problemas.push({ posicion: indice + PRIMERA_POSICION, motivo: resuelto });
       continue;
@@ -149,48 +181,85 @@ function resolver(
  * es una cadena.** Con tipos marcados eso pasa más de lo que parece.
  */
 type ArticuloResuelto =
-  | { readonly clase: 'ok'; readonly id: PurchaseArticleId | null }
+  | { readonly clase: 'ok'; readonly articulo: ArticuloDelCatalogo | null }
   | { readonly clase: 'falta'; readonly motivo: string };
 
 /** El precio resuelto, o el motivo por el que no se puede. */
-function resolverUno(
-  precio: PrecioDelLote,
-  catalogo: Catalogo,
-  ivaPorDefecto: string,
-): DatosDePrecioEnLote | string {
+function resolverUno(precio: PrecioDelLote, catalogo: Catalogo): DatosDePrecioEnLote | string {
   const item = catalogo.items.get(clavePorNombre(precio.item));
   if (item === undefined) return `No existe ningún ítem llamado «${precio.item.trim()}».`;
 
-  const articulo = articuloDe(precio, catalogo);
-  if (articulo.clase === 'falta') return articulo.motivo;
+  const resuelto = articuloDe(precio, catalogo);
+  if (resuelto.clase === 'falta') return resuelto.motivo;
+  const articulo = resuelto.articulo;
 
-  const coherencia = motivoDeIncoherencia(item.tipo, articulo.id);
+  const coherencia = motivoDeIncoherencia(item.tipo, articulo?.id ?? null);
   if (coherencia !== null) return coherencia;
 
+  return conTarifa(precio, { item, articulo });
+}
+
+interface PrecioResuelto {
+  readonly item: ItemDelCatalogo;
+  readonly articulo: ArticuloDelCatalogo | null;
+}
+
+/**
+ * El último escalón: la tarifa, o el motivo de que no haya. Una preparación
+ * ignora artículo y grupo: su precio es un costo estándar ya neto (R10), y solo
+ * admite «0» o nada (D-16.51). El resto va por la precedencia.
+ */
+function conTarifa(precio: PrecioDelLote, resuelto: PrecioResuelto): DatosDePrecioEnLote | string {
+  if (resuelto.item.tipo === PRODUCIDO) {
+    return (
+      motivoDeIvaEnPreparacion(precio.ivaCompra) ?? conIva(precio, resuelto, TARIFA_DE_PREPARACION)
+    );
+  }
+
+  const ivaCompra = elegirTarifa({
+    cuerpo: precio.ivaCompra,
+    articulo: resuelto.articulo?.ivaTarifa ?? null,
+    grupo: resuelto.item.ivaTarifaDelGrupo,
+  });
+  if (ivaCompra === null) return motivoSinTarifa(precio.item);
+
+  return conIva(precio, resuelto, exigirTarifaValida(ivaCompra).toStorageString());
+}
+
+function conIva(
+  precio: PrecioDelLote,
+  resuelto: PrecioResuelto,
+  ivaCompra: string,
+): DatosDePrecioEnLote {
   return {
-    itemId: item.id,
-    purchaseArticleId: articulo.id,
+    itemId: resuelto.item.id,
+    purchaseArticleId: resuelto.articulo?.id ?? null,
     precio: precio.precio,
-    ivaCompra: precio.ivaCompra ?? ivaPorDefecto,
+    ivaCompra,
     origen: precio.origen,
     nota: precio.nota,
   };
 }
 
+/** «Nunca 0.15» vale también para el importador: el mensaje dice dónde ponerla. */
+function motivoSinTarifa(item: string): string {
+  return `Falta la tarifa de IVA de este precio: ponla en la columna «iva» del archivo, en el artículo o en el grupo de «${item.trim()}». Nunca se asume una.`;
+}
+
 function articuloDe(precio: PrecioDelLote, catalogo: Catalogo): ArticuloResuelto {
   // Una preparación PRODUCIDA no se compra: su precio es el costo estándar por
   // unidad de uso y no lleva artículo (R10). Eso es un éxito, no una falta.
-  if (precio.articulo === null) return { clase: 'ok', id: null };
+  if (precio.articulo === null) return { clase: 'ok', articulo: null };
 
-  const id = catalogo.articulos.get(clavePorNombre(precio.articulo));
-  if (id === undefined) {
+  const articulo = catalogo.articulos.get(clavePorNombre(precio.articulo));
+  if (articulo === undefined) {
     return {
       clase: 'falta',
       motivo: `No existe ningún artículo de compra llamado «${precio.articulo.trim()}».`,
     };
   }
 
-  return { clase: 'ok', id };
+  return { clase: 'ok', articulo };
 }
 
 /**
@@ -202,7 +271,7 @@ function motivoDeIncoherencia(tipo: string, articulo: PurchaseArticleId | null):
   if (tipo === 'COMPRADO' && articulo === null) {
     return 'El precio de un ítem comprado necesita su artículo: un importe sin presentación no dice cuánto cuesta la unidad de uso.';
   }
-  if (tipo === 'PRODUCIDO' && articulo !== null) {
+  if (tipo === PRODUCIDO && articulo !== null) {
     return 'Una preparación producida no se compra: su precio es el costo estándar por unidad de uso, sin artículo (R10).';
   }
   return null;

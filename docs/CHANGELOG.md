@@ -4,6 +4,97 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-A1 — El IVA en dos niveles, el correo que llega, y el límite que limita de verdad · 2026-09-10
+
+> Primer paquete de código de la pasada P16 → P20. Un commit, dos migraciones reversibles
+> (`20260910012847_p16a1_iva_de_compra`, `20260910042649_p16a1_correo_y_limite_de_tasa`), tres ADR
+> (024, 025, 026), una incidencia (INC-022) y cuatro revisiones adversariales por etapa, con 19
+> hallazgos atendidos, uno de ellos crítico.
+
+**El libro ya sabe de IVA, y nunca asume 0.15 (ADR-024).** El bodeguero teclea el total de la
+factura con IVA; la tarifa es del artículo de compra (`purchase_article.iva_tarifa`, obligatoria) o,
+sin artículo, del grupo del ítem (`item_group.iva_tarifa`, opcional); la recuperabilidad sigue siendo
+de la company (R13). Cada `COMPRA` nueva persiste los cuatro importes —bruto, tarifa aplicada,
+recuperabilidad aplicada y `total_cost` como neto— con `desglose_conocido = true`; las anteriores
+**no se rellenan** y quedan «sin desglose», con la discontinuidad de `compras_del_mes` dicha y no
+escondida. Sin tarifa en ningún nivel, 400 con el sitio donde ponerla. `company_settings.iva_compra`
+dejó de leerse (se retira en P16-B). La fórmula y la precedencia viven una sola vez en
+`shared/domain/iva/`. Para poder corregir la semilla 0.15: `PUT /catalogo/articulos/:id` y
+`PUT /catalogo/grupos/:id`; `ivaTarifa` en artículos, grupos, movimientos y en los CSV `ARTICULOS`,
+`MOVIMIENTOS` y `PRECIOS` (una fila sin tarifa, o con un 15 donde va 0.15, se rechaza en el análisis
+con su número). **Una preparación no lleva IVA de compra (D-16.51, pendiente de ratificar):** nacía
+con la tarifa del grupo y su costo estándar —ya neto— se dividía otra vez entre 1.15.
+
+**El correo transaccional (ADR-025).** La API **encola y no envía**: `email_outbox` se escribe en la
+misma transacción que la invitación (también el reenvío, el restablecimiento y el aviso de bloqueo
+del login, que en producción no existía). Entrega un **tercer binario**, el despachador
+(`despachador.ts`, servicio `correo`, `npm run correo:despachar`), con su propio rol
+`costeo_despachador` (`NOBYPASSRLS`, ve exactamente dos tablas; `npm run rol:despachador`;
+`desplegar.sh` lo crea en el paso 5/8 antes de migrar) y tres adaptadores: `fake`, `consola` y
+**`resend`** (HTTP, sin SDK, probado contra un `fetch` falso; en producción `fake` no arranca). Cola con
+`FOR UPDATE SKIP LOCKED` **más una reserva** renovada fila a fila —el bloqueo de fila muere al
+confirmar y el envío ocurre fuera—, reintentos 1 → 2 → 4 → 8 min y `FALLIDO` al quinto, `datos`
+saneado al cerrar el correo, cierre ordenado sin `enableShutdownHooks()` (regla nueva de
+`audit:forbidden`), purga de `rate_limit_hit`, latido como `healthcheck` y `GET /correo/salud` en el
+back office. **Restablecimiento de contraseña sin sesión** (`POST /auth/password/olvido`, 202
+siempre; `POST /auth/password/restablecimiento`, revoca todas las sesiones) por las **dos únicas
+funciones `SECURITY DEFINER` que escriben**; `password_reset_token` invisible para la app. **El
+token en claro vive solo en `email_outbox.datos` mientras el correo está en vuelo, y solo el
+despachador puede leer esa columna** (`SELECT` por columnas para la app y el back office). Reenvío
+de invitación (`POST /usuarios/:id/reenvio-de-invitacion`); enlaces `APP_URL/activacion?token=…` y
+`APP_URL/restablecer?token=…`; `HORAS_DE_RESTABLECIMIENTO = 1`.
+
+**El límite de tasa y la IP del cliente tras el proxy (ADR-026, INC-022).** Detrás de Caddy toda
+petición llegaba con la IP de Caddy y el bloqueo por IP del login habría sido un bloqueo de
+**todos**. Un solo camino, `ipDelCliente`: cree el último salto de `X-Forwarded-For` solo si el socket
+está en `PROXY_DE_CONFIANZA` (vacía en desarrollo; la IP fija de Caddy `172.28.0.10` dentro de la
+subred fija `172.28.0.0/24` en producción), y lo usan el login, el back office, el limitador global
+(`LimitadorGlobalGuard`) y el límite nuevo. `LimitadorDeTasa` protege `/olvido` (IP 10/h ·
+destinatario 3/h), `/restablecimiento` (IP 10/h), `POST /usuarios` y el reenvío (IP 30/h ·
+destinatario 3/h) con la regla del login generalizada a `shared/domain/acceso` (sus 23 pruebas, sin
+cambios); `rate_limit_hit` sin tenant como `login_attempt` (exención de ámbito, M6 sigue vacía),
+claves `ip:` o `correo:<sha256>`, y el tercer 429 del sistema: `LIMITE_DE_SOLICITUDES` con
+`Retry-After`. **Contar y anotar son una transacción por clave bajo `pg_advisory_xact_lock`**: la
+primera versión dejaba pasar todas las peticiones simultáneas (30 de 30), y la 🔴 que lo fija las
+lanza en paralelo.
+
+**Lo que destaparon las cuatro revisiones adversariales**, todo atendido: `datos` legible por la app
+y el back office; el «tiempo constante» de `/olvido` prometido y no medido (ahora reconocido, acotado
+y medido por medianas); tres 🔴 ausentes (atomicidad en la otra dirección, token fuera de
+`audit_log` leído con el rol que sí ve el log, privilegios negados a la app); `ci.yml` sin las
+variables del back office **desde P11**; el aviso de bloqueo por `MailerPort` desde la API; el cierre
+del despachador que mataba el proceso a media pasada; `enviar` y `marcarEnviado` en el mismo `try`;
+la reserva que no cubría un lote grande; `desplegar.sh` sin crear los roles; el límite que no
+limitaba bajo concurrencia (crítico); la lectura sin tope; un evento de auditoría por rechazo; y
+`PROXY_DE_CONFIANZA` con la subred entera (pasarela y contenedores incluidos).
+
+**Números.** Unitarias: **823** (eran 585, +238; 57 archivos). Integración: **400 casos, 395 en
+verde y 5 saltadas con motivo** (INC-016) en 30 archivos (eran 313; +6 suites: `iva-de-compra`,
+`correo-transaccional`, `correo-despachador`, `backoffice-correo`, `limite-de-tasa`,
+`ip-tras-el-proxy`). `audit:forbidden` 44 reglas sobre 433 archivos (eran 40 / 361); `audit:arch`
+351 módulos; 15 migraciones; 0 clones. `migrate:verify` 4/4 en las dos migraciones y `down` +
+`deploy` sobre la base sembrada (16 M de movimientos). **Lo que queda dicho:** el envío real por
+Resend no se ha ejercitado (depende de la cuenta y el dominio del usuario; runbook de puesta en
+marcha, Paso 6b) y D-16.51 espera ratificación.
+
+**Y `npm run bench`, que I8 exige en todo paquete que toque el camino de lectura, destapó tres
+cosas al ejecutarse.** Llevaba **dos paquetes sin poder arrancar**: `volumen.sql` insertaba
+`company.max_locations`, la columna que P11 borró al mover el límite a la tabla `plan`, y no lo veía
+ningún check —no es TypeScript, no es una migración, y la regla de INC-017 solo comprueba que el
+archivo del script exista. Es la **primera recurrencia de INC-017**, y lo que añade es que el SQL
+suelto que acompaña a un script no lo verifica nadie: la única prevención es ejecutarlo. Además, su
+informe de consultas estaba clavado en `docs/pasos/P15/` y la primera corrida **pisó evidencia ya
+commiteada**; ahora es `--informe=<carpeta>` y sin la bandera no escribe nada.
+
+Lo tercero es un número que hay que mirar: **el consolidado de diez ubicaciones da 940,9 ms contra su
+presupuesto de 800**. No es regresión de este paquete —mismas consultas, mismos recuentos de llamada,
+y normalizado al suelo del entorno que el propio bench mide cuesta 143,7 «suelos» frente a los 149,6
+de P15— pero el umbral no se sube: queda como duda abierta en `ESTADO.md`, con la deuda que P9 ya
+había diseñado (vistas materializadas, ADR-012 §7). Y queda dicho que **CI no ejecuta el bench**, que
+es justo el riesgo que la fila I8 declaraba.
+
+---
+
 ## P16 · commit 0 — Tooling de la pasada · 2026-09-09
 
 **Empieza la pasada P16 → P20: la aplicación completa.** El backend tenía 36 escrituras y la

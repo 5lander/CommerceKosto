@@ -29,9 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
-import { MAILER_PORT } from '../../src/shared/application/ports/mailer.port';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
-import { FakeMailer } from '../../src/shared/infrastructure/fakes/fake-mailer';
 
 const OK = 200;
 const CREADO = 201;
@@ -179,6 +177,8 @@ describe('autenticacion y autorizacion', () => {
     // fallar por una razon que no tiene que ver con lo que mide. Cada corrida
     // parte de cero, como parte de cero su tenant.
     await duena.query('DELETE FROM login_attempt');
+    // Y `rate_limit_hit` por lo mismo: `POST /usuarios` cuenta por IP (D-16.50).
+    await duena.query('DELETE FROM rate_limit_hit');
 
     uno = await sembrarTenant('uno');
     otra = await sembrarTenant('otra');
@@ -385,7 +385,7 @@ describe('autenticacion y autorizacion', () => {
         .send({ email: nuevo });
       expect(invitacion.status).toBe(ACEPTADO);
 
-      const token = tokenDelCorreo(app, nuevo);
+      const token = await tokenDelCorreo(duena, nuevo);
 
       const activacion = await request(servidor())
         .post('/usuarios/activacion')
@@ -403,7 +403,7 @@ describe('autenticacion y autorizacion', () => {
       const nuevo = `otro.${randomUUID().slice(0, 8)}@snacklab.ec`;
 
       await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo });
-      const token = tokenDelCorreo(app, nuevo);
+      const token = await tokenDelCorreo(duena, nuevo);
 
       await request(servidor())
         .post('/usuarios/activacion')
@@ -421,7 +421,7 @@ describe('autenticacion y autorizacion', () => {
       const nuevo = `debil.${randomUUID().slice(0, 8)}@snacklab.ec`;
 
       await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo });
-      const token = tokenDelCorreo(app, nuevo);
+      const token = await tokenDelCorreo(duena, nuevo);
 
       const respuesta = await request(servidor())
         .post('/usuarios/activacion')
@@ -546,29 +546,29 @@ describe('autenticacion y autorizacion', () => {
 });
 
 /**
- * Saca el token de invitacion del correo que guardo el adaptador falso.
+ * Saca el token de invitacion del correo ENCOLADO, leyendo `email_outbox` con
+ * la duena.
  *
- * Es lo que permite probar la invitacion de punta a punta sin una cuenta de
- * correo: criterio de aceptacion de P0 (CLAUDE.md §12) usado por primera vez.
+ * Desde P16-A1 la API no envia: encola en la misma transaccion que crea al
+ * invitado (ADR-025), y el enlace con el token vive en `datos` mientras el
+ * correo esta en vuelo. Leerlo de ahi es lo que permite probar la invitacion
+ * de punta a punta sin una cuenta de correo ni un despachador levantado —
+ * criterio de aceptacion de P0 (CLAUDE.md §12), por otra puerta.
  */
-function tokenDelCorreo(app: INestApplication, destino: string): string {
-  const mailer = app.get<FakeMailer>(MAILER_PORT);
-  const mensaje = [...mailer.sent].reverse().find((m) => m.to === destino);
-
-  if (mensaje === undefined) {
-    throw new Error(`no se envio ninguna invitacion a ${destino}`);
+async function tokenDelCorreo(duena: Client, destino: string): Promise<string> {
+  const { rows } = await duena.query<{ enlace: string }>(
+    `SELECT datos->>'enlace' AS enlace FROM email_outbox
+      WHERE destinatario = $1 ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [destino],
+  );
+  const enlace = rows[0]?.enlace;
+  if (enlace === undefined) {
+    throw new Error(`no se encolo ninguna invitacion a ${destino}`);
   }
 
-  const token = mensaje.body
-    .split('\n')
-    .map((linea) => linea.trim())
-    // El token es la unica linea con pinta de base64url largo. Se busca por
-    // FORMA y no por posicion: si manana el texto del correo cambia, la prueba
-    // sigue encontrandolo en vez de romperse por una linea de mas.
-    .find((linea) => /^[\w-]{40,}$/u.test(linea));
-
-  if (token === undefined) {
-    throw new Error('el correo de invitacion no lleva token');
+  const token = new URL(enlace).searchParams.get('token');
+  if (token === null) {
+    throw new Error('el enlace de invitacion no lleva token');
   }
   return token;
 }

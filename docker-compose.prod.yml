@@ -77,10 +77,32 @@ services:
       # real se multiplica por el numero de replicas sin que nadie lo note.
       RATE_LIMIT_WINDOW_MS: '60000'
       RATE_LIMIT_MAX: '300'
+      # En produccion NO hay valor por defecto: un enlace a localhost en la
+      # invitacion de un cliente es un fallo que descubre el cliente.
+      APP_URL: ${APP_URL:?falta APP_URL}
+      # Detras de Caddy TODA peticion llega con la IP de Caddy en el socket; la
+      # del cliente viaja en X-Forwarded-For. Sin esta lista la API no puede
+      # creerla y el bloqueo por IP del login seria un bloqueo de todos
+      # (INC-022, D-16.49). Vale la IP FIJA de Caddy de abajo: `172.28.0.10`,
+      # y solo esa. No la subred entera: en ella estan la pasarela (lo que ve
+      # el contenedor cuando algo del propio VPS entra por el puerto publicado)
+      # y el resto de contenedores, y cualquiera de ellos podria entonces
+      # poner la cabecera que quisiera.
+      PROXY_DE_CONFIANZA: ${PROXY_DE_CONFIANZA:?falta PROXY_DE_CONFIANZA}
     deploy:
       resources:
         limits:
           memory: 768M
+
+  # El despachador de correo: un bucle con un pool de dos conexiones y una
+  # llamada HTTP cada pocos segundos. 128M sobran.
+  correo:
+    environment:
+      MAIL_ADAPTER: ${MAIL_ADAPTER:?falta MAIL_ADAPTER}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
   # --- La interfaz ------------------------------------------------------------
   #
@@ -163,10 +185,39 @@ services:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
       - caddyconfig:/config
+    # IP FIJA, y es la unica que va en `PROXY_DE_CONFIANZA` (INC-022). Con la
+    # subred entera en la lista, la pasarela `172.28.0.1` —que es lo que la API
+    # ve cuando algo del propio VPS entra por `127.0.0.1:3000`— y los demas
+    # contenedores podrian poner la `X-Forwarded-For` que quisieran: esquivar
+    # el limite por IP o envenenar la de un tercero. Si esta direccion cambia,
+    # cambia `PROXY_DE_CONFIANZA` con ella, y `down` + `up`.
+    networks:
+      default:
+        ipv4_address: 172.28.0.10
     deploy:
       resources:
         limits:
           memory: 256M
+
+# --- La red, con subred FIJA ---------------------------------------------------
+#
+# `PROXY_DE_CONFIANZA` es la IP de Caddy escrita en el `.env` del VPS, y una IP
+# fija solo existe dentro de una subred declarada. Sin ella, Docker asigna una
+# al crear la red (172.18.0.0/16, 172.19.0.0/16, la siguiente libre...) y puede
+# cambiar tras un `docker compose down`/`up` o al crear otra red en la maquina.
+# El fallo seria SILENCIOSO: el socket de Caddy dejaria de casar con la lista,
+# la API volveria a la IP del socket —la de Caddy— y el bloqueo por IP volveria
+# a ser global sin un solo error en el log. Con la subred fijada aqui,
+# `172.28.0.10` significa lo mismo hoy y en un ano.
+#
+# CAMBIAR LA SUBRED EXIGE `docker compose down` Y `up`: la configuracion IPAM
+# de una red existente no se modifica en caliente y un `restart` no la toca
+# (docs/runbooks/despliegue.md).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
 
 volumes:
   pgdata:

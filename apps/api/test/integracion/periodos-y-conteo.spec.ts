@@ -164,6 +164,7 @@ describe('periodos y conteo fisico', () => {
         presentacion: '1',
         unidadDePresentacion: 'kg',
         factorExplicito: null,
+        ivaTarifa: '0',
       });
     expect(articulo.status).toBe(CREADO);
     const articuloId = (articulo.body as { id: string }).id;
@@ -182,6 +183,9 @@ describe('periodos y conteo fisico', () => {
         cantidad: '1',
         costoTotal: '20.00',
         purchaseArticleId: null,
+        // La tarifa es del cuerpo aquí: estos insumos no tienen grupo. Cero,
+        // para que el importe siga siendo el que las aserciones esperan.
+        ivaTarifa: '0',
         note: null,
         occurredAt: EN_MARZO,
         ...cuerpo,

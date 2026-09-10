@@ -23,6 +23,7 @@ import type {
   TransferId,
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
+import type { DesgloseDeCompra } from '../../domain/compra';
 import type { TipoDeMovimiento } from '../../domain/movimiento';
 
 export const REPOSITORIO_DE_INVENTARIO = 'REPOSITORIO_DE_INVENTARIO';
@@ -39,8 +40,16 @@ export interface MovimientoParaGuardar {
   readonly tipo: TipoDeMovimiento;
   /** CON SIGNO, ya resuelto por el dominio. */
   readonly cantidad: string;
-  /** Magnitud, sin signo. `null` donde el tipo no lo exige. */
+  /**
+   * Magnitud, sin signo. `null` donde el tipo no lo exige. En una COMPRA con
+   * desglose es el NETO (D-16.10); sin desglose, lo que se tecleó.
+   */
   readonly costoTotal: string | null;
+  /**
+   * Solo una COMPRA lo lleva, y `desglose_conocido` es exactamente
+   * `desglose !== null`. Los cuatro campos nacen juntos en el dominio.
+   */
+  readonly desglose: DesgloseDeCompra | null;
   readonly purchaseArticleId: PurchaseArticleId | null;
   readonly reversesMovementId: MovementId | null;
   readonly occurredAt: Date;
@@ -54,6 +63,8 @@ export interface MovimientoLeido {
   readonly tipo: TipoDeMovimiento;
   readonly cantidad: string;
   readonly costoTotal: string | null;
+  /** `null` = «sin desglose»: una COMPRA anterior a P16-A1, o no es COMPRA. */
+  readonly desglose: DesgloseDeCompra | null;
   readonly occurredAt: Date;
   readonly recordedAt: Date;
   readonly transferId: TransferId | null;

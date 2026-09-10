@@ -157,6 +157,8 @@ erDiagram
 
 Están inventariadas y justificadas en **ADR-006**. Son `auth_lookup(email)`, `session_lookup(token_hash)` e `invitation_lookup(token_hash)`: `SECURITY DEFINER`, con `SET search_path`, con `REVOKE EXECUTE FROM PUBLIC`, y sin ningún filtro más que su clave de entrada. **Que sean exactamente tres es parte de la decisión.**
 
+> **Desde P16-A1 son cinco, y dos escriben** (ADR-025, decisión 3): `password_reset_request(p_email, p_token_hash, p_expires_at, p_datos)` y `password_reset_consume(p_token_hash, p_ahora)`, las dos `VOLATILE`, con la misma forma exacta del hueco (entra un correo y sale nada; entra un hash y sale una fila o ninguna) y las mismas tres cerraduras. La discusión que ADR-006 pedía para «cualquier cuarta» está en ADR-025. Ver «Lo que añade P16-A1 — la cola de correo…».
+
 ### El `RETURNING` bajo RLS — INC-010
 
 Una tabla cuya política de `SELECT` sea más estrecha que la de `INSERT` **no se puede escribir con `create()`**: Prisma emite `INSERT ... RETURNING` y el `RETURNING` pasa por la política de `SELECT`. Se usa `createMany`. Aplica hoy a `audit_log`, y aplicará en P6 a `inventory_movement` y en P11 a `cross_tenant_access_log`.
@@ -272,6 +274,10 @@ erDiagram
 El SPEC nombra `iva_compra` en la fórmula de §12 y **no dice dónde vive**; §11 solo trae «IVA de compra recuperable SI/NO». Se eligió el superconjunto: en Ecuador el alimento sin procesar es 0 % y el detergente 15 %, así que una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. `company_settings.iva_compra` es solo el valor que se **propone** al capturar.
 
 **Es una decisión que merece confirmación del usuario** y está anotada como tal en `ESTADO.md`.
+
+> **P16-A1 la cierra en dos niveles** (D-16.9, ADR-024): la tarifa que se copia al precio sale del
+> **artículo de compra** o, sin artículo, del **grupo del ítem**; `company_settings.iva_compra` dejó de
+> leerse y se retira en P16-B. Ver «Lo que cambia P16-A1».
 
 ### Un precio no se actualiza: se añade
 
@@ -713,6 +719,164 @@ consolidado multiplique el coste por el número de ubicaciones.
 
 ---
 
+## Lo que cambia P16-A1 — el IVA de compra en dos niveles
+
+No hay tabla nueva. Tres tablas ganan columnas, y el libro cambia de significado en una (ADR-024).
+
+```mermaid
+erDiagram
+    item_group        ||--o{ item : "tarifa para las compras SIN articulo"
+    purchase_article  ||--o{ inventory_movement : "tarifa para las compras CON articulo"
+
+    purchase_article {
+        numeric iva_tarifa "NOT NULL. CHECK 0..1. SEMILLA 0.15 en las filas previas"
+    }
+    item_group {
+        numeric iva_tarifa "NULL = el grupo no define. CHECK 0..1"
+    }
+    inventory_movement {
+        numeric total_cost "en una COMPRA con desglose es el NETO"
+        numeric total_bruto "lo que dice la factura. NULL sin desglose"
+        numeric iva_tarifa_aplicada "fraccion con la que se neteo. NULL sin desglose"
+        boolean iva_recuperable_aplicado "ajuste de la company EN ESE MOMENTO. NULL sin desglose"
+        boolean desglose_conocido "NOT NULL DEFAULT false. true solo en COMPRA"
+    }
+```
+
+### La tarifa vive en dos niveles, y ninguno es la company
+
+`purchase_article.iva_tarifa` es obligatoria: la factura del saco de harina dice 0 % y la del
+detergente 15 %. `item_group.iva_tarifa` es anulable y solo la usan las compras **sin artículo**;
+`NULL` significa «el grupo no define», no cero. La precedencia cuerpo > artículo > grupo y la fórmula
+del neteo viven una sola vez en `shared/domain/iva/` (D-16.40). **No hay valor por defecto**: sin
+tarifa, la compra se rechaza (400).
+
+**La semilla 0.15 es semilla, no verdad.** La columna nace `NOT NULL` sobre una tabla con filas, así
+que la migración la llena con `DEFAULT 0.15` y **suelta el default en la misma migración**: ningún
+artículo nuevo lo hereda. Los existentes se corrigen con `PUT /catalogo/articulos/:id`.
+
+### El libro persiste los cuatro importes, y `total_cost` cambia de significado solo en las COMPRA nuevas
+
+Con `desglose_conocido = true`, `total_cost` es el **neto** (`recuperable ? bruto / (1 + tarifa) :
+bruto`) y los tres campos nuevos son la **foto del momento** (D-16.42): cambiar el ajuste después no
+reescribe el libro. Las `COMPRA` anteriores a P16-A1 **no se rellenan** (D-16.18): quedan con
+`desglose_conocido = false`, los tres campos en `NULL` y `total_cost` tal como se tecleó. La
+discontinuidad que eso deja en `compras_del_mes` está dicha en ADR-024.
+
+| Restricción | Qué impide |
+|---|---|
+| `purchase_article_iva_tarifa_es_fraccion` | Un 15 donde va 0.15: `iva_tarifa BETWEEN 0 AND 1` |
+| `item_group_iva_tarifa_es_fraccion` | Lo mismo, admitiendo `NULL` |
+| `inventory_movement_desglose_coherente` | Un desglose a medias, o en un tipo que no es `COMPRA`: o los cuatro importes están y `type = 'COMPRA'`, o los tres nuevos son `NULL` |
+| `inventory_movement_desglose_en_rango` | Un bruto negativo o una tarifa aplicada fuera de 0..1 |
+
+**Lo que la base NO garantiza, y se dice:** que una `COMPRA` nueva lleve desglose. «Sin desglose» es
+el estado legítimo de las filas anteriores, y un `CHECK` no distingue una fila vieja de una nueva que
+llegue mal. La guarda es de aplicación —`exigirDesgloseEnCompra`, en la única función del repositorio
+por la que entra toda fila— y el SQL a mano queda fuera (ADR-024, decisión 4).
+
+**Sin índice nuevo.** Las dos lecturas nuevas son por clave primaria más `company_id`, y
+`GET /inventario/movimientos` añade tres columnas al `select` con el mismo plan que en P6.
+
+## Lo que añade P16-A1 — la cola de correo, el token de restablecimiento y los golpes del límite de tasa
+
+Tres tablas nuevas (migración `20260910042649_p16a1_correo_y_limite_de_tasa`, reversible), y son
+**tres tablas distintas entre sí**: una del tenant que otro rol cierra, una que la aplicación no ve,
+y una sin tenant. Conviene leer los privilegios con eso delante (ADR-025, ADR-026).
+
+```mermaid
+erDiagram
+    company  ||--o{ email_outbox : "company_id: lo pone la app o la definer"
+    app_user ||--o{ email_outbox : "user_id: el invitado, el titular"
+    app_user ||--o{ password_reset_token : "user_id"
+
+    email_outbox {
+        uuid id PK "uuidv7()"
+        uuid company_id FK "NULL admitido; la app y la definer lo ponen siempre"
+        uuid user_id FK "NULL admitido; idem"
+        text destinatario "CHECK con forma de correo, <= 254"
+        text plantilla "INVITACION | RESTABLECIMIENTO | BLOQUEO"
+        jsonb datos "EN VUELO: enlace + caducaEn, o vacio en BLOQUEO. Al cerrar: plantilla + destinatario"
+        text estado "PENDIENTE | ENVIADO | FALLIDO"
+        int intentos "NOT NULL DEFAULT 0, CHECK >= 0"
+        text error "el ultimo, acotado a 500 caracteres por el despachador"
+        timestamptz siguiente_intento_en "NULL = ya. Espera 1-2-4-8 min, y la RESERVA de 5 min de la pasada"
+        timestamptz created_at
+        timestamptz sent_at "ENVIADO si y solo si no es NULL (CHECK)"
+    }
+    password_reset_token {
+        uuid id PK "uuidv7()"
+        uuid user_id FK "NOT NULL"
+        text token_hash "UNIQUE. SHA-256 del token de 256 bits"
+        timestamptz expires_at "CHECK > created_at. created_at + HORAS_DE_RESTABLECIMIENTO"
+        timestamptz used_at "NULL hasta consumirlo: un solo uso"
+        timestamptz created_at
+    }
+    rate_limit_hit {
+        uuid id PK "uuidv7()"
+        text kind "CHECK: password.olvido | password.restablecimiento | usuario.invitar | usuario.reenvio"
+        text clave "ip:<ip> o correo:<sha256 hex>. NUNCA un correo en claro"
+        timestamptz at "el golpe. Se purga a las 24 h"
+    }
+```
+
+### Quién puede qué, tabla por tabla
+
+| Tabla | `costeo_app` | `costeo_despachador` | `costeo_backoffice` | Política RLS |
+|---|---|---|---|---|
+| `email_outbox` | `INSERT` + `SELECT` **por columnas, sin `datos`**; `UPDATE`/`DELETE` revocados explícitamente | `SELECT, UPDATE` (ni `INSERT` ni `DELETE`) | `SELECT` por columnas, sin `datos` | `_app`: `company_id = current_company()` (`FOR ALL`, INC-010) · `_despachador` y `_migrator` permisivas |
+| `password_reset_token` | **nada**: `REVOKE ALL`, y sin política (deny-by-default) | nada | nada | solo `_migrator`: la escriben y la gastan las dos definer |
+| `rate_limit_hit` | `INSERT` + `SELECT`; `UPDATE`/`DELETE` revocados | `DELETE`, y `SELECT` **solo sobre `at`** | nada | `_app`, `_despachador`, `_migrator`, las tres `USING (true)`: **sin tenant, como `login_attempt`** |
+
+Las tres tienen `ENABLE + FORCE ROW LEVEL SECURITY`; **la lista de exenciones de M6 sigue vacía**.
+`rate_limit_hit` es una **exención de ámbito** (no hay tenant contra el que filtrar), no de RLS, y
+está registrada como tal en `docs/SEGURIDAD.md` §2.1 junto a `login_attempt`. `costeo_despachador`
+**no** es `BYPASSRLS`: ve la cola por su política, y una tabla nueva sin política le es invisible.
+
+### `datos` es la única columna que solo un rol puede leer
+
+Mientras el correo es `PENDIENTE`, `datos` lleva el enlace con el token **en claro** —vale lo mismo
+que la fila de `password_reset_token`, que a la app se le niega entera—. Por eso el `SELECT` de
+`costeo_app` y `costeo_backoffice` se concede **por columnas**, todas menos esa; el `INSERT` de la
+app no la necesita porque `createMany` no emite `RETURNING`. Al pasar a `ENVIADO` o `FALLIDO` el
+despachador reemplaza `datos` por `{plantilla, destinatario}` en la misma sentencia (D-16.34). Un
+`down` no necesita nada especial: soltar la tabla se lleva los privilegios de columna.
+
+### `siguiente_intento_en` hace dos cosas, y la segunda no está en su nombre
+
+Es la **espera** tras un fallo (1 → 2 → 4 → 8 min; al quinto, `FALLIDO`) y es la **reserva** de la
+pasada: `tomarPendientes` lo pone a `ahora + 5 min` en la misma transacción que hace el
+`SELECT … FOR UPDATE SKIP LOCKED`, porque el bloqueo de fila muere al confirmar y el envío ocurre
+fuera. `renovarReserva` lo vuelve a poner fila a fila con `WHERE siguiente_intento_en = <la firma
+con la que se tomó>`: cero filas significa que otra instancia se la quedó y se cede. Ver ADR-025,
+decisión 6.
+
+### Las claves foráneas, y una que el plan no nombraba
+
+`email_outbox.user_id → app_user` (además de `company_id → company`): un correo que apunta a un
+usuario que no existe es exactamente lo que la clave impide, y los usuarios no se borran
+físicamente. `password_reset_token.user_id → app_user`, `NOT NULL`. Las tres con `ON DELETE
+RESTRICT`.
+
+| Restricción | Qué impide |
+|---|---|
+| `email_outbox_destinatario_con_forma` | Un destinatario que no tiene forma de correo (no valida que exista) |
+| `email_outbox_plantilla_conocida` · `email_outbox_estado_conocido` | Una plantilla o un estado que el código no conoce |
+| `email_outbox_intentos_no_negativos` | Intentos negativos |
+| `email_outbox_enviado_con_fecha` | `ENVIADO` sin fecha (no dice cuándo salió) o fecha sin `ENVIADO` (el despachador lo mandaría otra vez) |
+| `password_reset_token_caduca_despues_de_nacer` | Un token que caduca antes de existir (la prueba «caducado» mueve la fila entera al pasado por esto) |
+| `rate_limit_hit_kind_conocido` | Un `kind` que no está en `politicas.ts`: añadirlo en un sitio y no en el otro falla en el primer golpe |
+
+### Los índices, con su consulta delante
+
+| Índice | Consulta que lo justifica |
+|---|---|
+| `email_outbox(estado, siguiente_intento_en, created_at)` | `tomarPendientes`: `WHERE estado = 'PENDIENTE' AND (siguiente_intento_en IS NULL OR <= ahora) ORDER BY created_at LIMIT lote FOR UPDATE SKIP LOCKED`. El `OR` impide que el índice sirva el `ORDER BY`: es un bitmap sobre `estado` más un `sort` de las pendientes (9,9 ms con 3.000 pendientes en el `EXPLAIN` del paquete), y con una cola sana hay decenas, no miles |
+| `email_outbox(user_id, created_at DESC)` | La salud de la invitación de un usuario (`GET /usuarios` con `correoInvitacion`, P16-C) |
+| `password_reset_token(token_hash)` único | `password_reset_consume`: una lectura por clave |
+| `password_reset_token(user_id, created_at DESC)` | Los tokens de un usuario, del más reciente |
+| `rate_limit_hit(kind, clave, at DESC)` | `golpear`: `ORDER BY at DESC LIMIT golpesQueDeciden` → `Index Only Scan` de 11 entradas, 0,07 ms con 38.000 golpes. **La purga (`WHERE at < ahora − 24 h`) no lo usa**: `Seq Scan` sobre un día de golpes como mucho (4 ms con 38.000); si aparece en las consultas caras, índice sobre `(at)` |
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -727,6 +891,7 @@ consolidado multiplique el coste por el número de ubicaciones.
 | **P7** | `period`, `physical_count`, `physical_count_line` + `period_status`, `physical_count_status`. **El conteo no ajusta el libro**: no hay clave foránea de `inventory_movement` hacia aquí, y confirmar no escribe ni un movimiento | ✅ |
 | **P8** | `product_sales`, `fixed_cost` + `fixed_cost_classification`. **Ninguna tabla derivada**: las seis vistas se calculan al vuelo sobre un contexto único por (ubicación, mes). Las materializadas de período cerrado se aplazan a P9 | ✅ |
 | P10 | `import_job`, `import_job_status` | ✅ |
+| **P16-A1** | `email_outbox`, `password_reset_token`, `rate_limit_hit` (ADR-025, ADR-026) + las dos funciones definer que escriben. Y sin tabla nueva en la otra mitad: `purchase_article.iva_tarifa`, `item_group.iva_tarifa` y los cuatro campos del desglose en `inventory_movement`, con sus cuatro `CHECK` (ADR-024) | ✅ |
 
 **`import_row` no existe, y es una decisión.** El plan la listaba; el análisis vive en un `jsonb`
 dentro de `import_job` porque es una **cache de algo reproducible** —si se pierde, se vuelve a subir

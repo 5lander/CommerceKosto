@@ -35,7 +35,7 @@ describe('lote de precios', () => {
     expect(problemasDelLoteDePrecios([precio({ ivaCompra: '15%' })])).toHaveLength(1);
   });
 
-  it('el IVA en blanco es válido: lo pone la company', () => {
+  it('el IVA en blanco es válido: lo pondrá el artículo o el grupo', () => {
     expect(problemasDelLoteDePrecios([precio({ ivaCompra: null })])).toEqual([]);
   });
 
@@ -71,5 +71,18 @@ describe('lote de precios', () => {
 
   it('una fila sin ítem se rechaza', () => {
     expect(problemasDelLoteDePrecios([precio({ item: '   ' })])).toHaveLength(1);
+  });
+});
+
+describe('la tarifa de IVA de la fila (D-16.44)', () => {
+  it('un 15 donde va 0.15 se rechaza con su posición, junto a los demás problemas', () => {
+    const problemas = problemasDelLoteDePrecios([
+      precio(),
+      precio({ item: 'Ajo', ivaCompra: '15' }),
+      precio({ item: 'Sal', precio: 'S/P' }),
+    ]);
+
+    expect(problemas.map((p) => p.posicion)).toEqual([2, 3]);
+    expect(problemas[0]?.motivo).toMatch(/0\.15, no 15/u);
   });
 });

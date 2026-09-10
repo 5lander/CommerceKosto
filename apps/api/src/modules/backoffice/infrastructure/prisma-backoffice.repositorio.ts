@@ -30,6 +30,7 @@ import type {
   OperatorId,
   PlanLeido,
   RepositorioDeBackoffice,
+  SaludDelCorreo,
   SesionDeOperador,
 } from '../application/ports/repositorio-de-backoffice.port';
 import { BackofficeConnection, type ClienteDeBackoffice } from './backoffice-connection';
@@ -364,6 +365,23 @@ export class PrismaBackofficeRepositorio implements RepositorioDeBackoffice {
         motivo: fila.reason,
         ip: fila.ip,
       }));
+    });
+  }
+
+  /**
+   * Tres agregados y ninguna fila. `count` y `_max` no nombran `datos`, y el
+   * rol no tiene `SELECT` sobre esa columna: si un dia alguien cambiara esto
+   * por un `findMany`, la base lo pararia con `42501` (D-16.34).
+   */
+  public async saludDelCorreo(pendientesDesdeAntesDe: Date): Promise<SaludDelCorreo> {
+    return this.conexion.run(async (tx) => {
+      const [pendientesAntiguos, fallidos, ultimo] = await Promise.all([
+        tx.emailOutbox.count({ where: { estado: 'PENDIENTE', createdAt: { lt: pendientesDesdeAntesDe } } }),
+        tx.emailOutbox.count({ where: { estado: 'FALLIDO' } }),
+        tx.emailOutbox.aggregate({ _max: { sentAt: true } }),
+      ]);
+
+      return { pendientesAntiguos, fallidos, ultimoEnvio: ultimo._max.sentAt };
     });
   }
 }

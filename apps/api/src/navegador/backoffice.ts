@@ -72,6 +72,13 @@ interface AccesoRegistrado {
   readonly ip: string | null;
 }
 
+/** Lo que devuelve `GET /correo/salud`: contadores e instantes, nunca correos. */
+interface SaludDelCorreo {
+  readonly pendientesAntiguos: number;
+  readonly fallidos: number;
+  readonly ultimoEnvio: string | null;
+}
+
 type Vista =
   | { readonly nombre: 'entrar' }
   | { readonly nombre: 'cartera' }
@@ -289,7 +296,26 @@ function insignia(estadoDeCompany: string): HTMLElement {
   return elemento('span', { class: `estado ${estadoDeCompany}` }, [estadoDeCompany]);
 }
 
+/**
+ * La tarjeta de la cola de correo (D-16.27c). Tres números: si hay pendientes
+ * viejos, el despachador no corre o el proveedor no entrega; si hay fallidos,
+ * alguien tendrá que reenviar desde la aplicación. No enseña ningún correo.
+ */
+function tarjetaDeCorreo(salud: SaludDelCorreo): HTMLElement {
+  const hayProblema = salud.pendientesAntiguos > 0 || salud.fallidos > 0;
+  const linea = (que: string, cuanto: string, mal: boolean): HTMLElement =>
+    elemento('p', mal ? { class: 'cuenta falta' } : { class: 'cuenta' }, [`${que}: ${cuanto}`]);
+
+  return elemento('div', { class: hayProblema ? 'tarjeta aviso' : 'tarjeta' }, [
+    elemento('h3', {}, ['Cola de correo']),
+    linea('Pendientes con retraso', String(salud.pendientesAntiguos), salud.pendientesAntiguos > 0),
+    linea('Fallidos', String(salud.fallidos), salud.fallidos > 0),
+    linea('Último envío', salud.ultimoEnvio === null ? 'ninguno todavía' : fecha(salud.ultimoEnvio), false),
+  ]);
+}
+
 async function vistaCartera(): Promise<HTMLElement> {
+  const salud = await llamar<SaludDelCorreo>('/correo/salud');
   const companies = await llamar<readonly CompanyEnLista[]>('/companies');
 
   const filas = companies.map((company) => {
@@ -310,6 +336,7 @@ async function vistaCartera(): Promise<HTMLElement> {
 
   return elemento('section', {}, [
     elemento('h2', {}, [`Cartera · ${String(companies.length)} companies`]),
+    tarjetaDeCorreo(salud),
     tabla(['Nombre', 'Plan', 'Estado', 'Ubicaciones', 'Creada'], filas, 'No hay ninguna todavía.'),
   ]);
 }

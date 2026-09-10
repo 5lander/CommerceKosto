@@ -21,8 +21,10 @@
  * aplicación.
  */
 
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
 import type { ItemId, PurchaseArticleId } from '../../../../shared/domain/identity/identificadores';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Quantity, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
@@ -32,11 +34,16 @@ import {
   type UnidadDelCatalogo,
 } from '../../domain/conversion';
 import {
+  ArticuloNoEncontradoError,
   ConflictoDeCatalogoError,
   EntradaDeCatalogoInvalidaError,
   ItemNoEncontradoError,
 } from '../../domain/errores';
-import type { ArticuloLeido, RepositorioDeCatalogo } from '../ports/repositorio-de-catalogo.port';
+import type {
+  ArticuloLeido,
+  EstadoDeCatalogo,
+  RepositorioDeCatalogo,
+} from '../ports/repositorio-de-catalogo.port';
 
 export interface DependenciasDeArticulos {
   readonly repositorio: RepositorioDeCatalogo;
@@ -52,6 +59,12 @@ export interface DatosDeAltaDeArticulo {
   readonly unidadDePresentacion: string;
   /** Solo cuando la presentación y la unidad de uso no comparten dimensión. */
   readonly factorExplicito: string | null;
+  /**
+   * LA TARIFA DE IVA ES DEL ARTÍCULO (D-16.9) y es obligatoria: la factura del
+   * saco de harina dice 0 % y la del detergente 15 %. Sin ella, ninguna compra
+   * de este artículo se podría netear.
+   */
+  readonly ivaTarifa: string;
 }
 
 export class CrearArticulo {
@@ -62,6 +75,7 @@ export class CrearArticulo {
     datos: DatosDeAltaDeArticulo,
   ): Promise<PurchaseArticleId> {
     const factor = await this.factorPara(sesion, datos);
+    const ivaTarifa = exigirTarifaValida(datos.ivaTarifa).toStorageString();
 
     const resultado = await this.deps.repositorio.crearArticulo({
       companyId: sesion.companyId,
@@ -72,11 +86,10 @@ export class CrearArticulo {
       presentacion: datos.presentacion,
       unidadDePresentacion: unidadDeUso(datos.unidadDePresentacion),
       factorDeConversion: factor.toStorageString(),
+      ivaTarifa,
     });
 
-    if (resultado.clase === 'nombre_en_uso') {
-      throw new ConflictoDeCatalogoError('Ya existe un artículo de compra con ese nombre.');
-    }
+    if (resultado.clase === 'nombre_en_uso') throw new ArticuloRepetidoError();
 
     await this.deps.auditoria.record({
       eventType: 'catalog.article.created',
@@ -119,6 +132,57 @@ export class CrearArticulo {
   }
 }
 
+export interface DatosDeCambioDeArticulo {
+  readonly articuloId: PurchaseArticleId;
+  readonly nombre: string;
+  readonly marca: string | null;
+  readonly proveedor: string | null;
+  readonly ivaTarifa: string;
+  readonly estado: EstadoDeCatalogo;
+}
+
+/**
+ * `PUT /catalogo/articulos/:id` — D-16.45. Existe en este paquete porque sin
+ * él la semilla 0.15 de los artículos anteriores a P16-A1 no se podría
+ * corregir, y «semilla, no verdad» sería una frase.
+ *
+ * LA PRESENTACIÓN, SU UNIDAD Y EL FACTOR NO SE CAMBIAN, y no es una omisión:
+ * son lo que convierte cada compra histórica a unidades de uso. Cambiarlos
+ * reescribiría el costo de meses ya cerrados sin tocar una sola fila del
+ * libro. Si el saco pasa de 2 kg a 2,5 kg, es otro artículo.
+ */
+export class ActualizarArticulo {
+  public constructor(private readonly deps: DependenciasDeArticulos) {}
+
+  /** @throws {ArticuloNoEncontradoError} @throws {ConflictoDeCatalogoError} */
+  public async ejecutar(sesion: SesionActiva, datos: DatosDeCambioDeArticulo): Promise<void> {
+    const ivaTarifa = exigirTarifaValida(datos.ivaTarifa).toStorageString();
+
+    const resultado = await this.deps.repositorio.actualizarArticulo({
+      companyId: sesion.companyId,
+      articuloId: datos.articuloId,
+      nombre: datos.nombre.trim(),
+      marca: datos.marca,
+      proveedor: datos.proveedor,
+      ivaTarifa,
+      estado: datos.estado,
+    });
+
+    if (resultado === 'no_encontrado') throw new ArticuloNoEncontradoError();
+    if (resultado === 'nombre_en_uso') throw new ArticuloRepetidoError();
+
+    await registrarEventoDeUsuario({
+      auditoria: this.deps.auditoria,
+      actorId: sesion.userId,
+      companyId: sesion.companyId,
+      eventType: 'catalog.article.updated',
+      // La tarifa SÍ va al detalle: es el dato por el que este endpoint existe,
+      // y saber quién la cambió y a qué es lo que una auditoría preguntará.
+      detail: { articuloId: datos.articuloId, ivaTarifa, estado: datos.estado },
+    });
+  }
+}
+
 export class ListarArticulos {
   public constructor(private readonly deps: DependenciasDeArticulos) {}
 
@@ -127,6 +191,13 @@ export class ListarArticulos {
     itemId: ItemId | null,
   ): Promise<readonly ArticuloLeido[]> {
     return this.deps.repositorio.listarArticulos({ companyId: sesion.companyId, itemId });
+  }
+}
+
+/** El mismo 409 para crear y para renombrar. */
+class ArticuloRepetidoError extends ConflictoDeCatalogoError {
+  public constructor() {
+    super('Ya existe un artículo de compra con ese nombre.');
   }
 }
 

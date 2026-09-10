@@ -38,6 +38,14 @@ export class AjustesInvalidosError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
 }
 
+/**
+ * Una preparación con IVA de compra distinto de cero (D-16.51). Su precio es
+ * el costo estándar, ya neto (R10): netearlo otra vez subcostearía el plato.
+ */
+export class PreparacionConIvaError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+}
+
 /** Un lote de precios que no se puede escribir, con todos sus problemas dentro. */
 export class LoteDePreciosInvalidoError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';

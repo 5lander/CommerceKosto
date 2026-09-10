@@ -11,6 +11,7 @@
  * ES DOMINIO PURO.
  */
 
+import { motivoDeTarifaInvalida } from '../../../shared/domain/iva/tarifa';
 import {
   PRIMERA_POSICION,
   type ProblemaDelLote,
@@ -30,6 +31,8 @@ export interface MovimientoDelLote {
   /** Magnitud, sin signo. El signo lo pone `conSignoDelTipo` (ADR-009). */
   readonly cantidad: string;
   readonly costoTotal: string | null;
+  /** La tarifa de IVA de la fila (D-16.44). `null` = manda la del grupo del ítem. */
+  readonly ivaTarifa: string | null;
   readonly occurredAt: Date;
   readonly note: string | null;
 }
@@ -62,9 +65,21 @@ export function motivoDelMovimiento(movimiento: MovimientoDelLote): string | nul
   if (ES_CERO.test(movimiento.cantidad)) {
     return 'Un movimiento de cantidad cero no mueve nada: sobra.';
   }
+
+  return motivoDelImporte(movimiento);
+}
+
+/** El importe y la tarifa de la fila, que solo una COMPRA necesita de verdad. */
+function motivoDelImporte(movimiento: MovimientoDelLote): string | null {
   if (movimiento.costoTotal !== null && !DECIMAL.test(movimiento.costoTotal)) {
     return `El importe «${movimiento.costoTotal}» no es un número.`;
   }
+
+  // La tarifa se rechaza AQUÍ, con su fila, y no en el caso de uso: un 15
+  // donde va 0.15 tiene que salir en el análisis como cualquier otro problema
+  // del archivo (D-16.44), no como un 400 suelto sin número de fila.
+  const tarifa = movimiento.ivaTarifa === null ? null : motivoDeTarifaInvalida(movimiento.ivaTarifa);
+  if (tarifa !== null) return tarifa;
 
   // Una compra sin importe deja un agujero en `compras_del_mes`, y con él el
   // food cost real de SPEC §16 sale más bajo de lo que es — sin que nada avise,

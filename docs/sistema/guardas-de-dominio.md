@@ -264,6 +264,43 @@ Sale como 400 con el mensaje explicando cuántos caracteres faltan, no como 500.
 
 ---
 
+## `20260910012847_p16a1_iva_de_compra`
+
+El IVA de compra en dos niveles (D-16.9): la tarifa es del artículo o del grupo, la recuperabilidad de la company, y el libro persiste los cuatro importes de cada `COMPRA` (D-16.10). **Nunca se asume una tarifa**: sin ninguna, la compra sale como 400 `ENTRADA_INVALIDA` con `TarifaDeIvaDesconocidaError`, que dice dónde ponerla.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `purchase_article_iva_tarifa_es_fraccion` | 🔴 | Esquema **en el campo** (`fraccion`: `0`, `0.xx` o `1`, nunca `15`) **y** `exigirTarifaValida` en `shared/domain/iva/tarifa.ts` → `TarifaDeIvaInvalidaError` con «un IVA se escribe 0.15, no 15». Alcanzable por `POST /catalogo/articulos`, `PUT /catalogo/articulos/:id` y el CSV `ARTICULOS` |
+| `item_group_iva_tarifa_es_fraccion` | 🔴 | Las mismas dos guardas, por `POST /catalogo/grupos` y `PUT /catalogo/grupos/:id` |
+| `inventory_movement_desglose_coherente` | ⚪ | Los cuatro campos los escribe **solo** el repositorio a partir de `DesgloseDeCompra`, que construye `desglosarCompra` (`inventory/domain/compra.ts`) únicamente para una `COMPRA`; la corrección copia el desglose del original entero. Ninguna ruta acepta los campos sueltos. **Lo que este CHECK no cubre:** una `COMPRA` nueva sin desglose, porque «sin desglose» es también el estado legítimo de las anteriores a P16-A1 y la base no distingue vieja de nueva. Esa garantía (D-16.25) es de aplicación: `exigirDesgloseEnCompra` → `CompraSinDesgloseError` (400), en `comoFila`, la única función del repositorio por la que entra toda fila del libro; solo exime la corrección de una compra vieja. El SQL a mano (siembras, scripts) queda fuera — ADR-024, decisión 4 |
+| `inventory_movement_desglose_en_rango` | 🔴 | `desglosarCompra` → `Money.fromDecimalString` rechaza un bruto negativo con `CompraConImporteInvalidoError`; la tarifa ya pasó por `fraccion` en el cuerpo o por el CHECK del artículo/grupo |
+
+**Las guardas de dominio que no tienen CHECK detrás**, y por qué: `motivoDeTarifaInvalida` (`shared/domain/iva/tarifa.ts`) es la misma regla de fracción como **motivo con fila** para los tres lotes (`catalog`, `inventory`, `pricing`; D-16.44), y `exigirTarifaValida` la lanza como última línea en los casos de uso; `tarifaDePreparacion` / `motivoDeIvaEnPreparacion` (`pricing/domain/preparacion.ts`) rechazan un IVA de compra distinto de cero en una preparación (D-16.51, `PreparacionConIvaError`, 400): no hay CHECK porque `reference_price` no sabe el tipo del ítem, y ponerlo exigiría un trigger que lea `item` para una regla que el dominio ya explica.
+
+**Lo que cambia de color en la migración de P6.** `inventory_movement_importe_no_negativo` sigue 🟡 para `MERMA`/`AJUSTE`, y en `COMPRA` el neto lo calcula el dominio a partir de un bruto que la guarda de arriba ya comprobó.
+
+---
+
+## `20260910042649_p16a1_correo_y_limite_de_tasa`
+
+La cola de correo, el token de restablecimiento y los golpes del límite de tasa (ADR-025, ADR-026). **Ninguna restricción es alcanzable con datos que teclee un cliente**: las tres tablas las escribe el sistema —el repositorio dentro de su transacción, las dos funciones `SECURITY DEFINER` o, más adelante, el despachador—, y lo único que llega de fuera es un correo que ya pasó por `z.email()` en el campo.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `email_outbox_destinatario_con_forma` | 🟡 | El destinatario es el correo de la invitación (`CUERPO_DE_INVITACION.email`, `z.email().max(254)` **en el campo**) o el de un usuario que ya existe. La base repite la forma por defensa en profundidad |
+| `email_outbox_plantilla_conocida` | ⚪ | La plantilla es el discriminante del tipo cerrado `ContenidoDeCorreo` (`shared/application/correo/correo-a-encolar.ts`): `INVITACION` y `RESTABLECIMIENTO` con enlace, `BLOQUEO` (el aviso del login) sin datos; ninguna ruta la recibe como texto |
+| `email_outbox_estado_conocido` | ⚪ | `escribirEnOutbox` escribe `PENDIENTE` siempre; los otros dos estados los escribe el despachador (etapa siguiente) desde una constante |
+| `email_outbox_intentos_no_negativos` | ⚪ | Nace en `0` por `DEFAULT`; solo el despachador lo incrementa |
+| `email_outbox_enviado_con_fecha` | ⚪ | La API nunca escribe `ENVIADO` ni `sent_at`. El despachador pone los dos en la misma sentencia |
+| `password_reset_token_caduca_despues_de_nacer` | ⚪ | `expires_at` lo calcula `SolicitarRestablecimiento` como `ahora + HORAS_DE_RESTABLECIMIENTO` (entero ≥ 1 en el esquema de entorno); `created_at` es `DEFAULT now()`. La aplicación no tiene privilegios sobre la tabla |
+| `rate_limit_hit_kind_conocido` | ⚪ | El `kind` lo fija el código del limitador (etapa posterior) desde la lista cerrada de D-16.50; jamás una petición |
+
+**El `RAISE EXCEPTION` del `DO $$` es una guarda de despliegue, no de dominio**, igual que la de P11: comprueba que `costeo_despachador` existe antes de concederle privilegios. Su destinatario es quien migra. Sin ella, los `GRANT` fallarían… o peor, se saltarían, y los correos se quedarían `PENDIENTE` sin un solo error en ningún log.
+
+**Las guardas de dominio de este bloque que no tienen `CHECK` detrás**, y por qué: `TokenDeRestablecimientoInvalidoError` (`iam/domain/errores.ts`, 400) cubre token vacío, inexistente, usado y caducado con **un solo mensaje** — es la asimetría deliberada de `AceptarInvitacion` aplicada al restablecimiento: quien prueba tokens no distingue «no existe» de «ya se usó». No hay `CHECK` porque «usado» y «caducado» son estados legítimos de la fila; los decide `password_reset_consume` con `used_at IS NULL AND expires_at > p_ahora`. Y `ContrasenaDebilError` protege la contraseña nueva como en la activación.
+
+---
+
 ## Cómo se mantiene
 
 Al añadir una migración con `CHECK` o `RAISE EXCEPTION`:

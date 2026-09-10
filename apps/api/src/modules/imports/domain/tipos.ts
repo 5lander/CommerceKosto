@@ -41,6 +41,13 @@ const TIPO_SIN_RESOLVER = 'LNK';
 
 const NOMBRE_MAXIMO = 200;
 
+/**
+ * La columna opcional de tarifa de IVA de `ARTICULOS` y `MOVIMIENTOS`
+ * (D-16.44). Vacía, manda el artículo o el grupo; sin ninguno, la fila se
+ * rechaza al escribir. NUNCA se asume 0.15.
+ */
+const ALIAS_DE_IVA: readonly string[] = ['iva', 'tarifa iva', 'iva compra', 'tarifa de iva'];
+
 /** El techo del rendimiento: nada aprovecha mas de lo que entra. */
 const UNO = Ratio.fromDecimalString('1');
 
@@ -202,6 +209,7 @@ const COLUMNAS_DE_ARTICULO: readonly Columna[] = [
   texto('marca', ['marca'], false),
   texto('proveedor', ['proveedor'], false),
   texto('factorExplicito', ['factor', 'factor de conversion'], false),
+  texto('ivaTarifa', ALIAS_DE_IVA, false),
 ];
 
 export const ARTICULOS: Descriptor = {
@@ -219,6 +227,7 @@ export const ARTICULOS: Descriptor = {
         ? { columna: 'unidad de presentacion', motivo: 'Falta la unidad de la presentación.' }
         : null,
       exigirDecimal('factor', celda(fila, cabecera, 'factorExplicito'), true),
+      exigirDecimal('iva', celda(fila, cabecera, 'ivaTarifa'), true),
     );
   },
 
@@ -231,6 +240,7 @@ export const ARTICULOS: Descriptor = {
       marca: celda(fila, cabecera, 'marca'),
       proveedor: celda(fila, cabecera, 'proveedor'),
       factorExplicito: comoDecimal(celda(fila, cabecera, 'factorExplicito')),
+      ivaTarifa: comoDecimal(celda(fila, cabecera, 'ivaTarifa')),
     };
   },
 };
@@ -339,6 +349,7 @@ const COLUMNAS_DE_MOVIMIENTO: readonly Columna[] = [
   texto('cantidad', ['cantidad']),
   texto('fecha', ['fecha', 'fecha del movimiento']),
   texto('costoTotal', ['importe', 'costo total', 'total'], false),
+  texto('ivaTarifa', ALIAS_DE_IVA, false),
 ];
 
 /** `2026-03-15` o `15/03/2026`. Las dos formas que salen de una hoja. */
@@ -366,6 +377,7 @@ export const MOVIMIENTOS: Descriptor = {
       tipo === 'COMPRA' && importe === ''
         ? { columna: 'importe', motivo: 'Una compra necesita su importe total.' }
         : null,
+      exigirDecimal('iva', celda(fila, cabecera, 'ivaTarifa'), true),
     );
   },
 
@@ -376,6 +388,7 @@ export const MOVIMIENTOS: Descriptor = {
       cantidad: comoDecimal(celda(fila, cabecera, 'cantidad')),
       fecha: comoFechaIso(celda(fila, cabecera, 'fecha')),
       costoTotal: comoDecimal(celda(fila, cabecera, 'costoTotal')),
+      ivaTarifa: comoDecimal(celda(fila, cabecera, 'ivaTarifa')),
     };
   },
 };

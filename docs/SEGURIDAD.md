@@ -43,6 +43,28 @@
 - Respuesta de login fallido **idéntica** exista o no la cuenta, y con **tiempo constante** (comparación con `timingSafeEqual`, hash dummy cuando el usuario no existe) — corta la enumeración de usuarios y los timing attacks
 - CAPTCHA (o proof-of-work) a partir del tercer fallo en superficies públicas
 
+**Cómo quedó implementado en P16-A1 (ADR-026), y en qué se aparta de la tabla.** Los contadores viven en **PostgreSQL, no en Redis** (decisión del usuario desde P1: un bloqueo sobrevive a un reinicio). Las cuatro rutas que escriben sin sesión o mandan correo tienen límite **por IP y por destinatario**, con la misma regla que el login (ventana de una hora, bloqueo de 60 min que cuenta desde el último golpe), y el golpe cuenta siempre, permitido o no:
+
+| Ruta | `kind` | Por IP | Por destinatario |
+|---|---|---|---|
+| `POST /auth/password/olvido` | `password.olvido` | 10/h | 3/h |
+| `POST /auth/password/restablecimiento` | `password.restablecimiento` | 10/h | — |
+| `POST /usuarios` | `usuario.invitar` | 30/h | 3/h |
+| `POST /usuarios/:id/reenvio-de-invitacion` | `usuario.reenvio` | 30/h | 3/h |
+
+Contar y anotar el golpe son **una sola transacción por clave** bajo `pg_advisory_xact_lock`: un límite de leer-luego-escribir no limita bajo peticiones simultáneas, y la 🔴 que lo fija las lanza en paralelo. La respuesta es 429 `LIMITE_DE_SOLICITUDES` con `Retry-After`, distinto de `ACCESO_BLOQUEADO` (login) y de `TOO_MANY_REQUESTS` (limitador global). La fila «recuperación de cuenta: escala a revisión manual» y el CAPTCHA siguen sin implementarse.
+
+**La IP es la del cliente, no la del proxy.** Detrás de Caddy toda petición llega con la IP de Caddy (INC-022): `ipDelCliente` toma el último salto de `X-Forwarded-For` **solo si el socket está en `PROXY_DE_CONFIANZA`** (en producción, la IP fija de Caddy `172.28.0.10`, dentro de la subred fija de compose; en desarrollo, vacía = el socket), y lo usan el login, el back office, el limitador global y el límite de tasa. Con par no confiable la cabecera se ignora.
+
+**Registro de exenciones de ámbito de tenant.** Tablas con RLS `ENABLE + FORCE` cuya política es `USING (true)` porque **no hay tenant contra el que filtrar**. No son exenciones de RLS (la lista M6 de `audit:migrations` sigue vacía) ni de auditoría; cada una lleva lo mínimo y la aplicación no la borra:
+
+| Tabla | Desde | Qué guarda | Por qué no tiene tenant |
+|---|---|---|---|
+| `login_attempt` | P1 | correo, IP, instante | se cuenta antes de saber quién entra |
+| `rate_limit_hit` | P16-A1 | `kind`, `ip:<ip>` o `correo:<sha256>`, instante | quien pide un restablecimiento todavía no es nadie; la purga a las 24 h la hace el despachador |
+
+**El token de restablecimiento y de invitación en vuelo.** Vive en claro solo en `email_outbox.datos` mientras el correo es `PENDIENTE`, y esa columna la lee únicamente `costeo_despachador` (`SELECT` por columnas para la app y el back office); al cerrar el correo se reemplaza por `{plantilla, destinatario}`. Las dos funciones `SECURITY DEFINER` que lo crean y lo gastan son las únicas que escriben, y están inventariadas con las tres de P1 en `docs/sistema/seguridad.md` (ADR-025).
+
 ### 2.2 Credenciales y sesiones
 - Argon2id (§4.4 de CLAUDE.md); verificación contra listas de contraseñas filtradas (k-anonimato de HIBP o lista local) al crearlas
 - Sesión: token opaco aleatorio de 256 bits en cookie `HttpOnly + Secure + SameSite=Strict`; **rotación del ID de sesión al iniciar sesión** (corta session fixation)

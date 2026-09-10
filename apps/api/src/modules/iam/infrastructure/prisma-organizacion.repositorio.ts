@@ -18,6 +18,7 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 
+import type { CorreoAEncolar } from '../../../shared/application/correo/correo-a-encolar';
 import {
   companyId as aCompanyId,
   locationId as aLocationId,
@@ -26,6 +27,7 @@ import {
   type LocationId,
   type UserId,
 } from '../../../shared/domain/identity/identificadores';
+import { escribirEnOutbox } from '../../../shared/infrastructure/persistence/outbox';
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
@@ -33,8 +35,10 @@ import type {
   RepositorioDeOrganizacion,
   ResultadoDeCreacion,
   ResultadoDeInvitacion,
+  ResultadoDeReinvitacion,
   TipoDeUbicacion,
   Ubicacion,
+  UsuarioInvitado,
 } from '../application/ports/repositorio-de-organizacion.port';
 
 const ESTADO_ACTIVO = 'ACTIVE';
@@ -121,6 +125,7 @@ export class PrismaOrganizacionRepositorio implements RepositorioDeOrganizacion 
     readonly email: string;
     readonly tokenHash: string;
     readonly expiraEn: Date;
+    readonly correo: CorreoAEncolar;
   }): Promise<ResultadoDeInvitacion> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       try {
@@ -135,7 +140,12 @@ export class PrismaOrganizacionRepositorio implements RepositorioDeOrganizacion 
           select: { id: true },
         });
 
-        return { clase: 'invitado', id: aUserId(fila.id) };
+        // EN LA MISMA TRANSACCION que el usuario (ADR-025): o existen los dos,
+        // o no existe ninguno.
+        const id = aUserId(fila.id);
+        await escribirEnOutbox(tx, { companyId: entrada.companyId, userId: id, correo: entrada.correo });
+
+        return { clase: 'invitado', id };
       } catch (error) {
         // El correo es unico GLOBALMENTE: puede estar en uso en otra company, y
         // por RLS ni siquiera se puede saber cual. El caso de uso responde lo
@@ -145,6 +155,44 @@ export class PrismaOrganizacionRepositorio implements RepositorioDeOrganizacion 
         }
         throw error;
       }
+    });
+  }
+
+  public async invitadoPendiente(entrada: {
+    readonly companyId: CompanyId;
+    readonly userId: UserId;
+  }): Promise<UsuarioInvitado | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.appUser.findFirst({
+        where: { id: entrada.userId, companyId: entrada.companyId, status: ESTADO_INVITADO },
+        select: { email: true },
+      });
+      return fila === null ? null : { email: fila.email };
+    });
+  }
+
+  public async reinvitar(entrada: {
+    readonly companyId: CompanyId;
+    readonly userId: UserId;
+    readonly tokenHash: string;
+    readonly expiraEn: Date;
+    readonly correo: CorreoAEncolar;
+  }): Promise<ResultadoDeReinvitacion> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      // `status: INVITED` en el WHERE: si activo entre la lectura del caso de
+      // uso y esta escritura, no se toca nada y no se encola nada. Sustituir
+      // el token es lo que invalida el enlace anterior — el indice unico de
+      // `invitation_token_hash` no admite dos vivos.
+      const resultado = await tx.appUser.updateMany({
+        where: { id: entrada.userId, companyId: entrada.companyId, status: ESTADO_INVITADO },
+        data: { invitationTokenHash: entrada.tokenHash, invitationExpiresAt: entrada.expiraEn },
+      });
+      if (resultado.count === 0) {
+        return 'no_pendiente';
+      }
+
+      await escribirEnOutbox(tx, { companyId: entrada.companyId, userId: entrada.userId, correo: entrada.correo });
+      return 'reinvitado';
     });
   }
 

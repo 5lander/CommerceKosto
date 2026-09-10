@@ -26,7 +26,7 @@ set -a
 . "$ENV_PRODUCCION"
 set +a
 
-echo "[desplegar] 1/7  codigo"
+echo "[desplegar] 1/8  codigo"
 git pull --ff-only
 
 # LAS DOS IMAGENES, EN SU PROPIO PASO Y ANTES DE TOCAR NADA.
@@ -36,13 +36,13 @@ git pull --ff-only
 # deja el contenedor ANTERIOR corriendo, su comprobacion de salud sigue en verde
 # y el despliegue parece haber funcionado mientras sirve codigo viejo. Paso de
 # verdad y esta contado en INC-018.
-echo "[desplegar] 2/7  imagenes de la API y de la interfaz"
+echo "[desplegar] 2/8  imagenes de la API y de la interfaz"
 "${COMPOSE[@]}" build api web
 
-echo "[desplegar] 3/7  base y pooler"
+echo "[desplegar] 3/8  base y pooler"
 "${COMPOSE[@]}" up -d db pgbouncer
 
-echo "[desplegar] 4/7  esperando a que la base este sana"
+echo "[desplegar] 4/8  esperando a que la base este sana"
 for _ in $(seq 1 60); do
   estado=$(docker inspect -f '{{.State.Health.Status}}' costeo-db 2>/dev/null || echo starting)
   [ "$estado" = "healthy" ] && break
@@ -54,16 +54,29 @@ if [ "${estado:-}" != "healthy" ]; then
   exit 1
 fi
 
+# LOS ROLES QUE UN CLUSTER YA EN PIE NO CREA SOLO. `roles.sql` corre una unica
+# vez, cuando el volumen de datos esta vacio; un rol que un paquete estrena
+# despues (costeo_backoffice en P11, costeo_despachador en P16-A1) no existe en
+# el VPS desplegado antes, y la migracion que lo necesita FALLA EN ALTO si
+# falta. Los dos scripts son idempotentes y no rotan contrasenas: si el rol ya
+# existe, solo conceden CONNECT. Necesitan psql, que aqui va por
+# `docker compose exec db`, y POSTGRES_SUPERUSER_PASSWORD del .env de arriba.
+echo "[desplegar] 5/8  dependencias y roles del cluster (costeo_backoffice, costeo_despachador)"
+npm ci --omit=dev --ignore-scripts
+npm run rol:backoffice
+npm run rol:despachador
+
 # Las migraciones NO corren dentro del contenedor de la API: corren aqui, con
 # MIGRATION_DATABASE_URL, que apunta a 127.0.0.1 porque el puerto esta atado ahi.
-echo "[desplegar] 5/7  migraciones, como costeo_migrator"
-npm ci --omit=dev --ignore-scripts
+echo "[desplegar] 6/8  migraciones, como costeo_migrator"
 npm exec --yes prisma migrate deploy -- --schema apps/api/prisma/schema.prisma
 
-echo "[desplegar] 6/7  API, interfaz y proxy"
-"${COMPOSE[@]}" up -d api web caddy
+# `correo` usa la imagen de `api` (misma imagen, otro binario): no se construye
+# aparte y arranca en el mismo paso.
+echo "[desplegar] 7/8  API, despachador de correo, interfaz y proxy"
+"${COMPOSE[@]}" up -d api correo web caddy
 
-echo "[desplegar] 7/7  comprobando"
+echo "[desplegar] 8/8  comprobando"
 for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:${API_PORT:-3000}/ready" >/dev/null 2>&1; then
     listo=si
@@ -104,4 +117,19 @@ if ! curl -fsSk -o /dev/null "https://${DOMINIO}/api/health"; then
   exit 1
 fi
 
-echo "[desplegar] listo — API, interfaz y proxy responden"
+# EL DESPACHADOR NO TIENE PUERTO: su salud es el latido que escribe tras cada
+# pasada, y el healthcheck del contenedor es quien lo mira. Se espera a que
+# Docker lo de por sano; si no lo hace, un despachador caido son invitaciones
+# que nunca llegan sin ningun error a la vista del cliente.
+for _ in $(seq 1 30); do
+  estado_correo=$(docker inspect -f '{{.State.Health.Status}}' costeo-correo 2>/dev/null || echo starting)
+  [ "$estado_correo" = "healthy" ] && break
+  sleep 3
+done
+if [ "${estado_correo:-}" != "healthy" ]; then
+  echo "El despachador de correo no llego a healthy." >&2
+  "${COMPOSE[@]}" logs --tail=50 correo >&2
+  exit 1
+fi
+
+echo "[desplegar] listo — API, despachador de correo, interfaz y proxy responden"

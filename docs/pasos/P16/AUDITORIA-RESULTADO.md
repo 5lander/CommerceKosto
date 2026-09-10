@@ -69,7 +69,7 @@
 | H1 | `CONSTRUCCION.md` | ✅ | `docs/pasos/P16/CONSTRUCCION.md`, sección «Commit 0» completa |
 | H2–H4 | Endpoints, FUNCIONAMIENTO, modelo de datos | — no aplica | Sin endpoints ni migraciones |
 | H5 | Configuración | — no aplica | Sin variables nuevas |
-| H6 | ADR | — no aplica | Las decisiones de este commit son de tooling y están en `CONSTRUCCION.md`; las de la pasada (ADR-019…ADR-025) llegan con el paquete que las implementa |
+| H6 | ADR | — no aplica | Las decisiones de este commit son de tooling y están en `CONSTRUCCION.md`; las de la pasada (ADR-020…ADR-026: ADR-019 ya es la capa visual) llegan con el paquete que las implementa |
 | H8 | CHANGELOG | ✅ | Entrada «P16 · commit 0 — Tooling de la pasada» |
 | H10–H12 | Incidencias | ✅ | Ninguna cumple el criterio: el rojo de `docs/Sistema ejemplo/` lo explicaba el propio mensaje del check |
 | H13 | Describe lo construido | ✅ | Los números del bundle son los medidos, no los previstos |

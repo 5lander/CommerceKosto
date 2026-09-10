@@ -12,6 +12,11 @@
  * NO SE ACEPTA `factorDeConversion`: lo calcula el dominio. Lo que sí se acepta
  * es `factorExplicito`, que es otra cosa —cuántas unidades de uso salen de UNA
  * de compra— y solo hace falta cuando las dimensiones no coinciden.
+ *
+ * **`ivaTarifa` SE VALIDA EN EL CAMPO, NO EN UN REFINAMIENTO DE OBJETO**
+ * (INC-008): `fraccion` solo admite `0`, `0.xx` o `1`. Un `15` donde va
+ * `0.15` dividiría cada compra entre dieciséis, y el número sería plausible
+ * en pantalla. El dominio lo vuelve a comprobar con `exigirTarifaValida`.
  */
 
 import { z } from 'zod';
@@ -25,10 +30,27 @@ const decimal = z
   .max(LARGO_MAXIMO_DE_DECIMAL)
   .regex(/^-?\d+(\.\d+)?$/u, 'debe ser un decimal en notación normal, por ejemplo "0.85"');
 
+/** Una tarifa de IVA: fracción entre 0 y 1, en cadena. `"0.15"`, nunca `"15"`. */
+const fraccion = z
+  .string()
+  .max(LARGO_MAXIMO_DE_DECIMAL)
+  .regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u, 'debe ser una fracción entre 0 y 1, por ejemplo "0.15"');
+
 const nombre = z.string().trim().min(1).max(LARGO_MAXIMO_DE_NOMBRE);
 const texto = z.string().trim().max(LARGO_MAXIMO_DE_NOMBRE);
 
-export const CUERPO_DE_GRUPO = z.object({ nombre }).strict();
+/**
+ * `ivaTarifa` es la tarifa que heredan las compras SIN ARTÍCULO de los ítems
+ * del grupo (D-16.9). Omitida o `null`: el grupo no define ninguna.
+ */
+export const CUERPO_DE_GRUPO = z
+  .object({ nombre, ivaTarifa: fraccion.nullable().default(null) })
+  .strict();
+
+/** `PUT`: estado completo, así que aquí `ivaTarifa` no tiene valor por defecto. */
+export const CUERPO_DE_CAMBIO_DE_GRUPO = z
+  .object({ nombre, ivaTarifa: fraccion.nullable() })
+  .strict();
 
 export const CUERPO_DE_ITEM = z
   .object({
@@ -74,10 +96,29 @@ export const CUERPO_DE_ARTICULO = z
     presentacion: decimal,
     unidadDePresentacion: z.string().min(1).max(LARGO_MAXIMO_DE_DECIMAL),
     factorExplicito: decimal.nullable(),
+    /** Obligatoria: la tarifa de IVA de ESTE artículo (D-16.9). */
+    ivaTarifa: fraccion,
+  })
+  .strict();
+
+/**
+ * Lo editable de un artículo. Ni la presentación ni su unidad ni el factor: son
+ * lo que convierte cada compra histórica a unidades de uso, y cambiarlos
+ * reescribiría meses cerrados. Para eso se crea otro artículo.
+ */
+export const CUERPO_DE_CAMBIO_DE_ARTICULO = z
+  .object({
+    nombre,
+    marca: texto.nullable(),
+    proveedor: texto.nullable(),
+    ivaTarifa: fraccion,
+    estado: z.enum(['ACTIVE', 'INACTIVE']),
   })
   .strict();
 
 export type CuerpoDeGrupo = z.infer<typeof CUERPO_DE_GRUPO>;
+export type CuerpoDeCambioDeGrupo = z.infer<typeof CUERPO_DE_CAMBIO_DE_GRUPO>;
+export type CuerpoDeCambioDeArticulo = z.infer<typeof CUERPO_DE_CAMBIO_DE_ARTICULO>;
 export type CuerpoDeItem = z.infer<typeof CUERPO_DE_ITEM>;
 export type CuerpoDeCambioDeItem = z.infer<typeof CUERPO_DE_CAMBIO_DE_ITEM>;
 export type CuerpoDeArticulo = z.infer<typeof CUERPO_DE_ARTICULO>;

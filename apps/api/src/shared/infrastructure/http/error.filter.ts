@@ -69,7 +69,9 @@ function codigoDe(status: number): string {
  *
  * `ACCESO_BLOQUEADO` sale como 429 y no como 401 a proposito: es informacion
  * util y honesta para un cliente legitimo —"espera y reintenta"—, y para el
- * atacante no anade nada que no supiera ya.
+ * atacante no anade nada que no supiera ya. `LIMITE_DE_SOLICITUDES` es el
+ * tercer 429 (D-16.24) y se distingue por el `code`: el cliente tiene que
+ * saber si es su cuenta, el limitador global o una peticion repetida de mas.
  */
 const ESTADO_POR_CODIGO: Readonly<Record<CodigoDeDominio, number>> = {
   CREDENCIALES_INVALIDAS: HttpStatus.UNAUTHORIZED,
@@ -80,7 +82,24 @@ const ESTADO_POR_CODIGO: Readonly<Record<CodigoDeDominio, number>> = {
   LIMITE_DEL_PLAN: HttpStatus.CONFLICT,
   CONFLICTO: HttpStatus.CONFLICT,
   ENTRADA_INVALIDA: HttpStatus.BAD_REQUEST,
+  LIMITE_DE_SOLICITUDES: HttpStatus.TOO_MANY_REQUESTS,
 };
+
+const CABECERA_DE_REINTENTO = 'Retry-After';
+
+/**
+ * Un error de dominio que sabe cuando reintentar. El filtro no conoce la
+ * clase: mira la forma, para que cualquier error futuro con espera —un
+ * bloqueo de cuenta, un cierre de periodo en curso— gane la cabecera sin
+ * tocar este archivo.
+ */
+function segundosDeReintento(exception: ErrorDeDominio): number | null {
+  if (!('reintentarEnSegundos' in exception)) {
+    return null;
+  }
+  const segundos: unknown = exception.reintentarEnSegundos;
+  return typeof segundos === 'number' && Number.isInteger(segundos) && segundos > 0 ? segundos : null;
+}
 
 /** Extrae el texto de una `HttpException` sin tocar `any`. */
 function mensajeDe(exception: HttpException): string {
@@ -106,6 +125,8 @@ function mensajeDe(exception: HttpException): string {
 export interface ErrorResponse {
   readonly status: number;
   readonly body: { readonly code: string; readonly message: string };
+  /** `Retry-After` cuando el error trae espera; vacio en el resto. */
+  readonly cabeceras: Readonly<Record<string, string>>;
 }
 
 /**
@@ -123,9 +144,11 @@ export function errorResponseFor(exception: unknown): ErrorResponse {
   // Un error de dominio es una regla de negocio rota, no un fallo: su codigo y
   // su mensaje son parte del contrato de la API y salen tal cual.
   if (exception instanceof ErrorDeDominio) {
+    const reintento = segundosDeReintento(exception);
     return {
       status: ESTADO_POR_CODIGO[exception.codigo],
       body: { code: exception.codigo, message: exception.message },
+      cabeceras: reintento === null ? {} : { [CABECERA_DE_REINTENTO]: String(reintento) },
     };
   }
 
@@ -141,6 +164,7 @@ export function errorResponseFor(exception: unknown): ErrorResponse {
       message:
         esDeServidor || !(exception instanceof HttpException) ? MENSAJE_GENERICO : mensajeDe(exception),
     },
+    cabeceras: {},
   };
 }
 
@@ -149,7 +173,7 @@ export class ErrorFilter implements ExceptionFilter {
   private readonly logger = new Logger(ErrorFilter.name);
 
   public catch(exception: unknown, host: ArgumentsHost): void {
-    const { status, body } = errorResponseFor(exception);
+    const { status, body, cabeceras } = errorResponseFor(exception);
 
     if (status >= PRIMER_CODIGO_DE_SERVIDOR) {
       // El log lleva la excepcion entera; la respuesta, nada de ella.
@@ -159,6 +183,9 @@ export class ErrorFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<ServerResponse>();
     response.statusCode = status;
     response.setHeader('Content-Type', 'application/json; charset=utf-8');
+    for (const [nombre, valor] of Object.entries(cabeceras)) {
+      response.setHeader(nombre, valor);
+    }
     response.end(JSON.stringify(body));
   }
 }

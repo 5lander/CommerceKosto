@@ -140,6 +140,7 @@ describe('inventario', () => {
         presentacion: '1',
         unidadDePresentacion: unidad,
         factorExplicito: null,
+        ivaTarifa: '0',
       });
     expect(articulo.status).toBe(CREADO);
 
@@ -188,11 +189,24 @@ describe('inventario', () => {
     expect(decision.status).toBe(SIN_CONTENIDO);
   }
 
+  /**
+   * Una COMPRA de esta suite lleva tarifa CERO en el cuerpo: los ítems no
+   * tienen grupo y la compra no trae artículo, así que sin ella sería 400
+   * (D-16.9). Con cero, el neto ES el bruto y los saldos e importes que estas
+   * pruebas esperan no cambian. La tarifa real se prueba en `iva-de-compra`.
+   */
   function registrar(cuerpo: Cuerpo, quien = cookie) {
     return request(servidor())
       .post('/inventario/movimientos')
       .set('Cookie', quien)
-      .send({ costoTotal: null, purchaseArticleId: null, note: null, occurredAt: MARZO, ...cuerpo });
+      .send({
+        costoTotal: null,
+        purchaseArticleId: null,
+        ivaTarifa: cuerpo['tipo'] === 'COMPRA' ? '0' : null,
+        note: null,
+        occurredAt: MARZO,
+        ...cuerpo,
+      });
   }
 
   async function comprar(datos: {

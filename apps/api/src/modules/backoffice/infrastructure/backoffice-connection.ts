@@ -35,10 +35,10 @@
  * el del migrador, que es dueño de las tablas.
  */
 
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Injectable } from '@nestjs/common';
 
-import { type Prisma, PrismaClient } from '../../../../generated/prisma';
+import type { Prisma } from '../../../../generated/prisma';
+import { ConexionConRolPropio } from '../../../shared/infrastructure/persistence/conexion-con-rol-propio';
 
 /** El usuario que la cadena TIENE que traer. Cualquier otro aborta el arranque. */
 const ROL_ESPERADO = 'costeo_backoffice';
@@ -72,31 +72,21 @@ function cadenaVerificada(): string {
   return cadena;
 }
 
+/**
+ * El pool y la transaccion por operacion los pone `ConexionConRolPropio`
+ * (desde P16-A1, compartida con el despachador). Lo que sigue siendo de aqui
+ * es la cuarta condicion: la cadena se verifica ANTES de construir el cliente.
+ *
+ * **`run` NO FIJA NINGÚN TENANT, y no es un olvido:** el rol puentea RLS, así
+ * que `set_config('app.company_id', ...)` no cambiaría nada. Lo que sí
+ * garantiza la transacción es lo que de verdad importa aquí: que la lectura
+ * de datos de un cliente y el registro de por qué se leyó **ocurran o no
+ * ocurran juntos**. Si el `INSERT` en `backoffice_access_log` falla, la
+ * lectura se revierte y quien preguntó no ve nada.
+ */
 @Injectable()
-export class BackofficeConnection implements OnModuleDestroy {
-  private readonly cliente: PrismaClient;
-
+export class BackofficeConnection extends ConexionConRolPropio {
   public constructor() {
-    this.cliente = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: cadenaVerificada() }),
-    });
-  }
-
-  /**
-   * Ejecuta el trabajo en una transacción.
-   *
-   * **NO FIJA NINGÚN TENANT, y no es un olvido:** el rol puentea RLS, así que
-   * `set_config('app.company_id', ...)` no cambiaría nada. Lo que sí garantiza
-   * la transacción es lo que de verdad importa aquí: que la lectura de datos de
-   * un cliente y el registro de por qué se leyó **ocurran o no ocurran juntos**.
-   * Si el `INSERT` en `backoffice_access_log` falla, la lectura se revierte y
-   * quien preguntó no ve nada.
-   */
-  public async run<T>(trabajo: (tx: ClienteDeBackoffice) => Promise<T>): Promise<T> {
-    return this.cliente.$transaction(async (tx) => trabajo(tx));
-  }
-
-  public async onModuleDestroy(): Promise<void> {
-    await this.cliente.$disconnect();
+    super(cadenaVerificada());
   }
 }

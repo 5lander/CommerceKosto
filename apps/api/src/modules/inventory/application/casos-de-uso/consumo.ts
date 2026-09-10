@@ -247,6 +247,7 @@ function salida(entrada: {
     tipo: 'CONSUMO_POR_VENTA',
     cantidad: conSignoDelTipo('CONSUMO_POR_VENTA', magnitud).toStorageString(),
     costoTotal: null,
+    desglose: null,
     purchaseArticleId: null,
     reversesMovementId: null,
     occurredAt: entrada.datos.occurredAt,

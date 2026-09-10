@@ -243,3 +243,49 @@ export class MovimientoDeLoteInvalidoError extends ErrorDeDominio {
     super(mensajeDeProblemas(problemas));
   }
 }
+
+/**
+ * Una COMPRA sin el total de la factura.
+ *
+ * El esquema del endpoint ya lo exige con un refinamiento de objeto, y un
+ * refinamiento de objeto no corre si otro campo falló antes (INC-008): la
+ * petición se rechaza igual, pero el dominio no puede fiarse de eso. Sin
+ * importe no hay neto, y sin neto `compras_del_mes` (SPEC §16) queda corto.
+ */
+export class CompraSinImporteError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('Una compra necesita el total de la factura: sin él no hay costo que netear.');
+  }
+}
+
+/**
+ * Una COMPRA nueva sin desglose (D-16.25). No la escribe ninguna ruta de hoy:
+ * es la guarda para la ruta de mañana que construya una compra sin pasar por
+ * `desglosarCompra` (§23 HACCP, back office, un script), porque la base no
+ * puede distinguirla de una anterior a P16-A1.
+ */
+export class CompraSinDesgloseError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super(
+      'Una compra se registra con su total de factura y su tarifa de IVA: el libro no acepta ' +
+        'una compra nueva sin desglose.',
+    );
+  }
+}
+
+/** Un bruto negativo no es una factura. Guarda de `inventory_movement_desglose_en_rango`. */
+export class CompraConImporteInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(importe: string) {
+    super(
+      `El total de una compra es una magnitud sin signo: «${importe}» no lo es. ` +
+        'Para deshacer una compra existe la corrección.',
+      { importe },
+    );
+  }
+}

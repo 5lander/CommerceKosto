@@ -11,6 +11,9 @@
 | `POSTGRES_SUPERUSER_PASSWORD` | Solo el arranque de la base y los respaldos | `/etc/costeo/.env`, modo `600`, dueño `root` |
 | `COSTEO_MIGRATOR_PASSWORD` | `migrate deploy`, en su propio paso | idem |
 | `COSTEO_APP_PASSWORD` | El proceso de la API | idem |
+| `COSTEO_BACKOFFICE_PASSWORD` | El proceso del back office (P11) | idem, y dentro de `BACKOFFICE_DATABASE_URL` |
+| `COSTEO_DESPACHADOR_PASSWORD` | El servicio `correo` (P16-A1). Compose construye `DESPACHADOR_DATABASE_URL` con ella; la plantilla del `.env` la lleva también dentro de la cadena | idem |
+| `RESEND_API_KEY` | El servicio `correo`, para enviar (P16-A1) | idem. Resend la enseña una sola vez; la copia vive en el gestor |
 | `COSTEO_IMPORT_PASSWORD` | Solo cuando se carga un catálogo | **No se guarda**: se exporta en la sesión y se va con ella |
 | Contraseñas de usuarios de la app | Las personas | `app_user.password_hash`, Argon2id. No son nuestras y no se rotan desde aquí |
 
@@ -81,6 +84,44 @@ para descubrir que no.**
 
 ---
 
+## Rotar `COSTEO_DESPACHADOR_PASSWORD` — con un corte de segundos en el correo
+
+El despachador mantiene dos conexiones y las reabre solas; mientras se recrea el contenedor, los
+correos esperan en `PENDIENTE` y salen en la primera pasada después. Nada se pierde.
+
+```sh
+NUEVA=$(openssl rand -base64 48 | tr -d '\n/+=' | head -c 48)
+docker compose exec -T db psql -U postgres -d costeo \
+  -c "ALTER ROLE costeo_despachador PASSWORD '$NUEVA';"
+sudo sed -i "s|^COSTEO_DESPACHADOR_PASSWORD=.*|COSTEO_DESPACHADOR_PASSWORD=$NUEVA|" /etc/costeo/.env
+sudo sed -i "s|postgresql://costeo_despachador:[^@]*@|postgresql://costeo_despachador:$NUEVA@|g" /etc/costeo/.env
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file /etc/costeo/.env up -d --force-recreate correo
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file /etc/costeo/.env ps correo   # (healthy) en menos de un minuto
+```
+
+`COSTEO_BACKOFFICE_PASSWORD` se rota igual, con `costeo_backoffice`, `BACKOFFICE_DATABASE_URL` y el
+proceso del back office.
+
+## Rotar `RESEND_API_KEY`
+
+Primero la nueva, después revocar la vieja: al revés hay una ventana en la que el despachador
+recibe `401` y va sumando intentos (a los cinco, `FALLIDO`, y esos hay que reenviarlos a mano).
+
+```sh
+# 1. En el panel de Resend: API Keys → Create (permiso de envío solamente). Copiarla al gestor.
+# 2. Cambiarla en el archivo de entorno del VPS
+sudo sed -i "s|^RESEND_API_KEY=.*|RESEND_API_KEY=<la nueva>|" /etc/costeo/.env
+# 3. Recrear solo el despachador
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file /etc/costeo/.env up -d --force-recreate correo
+# 4. Un envío de prueba (una invitación a un buzón propio) y la fila ENVIADO
+docker compose exec -T db psql -U postgres -d costeo \
+  -c "SELECT estado, intentos, error FROM email_outbox ORDER BY created_at DESC LIMIT 1;"
+# 5. Solo entonces, revocar la vieja en el panel de Resend
+```
+
+La API también recibe `RESEND_API_KEY` en su entorno (el `.env` es uno y el selector se evalúa en
+los dos procesos), pero **no la usa**: no hace falta recrear `api`.
+
 ## Rotar `POSTGRES_SUPERUSER_PASSWORD`
 
 ```sh
@@ -104,8 +145,8 @@ Si no lo compruebas ahora, lo descubres el día que necesites restaurar.
 
 | Situación | Qué se rota | Cuándo |
 |---|---|---|
-| Rutina | Los tres de la base | Cada 6 meses |
-| **Alguien dejó el equipo o el proyecto** | Los tres, **y se revocan las sesiones** | El mismo día |
+| Rutina | Los cinco de la base y la clave de Resend | Cada 6 meses |
+| **Alguien dejó el equipo o el proyecto** | Los cinco y la clave de Resend, **y se revocan las sesiones** | El mismo día |
 | **Un secreto se pegó en un chat, un ticket o una captura** | Ese, de inmediato | En minutos, no en horas |
 | Un `.env` llegó a un commit | Ese, **y se reescribe el historial** | De inmediato. `audit:secrets` debería haberlo parado; si no lo hizo, abre una incidencia |
 
@@ -122,7 +163,8 @@ docker compose exec -T db psql -U postgres -d costeo \
 
 - **Poner un secreto en `docker-compose.yml`, en el `Dockerfile` o en una variable de GitHub Actions
   que no sea un secreto del repositorio.** `audit:secrets` corre sobre cada diff y sobre el historial.
-- **Reutilizar la misma contraseña para `costeo_app` y `costeo_migrator`.** Son roles con privilegios
-  distintos justamente para que comprometer uno no dé el otro.
+- **Reutilizar la misma contraseña para dos de los roles** (`costeo_app`, `costeo_migrator`,
+  `costeo_backoffice`, `costeo_despachador`). Son roles con privilegios distintos justamente para que
+  comprometer uno no dé el otro.
 - **Dejar `COSTEO_IMPORT_PASSWORD` en el archivo de entorno.** Se exporta en la sesión que carga el
   catálogo y se va al cerrarla.

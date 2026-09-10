@@ -1,10 +1,12 @@
 /**
- * Politica anti fuerza bruta — SEGURIDAD.md §2.1.
+ * Politica anti fuerza bruta del login — SEGURIDAD.md §2.1.
  *
- * ES DOMINIO PURO: recibe una lista de fechas y devuelve una decision. No sabe
- * de PostgreSQL, ni de Redis, ni de relojes del sistema — `ahora` entra por
- * parametro. Por eso se puede probar el bloqueo de una hora sin esperar una
- * hora, que es la unica forma de que estas reglas esten probadas de verdad.
+ * LA REGLA VIVE EN `shared/domain/acceso/politica-de-intentos.ts` DESDE
+ * P16-A1 (D-16.50): el limite de tasa de los endpoints sin sesion necesita la
+ * misma logica con otros numeros, y `shared` no puede importar de un modulo.
+ * Aqui quedan LOS NUMEROS DEL LOGIN y las dos funciones que solo el login usa.
+ * Sus pruebas siguen en verde sin cambiar de resultado: eso es lo que prueba
+ * que la generalizacion no movio nada.
  *
  * DOS VENTANAS, Y NO ES REDUNDANCIA:
  *
@@ -19,6 +21,15 @@
  * La escalada 1 → 5 → 15 → 60 minutos hace que el coste de seguir probando
  * crezca mucho mas rapido que el numero de intentos ganados.
  */
+
+import {
+  MINUTO_MS,
+  evaluarIntentos as evaluarConPolitica,
+  type DecisionDeAcceso,
+  type PoliticaDeIntentos,
+} from '../../../shared/domain/acceso/politica-de-intentos';
+
+export { bloqueoEfectivo, type DecisionDeAcceso } from '../../../shared/domain/acceso/politica-de-intentos';
 
 /**
  * El umbral depende del EJE que se este contando, y la diferencia es
@@ -41,14 +52,17 @@
  * fallos en una hora sigue siendo un techo bajisimo: ningun uso legitimo se
  * acerca.
  *
+ * Y LA IP TIENE QUE SER LA DEL CLIENTE, NO LA DEL PROXY. Detras de Caddy toda
+ * peticion llega con la IP del contenedor `caddy`: sin `ipDelCliente` y
+ * `PROXY_DE_CONFIANZA` (D-16.49, INC-022) este eje bloquearia a todos los
+ * usuarios a la vez al vigesimoquinto fallo de cualquiera.
+ *
  * Es un apartamiento de la lectura literal de SEGURIDAD.md §2.1, que da un solo
  * numero para los dos ejes. Esta razonado en ADR-006 y es reversible: son dos
  * constantes.
  */
 const UMBRAL_POR_CUENTA = 5;
 const UMBRAL_POR_IP = 25;
-
-const MINUTO_MS = 60_000;
 
 const MINUTOS_DE_DISPARO = 15;
 const MINUTOS_DE_ESCALADA = 60;
@@ -71,24 +85,19 @@ const ESCALA_DE_BLOQUEO_MINUTOS = [
 
 export type EjeDeConteo = 'cuenta' | 'ip';
 
-const UMBRAL_DE: Readonly<Record<EjeDeConteo, number>> = {
-  cuenta: UMBRAL_POR_CUENTA,
-  ip: UMBRAL_POR_IP,
-};
-
-export interface DecisionDeAcceso {
-  /** `false` significa: ni siquiera se comprueba la contrasena. */
-  readonly permitido: boolean;
-  /** Cuando vuelve a permitirse. `null` si no hay bloqueo. */
-  readonly bloqueadoHasta: Date | null;
-  /** Fallos que cuentan para el disparo. Util para el evento de auditoria. */
-  readonly fallosRecientes: number;
+function politicaDeLogin(umbral: number): PoliticaDeIntentos {
+  return {
+    umbral,
+    ventanaDeDisparoMs: VENTANA_DE_DISPARO_MS,
+    ventanaDeEscaladaMs: VENTANA_DE_ESCALADA_MS,
+    escalaDeBloqueoMinutos: ESCALA_DE_BLOQUEO_MINUTOS,
+  };
 }
 
-const PERMITIDO_SIN_FALLOS: DecisionDeAcceso = {
-  permitido: true,
-  bloqueadoHasta: null,
-  fallosRecientes: 0,
+/** Los numeros del login, por eje. Son la unica diferencia entre los dos ejes. */
+export const POLITICA_DE_LOGIN: Readonly<Record<EjeDeConteo, PoliticaDeIntentos>> = {
+  cuenta: politicaDeLogin(UMBRAL_POR_CUENTA),
+  ip: politicaDeLogin(UMBRAL_POR_IP),
 };
 
 /**
@@ -103,36 +112,11 @@ export function evaluarIntentos(entrada: {
   /** Cual de los dos ejes se esta contando. Decide el umbral. */
   readonly eje: EjeDeConteo;
 }): DecisionDeAcceso {
-  const { fallos, ahora, eje } = entrada;
-  const umbral = UMBRAL_DE[eje];
-  if (fallos.length === 0) {
-    return PERMITIDO_SIN_FALLOS;
-  }
-
-  const desde = (limite: number): Date[] =>
-    fallos.filter((f) => ahora.getTime() - f.getTime() <= limite);
-
-  const recientes = desde(VENTANA_DE_DISPARO_MS);
-  const paraEscalar = desde(VENTANA_DE_ESCALADA_MS);
-  const rondas = Math.floor(paraEscalar.length / umbral);
-
-  if (rondas === 0) {
-    return { permitido: true, bloqueadoHasta: null, fallosRecientes: recientes.length };
-  }
-
-  const escalon = Math.min(rondas, ESCALA_DE_BLOQUEO_MINUTOS.length) - 1;
-  const minutos = ESCALA_DE_BLOQUEO_MINUTOS[escalon] ?? ESCALA_DE_BLOQUEO_MINUTOS[0];
-
-  // El bloqueo cuenta desde el ULTIMO fallo, no desde el primero: cada intento
-  // nuevo durante el bloqueo lo reinicia. Insistir alarga la espera.
-  const ultimo = paraEscalar.reduce((a, b) => (a.getTime() > b.getTime() ? a : b));
-  const bloqueadoHasta = new Date(ultimo.getTime() + minutos * MINUTO_MS);
-
-  return {
-    permitido: ahora.getTime() >= bloqueadoHasta.getTime(),
-    bloqueadoHasta,
-    fallosRecientes: recientes.length,
-  };
+  return evaluarConPolitica({
+    fallos: entrada.fallos,
+    ahora: entrada.ahora,
+    politica: POLITICA_DE_LOGIN[entrada.eje],
+  });
 }
 
 /**
@@ -143,31 +127,6 @@ export function evaluarIntentos(entrada: {
  * ajusta sola en vez de quedarse corta en silencio.
  */
 export const VENTANA_A_CONSULTAR_MS: number = VENTANA_DE_ESCALADA_MS;
-
-/**
- * El bloqueo efectivo entre varias decisiones: manda la mas restrictiva.
- *
- * SEGURIDAD.md §2.1 exige contar por cuenta **y** por IP, y el "y" no es
- * decorativo. Contar solo por cuenta deja pasar el rociado de contrasenas —una
- * IP prueba la misma contrasena contra mil correos y ninguna cuenta llega a
- * cinco fallos—; contar solo por IP deja pasar la botnet, que reparte los
- * intentos entre miles de direcciones. Se cuentan los dos ejes y basta con que
- * uno bloquee.
- *
- * @returns el momento en que vuelve a permitirse, o `null` si nadie bloquea.
- */
-export function bloqueoEfectivo(decisiones: readonly DecisionDeAcceso[]): Date | null {
-  const bloqueantes = decisiones
-    .filter((d) => !d.permitido)
-    .map((d) => d.bloqueadoHasta)
-    .filter((hasta): hasta is Date => hasta !== null);
-
-  if (bloqueantes.length === 0) {
-    return null;
-  }
-
-  return bloqueantes.reduce((a, b) => (a.getTime() > b.getTime() ? a : b));
-}
 
 /**
  * `true` si el fallo numero `fallosPrevios + 1` es el que abre o escala un

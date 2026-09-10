@@ -24,12 +24,17 @@
  *                 no antes. Comprobarlos antes ahorraria el hash y volveria a
  *                 abrir el canal de tiempo que el paso 3 acaba de cerrar.
  *
+ * EL AVISO DE BLOQUEO SE ENCOLA, NO SE ENVIA (ADR-025, desde P16-A1): va a
+ * `email_outbox` bajo el tenant de la cuenta, como la invitacion y el
+ * restablecimiento, y lo entrega el despachador. Antes salia por `MailerPort`
+ * directamente desde la API, que en produccion tiene `MAIL_ADAPTER=fake`: el
+ * aviso existia solo en la memoria del proceso y nadie lo veia.
+ *
  * NO CONOCE NESTJS NI PRISMA. Recibe todo por puertos y se prueba entero con
  * dobles en memoria, con la base apagada (CLAUDE.md §2).
  */
 
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
-import type { MailerPort } from '../../../../shared/application/ports/mailer.port';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import type { CompanyId, UserId } from '../../../../shared/domain/identity/identificadores';
 import {
@@ -53,19 +58,16 @@ import type {
 
 const ESTADO_ACTIVO = 'ACTIVE';
 
-const ASUNTO_DEL_AVISO = 'Intentos de acceso fallidos en tu cuenta';
-
 /**
  * El "objeto de parametros" de CLAUDE.md §3. Se inyecta como una sola pieza
  * (ver `infrastructure/dependencias-de-iam.ts`), asi que el caso de uso tiene
- * un unico parametro por mucho que necesite seis colaboradores.
+ * un unico parametro por mucho que necesite cinco colaboradores.
  */
 export interface DependenciasDeIniciarSesion {
   readonly repositorio: RepositorioDeAutenticacion;
   readonly hasher: HasherDeContrasenas;
   readonly tokens: GeneradorDeTokens;
   readonly auditoria: AuditLogPort;
-  readonly correo: MailerPort;
   readonly reloj: Reloj;
 }
 
@@ -212,10 +214,10 @@ export class IniciarSesion {
       detail: { motivo },
     });
 
-    // El aviso solo se envia si la cuenta EXISTE. Enviarlo siempre convertiria
+    // El aviso solo se encola si la cuenta EXISTE. Encolarlo siempre convertiria
     // el login en un relay de correo hacia direcciones que elige el atacante.
     if (credencial !== null && cruzaUmbralDeBloqueo(fallosPrevios)) {
-      await this.avisarAlTitular(intento.email);
+      await this.avisarAlTitular(credencial, intento.email);
     }
 
     throw new CredencialesInvalidasError(motivo);
@@ -280,16 +282,16 @@ export class IniciarSesion {
     });
   }
 
-  private async avisarAlTitular(email: string): Promise<void> {
-    await this.deps.correo.send({
-      to: email,
-      subject: ASUNTO_DEL_AVISO,
-      // Sin enlaces y sin datos dentro: un correo automatico de seguridad con
-      // un enlace es indistinguible de la suplantacion que dice prevenir.
-      body:
-        'Hemos detectado varios intentos de acceso fallidos en tu cuenta y la hemos ' +
-        'bloqueado temporalmente. Si has sido tu, vuelve a intentarlo en unos minutos. ' +
-        'Si no, entra a la aplicacion como haces siempre y cambia tu contrasena.',
+  /**
+   * Sin enlaces y sin datos dentro (`datos: {}`): un correo automatico de
+   * seguridad con un enlace es indistinguible de la suplantacion que dice
+   * prevenir. El texto vive en `shared/application/correo/plantillas.ts`.
+   */
+  private async avisarAlTitular(credencial: CredencialDeLogin, email: string): Promise<void> {
+    await this.deps.repositorio.encolarCorreo({
+      companyId: credencial.companyId,
+      userId: credencial.userId,
+      correo: { destinatario: email, plantilla: 'BLOQUEO', datos: {} },
     });
   }
 

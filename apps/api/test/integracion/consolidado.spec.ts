@@ -137,6 +137,7 @@ describe('consolidado de company', () => {
       presentacion: '1',
       unidadDePresentacion: 'kg',
       factorExplicito: null,
+      ivaTarifa: '0',
     });
 
     const precioId = await crear('/precios', {

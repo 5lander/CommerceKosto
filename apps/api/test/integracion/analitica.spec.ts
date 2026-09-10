@@ -131,6 +131,7 @@ describe('vistas analiticas', () => {
       presentacion: '1',
       unidadDePresentacion: 'kg',
       factorExplicito: null,
+      ivaTarifa: '0',
     });
 
     const precioId = await crear('/precios', {
@@ -445,6 +446,7 @@ describe('vistas analiticas', () => {
           cantidad: '100',
           costoTotal: '200.00',
           purchaseArticleId: null,
+          ivaTarifa: '0',
           occurredAt: EN_MARZO,
           note: null,
         });

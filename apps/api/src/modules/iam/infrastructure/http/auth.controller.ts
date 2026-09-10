@@ -7,13 +7,16 @@
  * cuerpo lleva solo cuando caduca, que es lo unico que un cliente necesita
  * saber para renovar a tiempo.
  *
- * LA IP SALE DEL SOCKET, NO DE `X-Forwarded-For`, y es una decision de
- * seguridad, no un descuido. Esa cabecera la escribe quien hace la peticion: si
- * se creyera sin un proxy de confianza delante que la reescriba, un atacante
- * podria (a) esquivar el bloqueo por IP cambiandola en cada intento y (b) peor,
- * ENVENENAR la cuenta de otra IP para bloquear a un tercero. Cuando el
- * despliegue tenga proxy de confianza se configurara `trust proxy` y se leera
- * de ahi — con el proxy delante, no antes.
+ * LA IP LA RESUELVE `ipDelCliente` CON `PROXY_DE_CONFIANZA` (D-16.49). Hasta
+ * P16-A1 salia del socket sin mas, «hasta que el despliegue tuviera proxy de
+ * confianza»; ese despliegue existe desde P14b y nadie volvio aqui: detras de
+ * Caddy toda peticion llegaba con la IP de Caddy, y el bloqueo por IP del
+ * login habria sido un bloqueo GLOBAL al vigesimoquinto fallo de cualquiera
+ * (INC-022). `X-Forwarded-For` se cree SOLO cuando el socket es de un proxy de
+ * la lista, porque esa cabecera la escribe quien hace la peticion: creida sin
+ * mas, un atacante podria (a) esquivar el bloqueo cambiandola en cada intento
+ * y (b) peor, ENVENENAR la cuenta de otra IP para bloquear a un tercero. En
+ * desarrollo la lista esta vacia y la IP sigue siendo la del socket.
  *
  * `Secure` SALE DE LA CONFIGURACION Y NO DEL SOCKET. Con TLS terminado en un
  * proxy —que es como se despliega esto— `socket.encrypted` es `false` en
@@ -26,6 +29,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { CONFIGURATION, type Configuration } from '../../../../shared/infrastructure/config/environment';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { ipDelCliente } from '../../../../shared/infrastructure/http/ip-del-cliente';
 import { CerrarSesion } from '../../application/casos-de-uso/cerrar-sesion';
 import { IniciarSesion } from '../../application/casos-de-uso/iniciar-sesion';
 import type { SesionActiva } from '../../application/casos-de-uso/validar-sesion';
@@ -60,7 +64,7 @@ export class AuthController {
     const abierta = await this.iniciarSesion.ejecutar({
       email: cuerpo.email,
       contrasena: cuerpo.contrasena,
-      ip: ipDe(peticion),
+      ip: ipDelCliente(peticion, this.config.proxiesDeConfianza),
       userAgent: userAgentDe(peticion),
     });
 
@@ -86,10 +90,6 @@ export class AuthController {
     await this.cerrarSesion.ejecutar(sesion);
     respuesta.setHeader('Set-Cookie', cookieBorrada(this.config.isProduction));
   }
-}
-
-function ipDe(peticion: IncomingMessage): string | null {
-  return peticion.socket.remoteAddress ?? null;
 }
 
 function userAgentDe(peticion: IncomingMessage): string | null {

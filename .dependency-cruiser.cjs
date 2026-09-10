@@ -119,7 +119,7 @@ module.exports = {
         'fuera de el — ni desde otro modulo, ni desde `shared`, ni desde `app.module.ts`. Lo unico ' +
         'que lo monta es `backoffice.ts`, que es otro proceso.',
       from: {
-        path: '(^|/)(app[.]module[.]ts|main[.]ts|bootstrap[.]ts|cli[.]ts|bench[.]ts)$',
+        path: '(^|/)(app[.]module[.]ts|main[.]ts|bootstrap[.]ts|cli[.]ts|bench[.]ts|despachador[.]ts)$',
       },
       to: { path: '(^|/)modules/backoffice/' },
     },
@@ -133,6 +133,27 @@ module.exports = {
         'apunta al reves.',
       from: { path: '(^|/)modules/(?!backoffice/)[^/]+/', pathNot: PRUEBAS },
       to: { path: '(^|/)modules/backoffice/' },
+    },
+    {
+      name: 'correo-inalcanzable-desde-la-app',
+      severity: 'error',
+      comment:
+        'D-16.23: el despachador de correo es un proceso aparte con su propio rol, que marca la cola y ' +
+        'purga el limite de tasa. Ninguna arista puede entrar en `modules/correo/` desde la aplicacion ' +
+        'cliente ni desde los otros binarios: lo unico que lo monta es `despachador.ts`.',
+      from: {
+        path: '(^|/)(app[.]module[.]ts|main[.]ts|bootstrap[.]ts|cli[.]ts|bench[.]ts|backoffice[.]ts)$',
+      },
+      to: { path: '(^|/)modules/correo/' },
+    },
+    {
+      name: 'correo-no-entra-desde-otros-modulos',
+      severity: 'error',
+      comment:
+        'La otra mitad: ningun modulo de negocio depende del despachador. El despachador SI lee de `shared` ' +
+        '(las plantillas, el puerto de correo, el reloj), pero la flecha nunca apunta al reves.',
+      from: { path: '(^|/)modules/(?!correo/)[^/]+/', pathNot: PRUEBAS },
+      to: { path: '(^|/)modules/correo/' },
     },
     {
       name: 'sin-dependencias-circulares',

@@ -12,6 +12,12 @@
  * el consumo — que dividido entre las unidades vendidas **es** la cantidad de
  * la receta (CLAUDE.md §4.3). Una respuesta que dijera «nuevo saldo: 12,4 kg»
  * filtraría exactamente lo mismo que un endpoint de lectura.
+ *
+ * **UNA COMPRA SE NETEA AQUÍ, Y NUNCA CON UNA TARIFA SUPUESTA** (D-16.9). El
+ * bodeguero teclea el total de la factura; la tarifa sale de cuerpo > artículo
+ * > grupo por el puerto de `catalog`, la recuperabilidad del ajuste de la
+ * company por el de `pricing`, y el dominio construye los cuatro importes
+ * (D-16.10). Sin tarifa, 400 con el mensaje que dice dónde ponerla.
  */
 
 import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
@@ -23,16 +29,23 @@ import type {
   MovementId,
   PurchaseArticleId,
 } from '../../../../shared/domain/identity/identificadores';
+import { TarifaDeIvaDesconocidaError } from '../../../../shared/domain/iva/errores';
+import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Quantity } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
-import type { LeerItem, ListarItems } from '../../../catalog/application/casos-de-uso/items';
+import type { LeerItem, ListarGrupos, ListarItems } from '../../../catalog/application/casos-de-uso/items';
+import type { TarifasDeIva } from '../../../catalog/application/casos-de-uso/tarifas-de-iva';
 import {
   exigirUbicacionEnAlcance,
   type SesionActiva,
 } from '../../../iam/application/casos-de-uso/validar-sesion';
 import type { ExigirPeriodoAbierto } from '../../../periods/application/casos-de-uso/periodos';
+import type { LeerAjustes } from '../../../pricing/application/casos-de-uso/ajustes';
+import { desglosarCompra, type CompraDesglosada } from '../../domain/compra';
 import { corregir } from '../../domain/correccion';
 import {
+  CompraSinImporteError,
   ItemDelLibroNoEncontradoError,
   MovimientoNoEncontradoError,
   MovimientoYaCorregidoError,
@@ -51,6 +64,12 @@ export interface DependenciasDeInventario {
   readonly repositorio: RepositorioDeInventario;
   readonly leerItem: LeerItem;
   readonly listarItems: ListarItems;
+  /** Los dos escalones de abajo de la tarifa de IVA: artículo y grupo (D-16.9). */
+  readonly tarifasDeIva: TarifasDeIva;
+  /** El lote resuelve el grupo de cada fila con UNA lectura, no una por fila. */
+  readonly listarGrupos: ListarGrupos;
+  /** La recuperabilidad del IVA es de la company (R13): se lee por el puerto de `pricing`. */
+  readonly leerAjustes: LeerAjustes;
   /** La guarda del mes cerrado (D6). La llaman las CINCO escrituras. */
   readonly periodos: ExigirPeriodoAbierto;
   readonly auditoria: AuditLogPort;
@@ -102,8 +121,11 @@ export interface DatosDeMovimiento {
   readonly tipo: TipoDirecto;
   /** Magnitud, tal como se captura. En `AJUSTE` puede venir negativa. */
   readonly cantidad: string;
+  /** En `COMPRA`, el total de la factura CON IVA: se netea aquí (D-16.9). */
   readonly costoTotal: string | null;
   readonly purchaseArticleId: PurchaseArticleId | null;
+  /** Solo en `COMPRA`: la tarifa de la factura, que manda sobre artículo y grupo. */
+  readonly ivaTarifa: string | null;
   readonly occurredAt: Date;
   readonly note: string | null;
 }
@@ -114,7 +136,7 @@ export class RegistrarMovimiento {
   /**
    * @throws {UbicacionFueraDeAlcanceError} @throws {ItemDelLibroNoEncontradoError}
    * @throws {CantidadNulaError} @throws {SignoIncoherenteError}
-   * @throws {FechaFuturaError}
+   * @throws {FechaFuturaError} @throws {TarifaDeIvaDesconocidaError}
    */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeMovimiento): Promise<MovementId> {
     await exigirLibroEscribible({
@@ -129,21 +151,12 @@ export class RegistrarMovimiento {
       datos.tipo,
       Quantity.of(datos.cantidad, unidadDeUso(item.unidadDeUso)),
     );
+    const compra = datos.tipo === 'COMPRA' ? await this.desglosar(sesion, datos) : null;
 
     const id = await this.deps.repositorio.registrarUno({
       companyId: sesion.companyId,
       userId: sesion.userId,
-      movimiento: {
-        locationId: datos.locationId,
-        itemId: datos.itemId,
-        tipo: datos.tipo,
-        cantidad: cantidad.toStorageString(),
-        costoTotal: datos.costoTotal,
-        purchaseArticleId: datos.purchaseArticleId,
-        reversesMovementId: null,
-        occurredAt: datos.occurredAt,
-        note: datos.note,
-      },
+      movimiento: filaDe(datos, cantidad, compra),
     });
 
     await registrarEvento({
@@ -159,6 +172,33 @@ export class RegistrarMovimiento {
     });
 
     return id;
+  }
+
+  /**
+   * Los cuatro importes de una COMPRA (D-16.10): tarifa por precedencia
+   * cuerpo > artículo > grupo, recuperabilidad de la company, neto del dominio.
+   *
+   * @throws {TarifaDeIvaDesconocidaError} @throws {CompraSinImporteError}
+   */
+  private async desglosar(sesion: SesionActiva, datos: DatosDeMovimiento): Promise<CompraDesglosada> {
+    if (datos.costoTotal === null) throw new CompraSinImporteError();
+
+    const [catalogo, ajustes] = await Promise.all([
+      this.deps.tarifasDeIva.ejecutar(sesion, {
+        itemId: datos.itemId,
+        purchaseArticleId: datos.purchaseArticleId,
+      }),
+      this.deps.leerAjustes.ejecutar(sesion),
+    ]);
+
+    const tarifa = elegirTarifa({ cuerpo: datos.ivaTarifa, ...catalogo });
+    if (tarifa === null) throw new TarifaDeIvaDesconocidaError();
+
+    return desglosarCompra({
+      bruto: datos.costoTotal,
+      tarifa: exigirTarifaValida(tarifa),
+      recuperable: ajustes.ivaCompraRecuperable,
+    });
   }
 }
 
@@ -284,12 +324,36 @@ function conNombre(
   return { ...saldo, nombre: item.nombre, unidadDeUso: item.unidadDeUso };
 }
 
+/** La fila de un movimiento directo; en una COMPRA, con el neto y el desglose. */
+function filaDe(
+  datos: DatosDeMovimiento,
+  cantidad: Quantity,
+  compra: CompraDesglosada | null,
+): MovimientoParaGuardar {
+  return {
+    locationId: datos.locationId,
+    itemId: datos.itemId,
+    tipo: datos.tipo,
+    cantidad: cantidad.toStorageString(),
+    costoTotal: compra === null ? datos.costoTotal : compra.costoTotal,
+    desglose: compra === null ? null : compra.desglose,
+    purchaseArticleId: datos.purchaseArticleId,
+    reversesMovementId: null,
+    occurredAt: datos.occurredAt,
+    note: datos.note,
+  };
+}
+
 /**
  * La fila que anula a otra.
  *
  * EL IMPORTE VIAJA CON LA CANTIDAD, y no es un detalle: sin él,
  * `compras_del_mes` (SPEC §16) seguiría contando el dinero de una compra que se
  * anuló, aunque su cantidad ya se hubiera cancelado.
+ *
+ * Y EL DESGLOSE VIAJA ENTERO (D-16.41): la corrección de una compra con
+ * desglose no queda «sin desglose», y así el CHECK de coherencia la admite y
+ * Σ(bruto) del mes se cancela igual que Σ(neto).
  */
 function anulacionDe(
   original: MovimientoLeido,
@@ -311,6 +375,7 @@ function anulacionDe(
     tipo: anulacion.tipo,
     cantidad: anulacion.cantidad.toStorageString(),
     costoTotal: original.costoTotal,
+    desglose: original.desglose,
     purchaseArticleId: null,
     reversesMovementId: original.id,
     occurredAt: anulacion.ocurridoEn,

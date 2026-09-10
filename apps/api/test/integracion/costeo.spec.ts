@@ -150,6 +150,7 @@ describe('costeo', () => {
         presentacion: '1',
         unidadDePresentacion: datos.unidad ?? 'unid',
         factorExplicito: null,
+        ivaTarifa: datos.iva,
       });
     expect(articulo.status).toBe(CREADO);
 

@@ -52,17 +52,28 @@ export interface ArticuloLeido {
   readonly presentacion: string;
   readonly unidadDePresentacion: string;
   readonly factorDeConversion: string;
+  /** Fracción, como cadena. La tarifa de IVA de ESTE artículo (D-16.9). */
+  readonly ivaTarifa: string;
   readonly estado: string;
 }
 
 export interface GrupoLeido {
   readonly id: ItemGroupId;
   readonly nombre: string;
+  /** `null` = «el grupo no define tarifa»: las compras sin artículo se rechazan. */
+  readonly ivaTarifa: string | null;
 }
 
 export type ResultadoDeAlta<T> =
   | { readonly clase: 'creado'; readonly id: T }
   | { readonly clase: 'nombre_en_uso' };
+
+/**
+ * El resultado de un cambio. `nombre_en_uso` existe porque renombrar choca con
+ * el índice único igual que crear, y un `P2002` a mitad de un `PUT` sería un
+ * 500 que no dice qué nombre sobra (INC-012).
+ */
+export type ResultadoDeCambio = 'actualizado' | 'no_encontrado' | 'nombre_en_uso';
 
 /**
  * El alta de un ITEM, que ademas puede toparse con el limite del plan (D5).
@@ -108,6 +119,30 @@ export interface DatosParaCrearArticulo {
   readonly unidadDePresentacion: UnidadDeUso;
   /** Ya calculado por el dominio: aquí solo se guarda. */
   readonly factorDeConversion: string;
+  /** Ya validada por el dominio como fracción. */
+  readonly ivaTarifa: string;
+}
+
+/**
+ * Lo editable de un artículo. La presentación, su unidad y el factor NO: son
+ * lo que convierte cada compra histórica a unidades de uso, y cambiarlos
+ * reescribiría el costo de meses ya cerrados. Para eso se crea otro artículo.
+ */
+export interface DatosParaActualizarArticulo {
+  readonly companyId: CompanyId;
+  readonly articuloId: PurchaseArticleId;
+  readonly nombre: string;
+  readonly marca: string | null;
+  readonly proveedor: string | null;
+  readonly ivaTarifa: string;
+  readonly estado: EstadoDeCatalogo;
+}
+
+export interface DatosParaActualizarGrupo {
+  readonly companyId: CompanyId;
+  readonly grupoId: ItemGroupId;
+  readonly nombre: string;
+  readonly ivaTarifa: string | null;
 }
 
 /**
@@ -134,6 +169,8 @@ export interface DatosDeArticuloEnLote {
   readonly presentacion: string;
   readonly unidadDePresentacion: UnidadDeUso;
   readonly factorDeConversion: string;
+  /** Ya resuelta por el caso de uso: fila > grupo del ítem (D-16.44). */
+  readonly ivaTarifa: string;
 }
 
 export interface RepositorioDeCatalogo {
@@ -146,9 +183,18 @@ export interface RepositorioDeCatalogo {
   crearGrupo(entrada: {
     readonly companyId: CompanyId;
     readonly nombre: string;
+    readonly ivaTarifa: string | null;
   }): Promise<ResultadoDeAlta<ItemGroupId>>;
 
   listarGrupos(companyId: CompanyId): Promise<readonly GrupoLeido[]>;
+
+  /** `null` si no existe en esa company. */
+  buscarGrupo(entrada: {
+    readonly companyId: CompanyId;
+    readonly grupoId: ItemGroupId;
+  }): Promise<GrupoLeido | null>;
+
+  actualizarGrupo(datos: DatosParaActualizarGrupo): Promise<ResultadoDeCambio>;
 
   crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAltaDeItem>;
 
@@ -193,4 +239,12 @@ export interface RepositorioDeCatalogo {
     readonly companyId: CompanyId;
     readonly itemId: ItemId | null;
   }): Promise<readonly ArticuloLeido[]>;
+
+  /** `null` si no existe en esa company. */
+  buscarArticulo(entrada: {
+    readonly companyId: CompanyId;
+    readonly articuloId: PurchaseArticleId;
+  }): Promise<ArticuloLeido | null>;
+
+  actualizarArticulo(datos: DatosParaActualizarArticulo): Promise<ResultadoDeCambio>;
 }

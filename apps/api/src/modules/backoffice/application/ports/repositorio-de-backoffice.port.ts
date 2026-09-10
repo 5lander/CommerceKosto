@@ -71,6 +71,18 @@ export interface LineaDeAuditoria {
   readonly correlationId: string;
 }
 
+/**
+ * La salud de la cola de correo: contadores e instantes, y NADA de ningun
+ * tenant (D-16.27c, D-16.34). Ni destinatarios, ni `datos`, ni ids.
+ */
+export interface SaludDelCorreo {
+  /** `PENDIENTE` desde antes del umbral: la cola no avanza o el despachador no corre. */
+  readonly pendientesAntiguos: number;
+  /** `FALLIDO` en total: cada uno es un correo que alguien tendra que reenviar. */
+  readonly fallidos: number;
+  readonly ultimoEnvio: Date | null;
+}
+
 export interface AccesoRegistrado {
   readonly at: Date;
   readonly operador: string;
@@ -156,4 +168,10 @@ export interface RepositorioDeBackoffice {
 
   /** El log del propio back office. No exige motivo: leerlo es lo que se pide. */
   accesosRecientes(limite: number): Promise<readonly AccesoRegistrado[]>;
+
+  /**
+   * Contadores de la cola de correo. Sin motivo ni registro de acceso: no se
+   * lee ningun dato de ningun tenant (ver `LeerSaludDelCorreo`).
+   */
+  saludDelCorreo(pendientesDesdeAntesDe: Date): Promise<SaludDelCorreo>;
 }

@@ -12,6 +12,8 @@
 import { HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
+import { TokenDeRestablecimientoInvalidoError } from '../../../modules/iam/domain/errores';
+import { LimiteDeSolicitudesError } from '../../domain/limite-de-tasa/politicas';
 import { errorResponseFor } from './error.filter';
 
 describe('errorResponseFor', () => {
@@ -74,9 +76,37 @@ describe('errorResponseFor', () => {
   });
 
   it('lo que no es un Error tampoco lo tumba', () => {
-    const { status, body } = errorResponseFor('una cadena lanzada desde una libreria');
+    const { status, body, cabeceras } = errorResponseFor('una cadena lanzada desde una libreria');
 
     expect(status).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
     expect(body.code).toBe('INTERNAL_ERROR');
+    expect(cabeceras).toEqual({});
+  });
+
+  describe('el limite de tasa (D-16.24)', () => {
+    const AHORA = new Date('2026-09-10T12:00:00.000Z');
+
+    it('LIMITE_DE_SOLICITUDES es 429 con Retry-After en segundos, y el mensaje dice el minuto', () => {
+      const error = new LimiteDeSolicitudesError({
+        kind: 'password.olvido',
+        bloqueadoHasta: new Date(AHORA.getTime() + 90_000),
+        ahora: AHORA,
+      });
+
+      const { status, body, cabeceras } = errorResponseFor(error);
+
+      expect(status).toBe(HttpStatus.TOO_MANY_REQUESTS);
+      expect(body).toEqual({
+        code: 'LIMITE_DE_SOLICITUDES',
+        message: 'Demasiadas solicitudes. Vuelve a intentarlo en 2 minutos.',
+      });
+      expect(cabeceras).toEqual({ 'Retry-After': '90' });
+    });
+
+    it('un error de dominio sin espera no lleva la cabecera', () => {
+      const { cabeceras } = errorResponseFor(new TokenDeRestablecimientoInvalidoError());
+
+      expect(cabeceras).toEqual({});
+    });
   });
 });

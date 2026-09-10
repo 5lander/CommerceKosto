@@ -35,6 +35,7 @@ services:
       COSTEO_MIGRATOR_PASSWORD: ${COSTEO_MIGRATOR_PASSWORD:?falta COSTEO_MIGRATOR_PASSWORD}
       COSTEO_APP_PASSWORD: ${COSTEO_APP_PASSWORD:?falta COSTEO_APP_PASSWORD}
       COSTEO_BACKOFFICE_PASSWORD: ${COSTEO_BACKOFFICE_PASSWORD:?falta COSTEO_BACKOFFICE_PASSWORD}
+      COSTEO_DESPACHADOR_PASSWORD: ${COSTEO_DESPACHADOR_PASSWORD:?falta COSTEO_DESPACHADOR_PASSWORD}
       # Detecta corrupcion silenciosa en disco. En una base que guarda el libro
       # de inventario, un bit cambiado sin aviso es peor que una caida.
       POSTGRES_INITDB_ARGS: --data-checksums
@@ -121,6 +122,13 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+    # CON NOMBRE, para que `correo` use LA MISMA IMAGEN sin construirla dos
+    # veces: son dos binarios del mismo `dist/`, y dos builds del mismo
+    # Dockerfile podrian divergir por una capa cacheada. `desplegar.sh`
+    # construye `api` y `correo` la hereda. No lleva digest porque es una
+    # imagen local, no una publicada (la regla `sin-imagen-sin-fijar` mira
+    # etiquetas moviles; `local` no lo es).
+    image: costeo-api:local
     container_name: costeo-api
     restart: unless-stopped
     depends_on:
@@ -136,9 +144,19 @@ services:
       # MIGRATION_DATABASE_URL NO se pasa a este contenedor a proposito: el
       # proceso de la aplicacion no debe poder migrar. El esquema de entorno
       # falla si la encuentra en produccion.
+      # La API NO ENVIA correo: encola (ADR-025). Quien envia es `correo`, con
+      # su propio selector. Aqui `fake` es lo correcto y no se configura.
       MAIL_ADAPTER: fake
       STORAGE_ADAPTER: fake
       LOG_LEVEL: info
+      # De aqui salen los enlaces de los correos. Obligatoria en produccion
+      # (el esquema no arranca sin ella): la superposicion la exige.
+      APP_URL: ${APP_URL:-http://localhost:3001}
+      HORAS_DE_RESTABLECIMIENTO: ${HORAS_DE_RESTABLECIMIENTO:-1}
+      # Desde donde se cree X-Forwarded-For (D-16.49). En local, vacia: no hay
+      # proxy y el socket es la verdad. La superposicion de produccion la exige,
+      # porque ahi el socket es siempre Caddy.
+      PROXY_DE_CONFIANZA: ${PROXY_DE_CONFIANZA:-}
     # En produccion quien atiende internet es Caddy, que llega a la API por la
     # red interna de compose. Este puerto queda en local para poder mirar la API
     # sin pasar por el proxy cuando algo va mal.
@@ -150,6 +168,53 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # --- El despachador de correo (P16-A1, D-16.23, ADR-025) --------------------
+  #
+  # TERCER PROCESO, misma imagen que la API y otro binario. La API encola en
+  # `email_outbox` con `costeo_app`, que no puede marcar ni borrar; este
+  # proceso toma la cola con `costeo_despachador`, envia y marca. Dos roles,
+  # dos procesos: el de la API ni siquiera tiene la variable de conexion de
+  # este, y su esquema de entorno la rechaza.
+  #
+  # SIN PUERTOS: no atiende nada. Su salud es el LATIDO que escribe tras cada
+  # pasada completa; si la base cae o el rol pierde privilegios, deja de latir
+  # y Docker lo marca `unhealthy` (y `GET /correo/salud` del back office ensena
+  # los pendientes con retraso).
+  #
+  # `restart: unless-stopped` es D-16.27a: un despachador caido son invitaciones
+  # que no llegan sin un solo error visible para el cliente.
+  correo:
+    image: costeo-api:local
+    container_name: costeo-correo
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ['node', 'apps/api/dist/despachador.js']
+    environment:
+      NODE_ENV: production
+      # Rol propio, puerto directo, dos conexiones. NUNCA la cadena de la API.
+      DESPACHADOR_DATABASE_URL: postgresql://costeo_despachador:${COSTEO_DESPACHADOR_PASSWORD}@db:5432/${POSTGRES_DB:-costeo}?schema=public&connection_limit=2&pool_timeout=10
+      # `consola` escribe los correos en el log del contenedor; `resend` los
+      # envia. `fake` NO arranca con NODE_ENV=production: marcaria ENVIADO lo
+      # que nadie recibio.
+      MAIL_ADAPTER: ${MAIL_ADAPTER:-consola}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_REMITENTE: ${RESEND_REMITENTE:-}
+      CORREO_INTERVALO_MS: ${CORREO_INTERVALO_MS:-5000}
+      CORREO_LOTE: ${CORREO_LOTE:-20}
+      # El mismo archivo que mira el healthcheck: se fija aqui para que los dos
+      # coincidan por configuracion y no por casualidad.
+      CORREO_LATIDO: /tmp/costeo-correo.latido
+    healthcheck:
+      # Sano si el latido tiene menos de 60 s: doce pasadas seguidas sin
+      # terminar es un proceso que no esta haciendo su trabajo.
+      test: ['CMD', 'node', '-e', "const s=require('fs').statSync('/tmp/costeo-correo.latido');process.exit(Date.now()-s.mtimeMs<60000?0:1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
 
 volumes:
   pgdata:

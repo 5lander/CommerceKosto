@@ -7,10 +7,11 @@
  * receta. Un `double` aquí no se nota nunca hasta que la conciliación de R7 no
  * da cero.
  *
- * **`ivaCompra` ES OPCIONAL Y ANULABLE, y significan cosas distintas**:
- * omitirlo toma la tasa por defecto de la company; mandar `"0"` declara que esa
- * compra fue exenta. En Ecuador el alimento sin procesar es 0 % y el detergente
- * 15 %, así que la diferencia no es teórica.
+ * **`ivaCompra` ES ANULABLE, y `null` y `"0"` significan cosas distintas**:
+ * `null` toma la tarifa del artículo o, sin artículo, la del grupo del ítem
+ * (D-16.9: nunca la de la company, nunca un valor por defecto); mandar `"0"`
+ * declara que esa compra fue exenta. En Ecuador el alimento sin procesar es
+ * 0 % y el detergente 15 %, así que la diferencia no es teórica.
  */
 
 import { z } from 'zod';
@@ -35,7 +36,7 @@ export const CUERPO_DE_SUGERENCIA = z
     /** `null` solo para una preparación producida: su precio es costo estándar. */
     purchaseArticleId: z.uuid().nullable(),
     precio: decimal,
-    /** `null` = usar la tasa por defecto de la company. `"0"` = compra exenta. */
+    /** `null` = la del artículo o la del grupo; sin ninguna, 400. `"0"` = compra exenta. */
     ivaCompra: decimal.nullable(),
     origen: z.enum(['MANUAL', 'ULTIMA_COMPRA', 'EXTERNO']),
     validFrom: z.iso.datetime(),

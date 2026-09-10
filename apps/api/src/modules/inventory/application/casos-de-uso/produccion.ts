@@ -208,6 +208,8 @@ function comoFila(valorizado: MovimientoValorizado, note: string | null): Movimi
     tipo: valorizado.movimiento.tipo,
     cantidad: valorizado.movimiento.cantidad.toStorageString(),
     costoTotal: valorizado.costoTotal.toStorageString(),
+    // PRODUCCION no se netea: su importe es el costo estandar (R10), ya neto.
+    desglose: null,
     purchaseArticleId: null,
     reversesMovementId: null,
     occurredAt: valorizado.movimiento.ocurridoEn,

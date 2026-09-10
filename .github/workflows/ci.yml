@@ -47,12 +47,23 @@ jobs:
       POSTGRES_SUPERUSER_PASSWORD: ci-superusuario
       COSTEO_MIGRATOR_PASSWORD: ci-migrator
       COSTEO_APP_PASSWORD: ci-app
+      # Los dos roles que llegaron después de P1: el back office (P11) y el
+      # despachador de correo (P16-A1). `docker-compose.yml` los exige con
+      # `:?falta`, `initdb` los crea con ellos, y sin ellos las migraciones de
+      # P11 y P16-A1 fallan en alto a propósito.
+      COSTEO_BACKOFFICE_PASSWORD: ci-backoffice
+      COSTEO_DESPACHADOR_PASSWORD: ci-despachador
 
       # La aplicación se conecta como costeo_app. El esquema de entorno rechaza
       # el arranque si esta cadena trae otro usuario (CLAUDE.md §4.1).
       DATABASE_URL: postgresql://costeo_app:ci-app@localhost:5432/costeo?schema=public
       MIGRATION_DATABASE_URL: postgresql://costeo_migrator:ci-migrator@localhost:5432/costeo?schema=public
       SHADOW_DATABASE_URL: postgresql://costeo_migrator:ci-migrator@localhost:5432/costeo_shadow?schema=public
+      # Las conexiones de los otros dos roles, para las suites que las exigen
+      # (`backoffice.spec.ts`, `correo-transaccional.spec.ts`) y que FALLAN si
+      # faltan en vez de saltarse (INC-007).
+      BACKOFFICE_DATABASE_URL: postgresql://costeo_backoffice:ci-backoffice@localhost:5432/costeo?schema=public&connection_limit=4&pool_timeout=10
+      DESPACHADOR_DATABASE_URL: postgresql://costeo_despachador:ci-despachador@localhost:5432/costeo?schema=public&connection_limit=2&pool_timeout=10
 
       # La conexión a través del pooler. La usa `pgbouncer.spec.ts`, que
       # verifica la cuarta condición de D12 y que **falla si falta**, en vez de
@@ -135,7 +146,13 @@ jobs:
       # `fake`, ninguna clave de ningún servicio externo.
       - name: La aplicación levanta entera, sin credenciales reales
         run: |
-          docker compose up -d --build api
+          # EL BUILD VA EN SU PROPIO PASO, NO EN `up -d --build`: ese comando no
+          # aborta cuando la construccion falla —deja el contenedor anterior en
+          # pie, sano y sirviendo codigo viejo— y es como INC-018 sobrevivio dos
+          # dias con los doce checks en verde. Aqui no hay contenedor anterior,
+          # pero la regla es la regla y esta escrita en el runbook.
+          docker compose build api
+          docker compose up -d api
           for _ in $(seq 1 45); do
             if curl -fsS http://localhost:3000/health > /dev/null; then
               curl -fsS http://localhost:3000/ready

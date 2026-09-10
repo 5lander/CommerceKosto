@@ -28,6 +28,7 @@ import {
 } from '../iam/application/ports/hasher-de-contrasenas.port';
 import { Argon2Hasher } from '../iam/infrastructure/argon2-hasher';
 import { LeerAccesosDelBackoffice, LeerAuditoria } from './application/casos-de-uso/auditoria';
+import { LeerSaludDelCorreo } from './application/casos-de-uso/correo';
 import {
   CambiarEstadoDeCompany,
   CambiarPlan,
@@ -48,6 +49,8 @@ import {
   type RepositorioDeBackoffice,
 } from './application/ports/repositorio-de-backoffice.port';
 import { BackofficeConnection } from './infrastructure/backoffice-connection';
+import { minutosDeAlertaDelEntorno } from './infrastructure/minutos-de-alerta';
+import { PROXIES_DE_CONFIANZA, proxiesDeConfianzaDelEntorno } from './infrastructure/proxies-de-confianza';
 import { PrismaBackofficeRepositorio } from './infrastructure/prisma-backoffice.repositorio';
 import { ErrorFilter } from '../../shared/infrastructure/http/error.filter';
 import { securityHeaders } from '../../shared/infrastructure/http/security-headers';
@@ -83,6 +86,9 @@ const DE_SESION = { inject: [REPOSITORIO_DE_BACKOFFICE, HASHER_DE_CONTRASENAS, R
     { provide: REPOSITORIO_DE_BACKOFFICE, useClass: PrismaBackofficeRepositorio },
     { provide: HASHER_DE_CONTRASENAS, useClass: Argon2Hasher },
     { provide: RELOJ, useClass: RelojDelSistema },
+    // La lista se lee al construir el modulo: una entrada invalida para el
+    // arranque, como `BACKOFFICE_PORT` (D-16.49).
+    { provide: PROXIES_DE_CONFIANZA, useFactory: proxiesDeConfianzaDelEntorno },
 
     // DENY BY DEFAULT: el guard es global del proceso, así que una ruta nueva
     // nace protegida. Al revés, la que se olvida queda abierta — y aquí lo que
@@ -155,6 +161,14 @@ const DE_SESION = { inject: [REPOSITORIO_DE_BACKOFFICE, HASHER_DE_CONTRASENAS, R
       ...DE_REPO,
       useFactory: (r: Repo): LeerAccesosDelBackoffice =>
         new LeerAccesosDelBackoffice({ repositorio: r }),
+    },
+    {
+      provide: LeerSaludDelCorreo,
+      inject: [REPOSITORIO_DE_BACKOFFICE, RELOJ],
+      // El umbral se lee al construir el modulo: un valor invalido en el
+      // entorno para el arranque, como `BACKOFFICE_PORT`.
+      useFactory: (r: Repo, c: Reloj): LeerSaludDelCorreo =>
+        new LeerSaludDelCorreo({ repositorio: r, reloj: c, minutosDeAlerta: minutosDeAlertaDelEntorno() }),
     },
 
     // LAS TRES FACHADAS, por inyección de propiedad: el controlador recibe tres

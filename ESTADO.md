@@ -8,9 +8,9 @@
 
 ## Estado actual
 
-**Fase en curso:** **Pasada P16 → P20**. Commit 0 (Tooling) cerrado; **siguiente: P16-A1** (IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy), que empieza por RECARGA y su propio `docs/pasos/P16-A1/`. El plan P0–P15 está completo y el sistema se ha desplegado entero en local.
-**Último commit:** `P16 · commit 0: tooling de la pasada — decisiones registradas, cuatro guardianes y el medidor de bundle`
-**Fecha de última actualización:** 2026-09-09
+**Fase en curso:** **Pasada P16 → P20**. Commit 0 (Tooling) cerrado; **P16-A1 cerrado** (IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy; `docs/pasos/P16-A1/`), con `npm run audit` en verde y `npm run bench` ejecutado. **Siguiente: P16-A2** (shared + sesión + CSRF + lecturas de catálogo). Dos cosas esperan al usuario y no bloquean el código: ratificar **D-16.51** y decidir sobre el **presupuesto del consolidado** (abajo, en dudas abiertas). El plan P0–P15 está completo y el sistema se ha desplegado entero en local.
+**Último commit:** `P16-A1: el IVA en dos niveles, el correo que llega, y el límite que limita`
+**Fecha de última actualización:** 2026-09-10
 
 ## Pasada P16 → P20 — la aplicación completa · EN CURSO desde 2026-09-09
 
@@ -37,7 +37,7 @@ armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: p
 | Commit | Qué | Estado | Hash | Capturas | Bundle gzip (piso / mayor) | Decisiones |
 |---|---|---|---|---|---|---|
 | 0 · Tooling | Fase 0 + tres reglas de `apps/web` + `medir-bundle` + `multer` forzado a 2.3.0 (INC-021) | ✅ 2026-09-09 | *(el de este commit)* | — | 127 KiB / 139 KiB | D-16.39 |
-| P16-A1 | IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy | ⬜ | | — | | |
+| P16-A1 | IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy · 2 migraciones · ADR-024/025/026 · INC-022 + recurrencia de INC-017 · 823 unitarias, 395 + 5 de integración | ✅ 2026-09-10 · `npm run audit` **exit 0** · bench ejecutado (3 de 4 presupuestos en verde) | *(el de este commit)* | — | | D-16.40…D-16.64 |
 | P16-A2 | `shared` + sesión + CSRF + lecturas de catálogo + arreglos | ⬜ | | — | | |
 | P16-B | pricing + recipes/products + costing + `version` de product/item · `npm run bench` | ⬜ | | — | | |
 | P16-C | inventory + usuarios/roles/sucursales + `version` de period | ⬜ | | — | | |
@@ -65,7 +65,7 @@ armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: p
 | D-16.17 | Límite de tasa **por IP y por destinatario** en olvido, restablecimiento, `POST /usuarios` y reenvío de invitación; 429 con código propio. La IP llega por el proxy de confianza, nunca leyendo `X-Forwarded-For` directamente; 🔴 cabecera falseada desde fuera no cambia la clave |
 | D-16.18 | Los `COMPRA` anteriores **no se rellenan**: «sin desglose» es un estado; datos de ejemplo re-importados |
 | D-16.19 | `email_outbox.company_id` nullable; índices por estado |
-| D-16.20 | ADR-022 registra la deuda del 409 espurio entre sucursales por `product.version`; señal: primer conflicto sin usuario concurrente |
+| D-16.20 | ADR-023 registra la deuda del 409 espurio entre sucursales por `product.version`; señal: primer conflicto sin usuario concurrente |
 | D-16.21 | P20 **en memoria, sin reanudar, sin antivirus, solo CSV**, con tope de `Content-Length` y de filas |
 | D-16.22 | `verificar-pantalla.mjs` **no** se construye |
 | D-16.26 | Los endpoints públicos de restablecimiento no operan bajo tenant: **dos funciones `SECURITY DEFINER`** (una crea token + encola en una operación; otra consume y devuelve `user_id`) |
@@ -73,7 +73,7 @@ armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: p
 | D-16.28 | `rate_limit_hit` fuera del ámbito de tenant, con exención documentada; purga en cada pasada del despachador; 🔴 no crece |
 | D-16.29 | `import_job` persiste **SHA-256**; la confirmación lo recalcula → 409 `ARCHIVO_DISTINTO` |
 | D-16.30 | Evidencia 1 del piloto: respaldo **copiado fuera del VPS**, restauración probada **desde la copia remota** |
-| D-16.34 | El token en claro vive en la base **solo mientras el correo está en vuelo**: al pasar a `ENVIADO` o `FALLIDO`, `datos` queda en `{plantilla, destinatario}`; ninguna lectura del outbox expone `datos`; `HORAS_DE_RESTABLECIMIENTO` = 1 por defecto; ADR-024 registra el cifrado del campo como alternativa descartada y su señal (más de un operador con acceso a la base) |
+| D-16.34 | El token en claro vive en la base **solo mientras el correo está en vuelo**: al pasar a `ENVIADO` o `FALLIDO`, `datos` queda en `{plantilla, destinatario}`; ninguna lectura del outbox expone `datos`; `HORAS_DE_RESTABLECIMIENTO` = 1 por defecto; ADR-025 registra el cifrado del campo como alternativa descartada y su señal (más de un operador con acceso a la base) |
 | D-16.35 | El dump se **cifra en el VPS antes de subirse**; la clave no vive con el respaldo; la restauración probada descifra desde la copia remota |
 | D-16.38 | La clave privada tiene **al menos dos copias independientes** (gestor + copia física o segundo gestor), anotadas en el runbook sin decir dónde; la evidencia 1 descifra con una copia **distinta del equipo donde se generó el par**, y lo dice |
 | U6 | Entran las cuatro opcionales: simulador de PVP, desglose del costo, costo de uso, editar sucursal |
@@ -103,6 +103,31 @@ armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: p
 | D-16.36 | **Hoy la API toma la IP del socket** (`auth.controller.ts:91`, `backoffice.controller.ts:345`) y detrás de Caddy toda petición llega con la IP del proxy: el bloqueo por IP del login sería un **bloqueo global**. `ipDelCliente(peticion)` en `shared/infrastructure/http/` con `PROXY_DE_CONFIANZA`; lo usan login, back office y el limitador; **INC-022** |
 | D-16.37 | Cifrado del respaldo con **`age`** (asimétrico): pública en `/etc/costeo/respaldo.pub`, privada solo en el gestor; `preparar.sh` instala `age` y su `.env` gana `RESPALDO_CLAVE_PUBLICA` y `PROXY_DE_CONFIANZA`; `descifrar-respaldo.sh`; descartado `gpg --symmetric` |
 | D-16.39 | `docs/Sistema ejemplo/` se ignora en git y el plan se copia a `docs/pasos/P16/PLAN.md` para que sobreviva a la compactación |
+| D-16.40 | (P16-A1) La fórmula de neteo vive una sola vez en `shared/domain/iva/neteo.ts` y `pricing/domain/cadena-de-costo.ts` la llama; precedencia `elegirTarifa` y `TarifaDeIvaDesconocidaError` (400) al lado |
+| D-16.41 | (P16-A1) `total_cost` es neto solo en las `COMPRA` nuevas; `desglose_conocido` solo en `COMPRA`; la corrección copia los cuatro campos; CHECK `inventory_movement_desglose_coherente` |
+| D-16.42 | (P16-A1) `iva_recuperable_aplicado`/`iva_tarifa_aplicada` son la foto del momento de la compra; `compras_del_mes` sigue sumando `total_cost` (neto en filas nuevas), discontinuidad dicha en ADR-024 |
+| D-16.43 | (P16-A1) `company_settings.iva_compra` deja de leerse como default de `SugerirPrecio` y del lote; la columna queda hasta P16-B |
+| D-16.44 | (P16-A1) CSV `MOVIMIENTOS` y `ARTICULOS` ganan `ivaTarifa` opcional; precedencia fila > artículo > grupo; sin tarifa, la fila se rechaza en el análisis |
+| D-16.45 | (P16-A1) `PUT /catalogo/articulos/:id` y `PUT /catalogo/grupos/:id` se construyen aquí; los GET de lista devuelven `ivaTarifa` |
+| D-16.46 | (P16-A1) `email_outbox.siguiente_intento_en` (espera 1→2→4→8 min, tope 5); estados y plantillas con CHECK; app `SELECT, INSERT` bajo tenant, despachador `SELECT, UPDATE` permisivo, back office `SELECT` |
+| D-16.47 | (P16-A1) `password_reset_request(p_email, p_token_hash, p_expires_at, p_datos)` y `password_reset_consume(p_token_hash, p_ahora) RETURNS TABLE(user_id, company_id)`: el `company_id` faltaba y sin él no se puede escribir la contraseña ni revocar sesiones |
+| D-16.48 | (P16-A1) El repositorio de organización encola el correo en la misma transacción que la invitación; `ReenviarInvitacion`; correos con enlace; `HORAS_DE_RESTABLECIMIENTO` en el entorno, `DIAS_DE_INVITACION` constante |
+| D-16.49 | (P16-A1) `ipDelCliente` toma el último salto de `X-Forwarded-For` solo con par de confianza (IP o CIDR v4), valida que sea IP, y lo usa también el `ThrottlerGuard` global; producción con subred fija `172.28.0.0/24` y **Caddy con IP fija `172.28.0.10`, que es la única de la lista** (corrección tras la revisión adversarial: la subred entera incluía la pasarela y los demás contenedores) |
+| D-16.50 | (P16-A1) `evaluarIntentos` generalizada con `PoliticaDeIntentos` y mudada a `shared/domain/acceso`; `LimitadorDeTasa` por `kind` (olvido IP 10/h · destinatario 3/h; restablecimiento IP 10/h; invitar y reenvío IP 30/h · destinatario 3/h); `rate_limit_hit.clave` es `ip:` o `correo:<sha256>`; 429 con `Retry-After` |
+| D-16.51 | (P16-A1, **pendiente de ratificar**) Una preparación (`PRODUCIDO`) no lleva IVA de compra: su precio nace con `ivaCompra = 0` ignore lo que diga su grupo, y otra tarifa es 400. Su costo estándar ya es neto (R10) y `CostosDeItems` lo neteaba otra vez. ADR-024, decisión 5 |
+| D-16.52 | (P16-A1) «Toda COMPRA nueva nace con desglose» es guarda de **aplicación** (`exigirDesgloseEnCompra` en `comoFila`, la única puerta del libro), no trigger: un trigger sobre `recorded_at` habría roto las siembras SQL y la prueba de la fila vieja. El SQL a mano queda fuera, y dicho. ADR-024, decisión 4 |
+| D-16.53 | (P16-A1) `email_outbox.datos` (el enlace con el token en claro, mientras el correo está en vuelo) solo lo lee `costeo_despachador`: `costeo_app` y `costeo_backoffice` tienen `SELECT` **por columnas**, todas menos esa. Cifrar el campo con clave del despachador se descartó con señal: más de un operador con acceso a la base. ADR-025, decisión 4 |
+| D-16.54 | (P16-A1) El aviso de bloqueo del login **se encola** (plantilla `BLOQUEO`, `datos = {}`) en vez de salir por `MailerPort` desde la API; `DependenciasDeIam` no inyecta `MAILER_PORT`. «La API solo encola» pasa a ser cierto |
+| D-16.55 | (P16-A1) El canal de tiempo residual de `/olvido` (dos `INSERT` con usuario, ninguno sin él) se **reconoce y se acota** —límite de tasa y una prueba de medianas < 50 ms—, no se finge escribiendo en el ramal vacío. ADR-025, decisión 3 |
+| D-16.56 | (P16-A1) El token de restablecimiento **se gasta antes** de validar la contraseña (una débil obliga a pedir otro enlace); `password_reset_consume` exige `ACTIVE`; el correo del usuario se lee bajo tenant tras consumir, en vez de ampliar el retorno de la definer |
+| D-16.57 | (P16-A1) `GRANT SELECT ("at")` —solo la columna— sobre `rate_limit_hit` al despachador, lo mínimo para que el `DELETE … WHERE at < …` funcione sin leer una clave; y `email_outbox.user_id → app_user` con clave foránea (el plan solo nombraba `company_id`) |
+| D-16.58 | (P16-A1) `FOR UPDATE SKIP LOCKED` lleva al lado una **reserva** de 5 min en `siguiente_intento_en` (el bloqueo de fila muere al confirmar y el envío ocurre fuera), **renovada fila a fila** con la firma de la pasada; cero filas = otra instancia la tomó y se cede. Un fallo al **marcar** un correo aceptado sube sin pasar por `marcarFallo`. ADR-025, decisión 6 |
+| D-16.59 | (P16-A1) El despachador **no usa `enableShutdownHooks()`**: la señal solo hace `detener()`, la pasada termina, después se cierra el pool y sale con 0. Regla `despachador-sin-ganchos-de-nest` en `audit:forbidden` |
+| D-16.60 | (P16-A1) En producción el despachador **rechaza `fake`** (marcaría `ENVIADO` lo que nadie recibió); `consola` es el valor de desarrollo; `resend` sin `RESEND_API_KEY`/`RESEND_REMITENTE` no arranca; la API también conoce `RESEND_*` (el `.env` es uno) aunque no envíe. `mailer.provider.ts` decide para los dos procesos |
+| D-16.61 | (P16-A1) `GET /correo/salud` del back office **sin motivo y sin fila en `backoffice_access_log`**: contadores e instantes, ningún dato de ningún tenant; un motivo obligatorio se rellenaría con «salud» y enterraría los accesos que importan. Sigue exigiendo sesión de operador |
+| D-16.62 | (P16-A1) Contar y anotar el golpe son **una transacción por clave** bajo `pg_advisory_xact_lock(hashtext(kind), hashtext(clave))` (leer-luego-escribir dejaba pasar 30 de 30 simultáneas); la lectura se acota a `golpesQueDeciden = umbral × escalones + 1`; `system.ratelimit.exceeded` es **de transición** (una fila por ronda, `abreBloqueo`), no por rechazo. ADR-026, decisión 5 |
+| D-16.63 | (P16-A1) La IP entra en los **casos de uso** (`SolicitarRestablecimiento`, `RestablecerContrasena`, `InvitarUsuario`, `ReenviarInvitacion`) y el límite corre como primera línea; en el reenvío la IP cuenta aunque el usuario no exista. `auth.password.reset_requested`/`reset_completed` llevan la IP |
+| D-16.64 | (P16-A1) `Retry-After` sale para **cualquier** `ErrorDeDominio` con `reintentarEnSegundos` (el filtro mira la forma); `AccesoBloqueadoError` (login, P1) no lo trae aún: una línea y una prueba, deuda dicha en ADR-026. `api` gana `image: costeo-api:local` y `correo` la reutiliza sin `build`; `desplegar.sh` crea los roles en el paso 5/8 antes de migrar |
 
 ### P17 · P18 · P19 — diferidos por decisión de producto, no por bloqueo técnico
 
@@ -479,16 +504,16 @@ Lo implementado:
 |---|---|---|
 | `audit:types` | ✅ | Cuatro proyectos: API, interfaz del back office, tooling y `apps/web` |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | **40 reglas sobre 361 archivos.** En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie); P14b añadió dos reglas (INC-018, INC-020); el commit 0 de P16 añadió las tres del frontend (`no-fecha-a-medianoche`, `no-number-en-frontend`, `no-tipti`) y `override-de-npm-reflejado-en-el-lock` (INC-021); el archivo 361 es `scripts/medir-bundle.mjs` |
-| `audit:arch` | ✅ | 291 módulos, 1284 dependencias |
+| `audit:forbidden` | ✅ | **44 reglas sobre 433 archivos** (P16-A1, sin commit aún). En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie); P14b añadió dos reglas (INC-018, INC-020); el commit 0 de P16 añadió las tres del frontend (`no-fecha-a-medianoche`, `no-number-en-frontend`, `no-tipti`) y `override-de-npm-reflejado-en-el-lock` (INC-021): 40 sobre 361; P16-A1 añade las cuatro de `correo.rules.mjs` (`conexion-del-despachador-solo-en-correo`, `cadena-del-despachador-solo-en-correo`, `correo-no-lo-monta-la-app`, `despachador-sin-ganchos-de-nest`) y 72 archivos |
+| `audit:arch` | ✅ | 351 módulos, 1529 dependencias (P16-A1; eran 291 / 1284). Dos reglas nuevas aíslan `modules/correo` en los dos sentidos |
 | `audit:deadcode` | ✅ | Sin lista blanca |
 | `audit:complexity` | ✅ | |
 | `audit:duplication` | ✅ | **0 clones** |
-| `audit:migrations` | ✅ | M1–M11 · **13 migraciones** |
+| `audit:migrations` | ✅ | M1–M11 · **15 migraciones** (P16-A1: `p16a1_iva_de_compra`, `p16a1_correo_y_limite_de_tasa`; eran 13) |
 | `audit:secrets` | ✅ | Sobre `**/*`, incluidos los `.woff2` |
 | `audit:deps` | ✅ | 4 vulnerabilidades aceptadas y documentadas. **`multer` va forzado a 2.3.0 por `overrides`** (P16 commit 0, INC-021): se retira cuando `@nestjs/platform-express` fije `multer ≥ 2.3.0` |
 | `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | **585 unitarias** (sin base) + **313 de integración**; 5 saltadas con motivo (INC-016) |
+| `audit:tests` | ✅ | **823 unitarias** (sin base) + **400 de integración: 395 en verde y 5 saltadas con motivo** (INC-016). P16-A1, sin commit aún; eran 585 + 313 |
 
 > **`npm run bench` sigue fuera de `npm run audit`, a propósito** (documentado en `docs/AUDITORIA.md`
 > I8): levanta la API en la red de compose y tarda minutos. Se corre a mano y el consolidado marcaba
@@ -591,6 +616,11 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto co
 | 5 | **Las seis vistas no se pueden contrastar contra el Excel celda a celda**, porque el Excel no tiene dimensión temporal (SPEC §3). La aritmética está probada con casos a mano y R7 cierra sobre el sistema entero | P7 · P8 | Nada. Es una limitación del origen, no una tarea pendiente |
 | 8 | ✅ **RESUELTA: `/costeo` cumple §5 con holgura. La que fallaba era la medición.** En la topología de producción —API y base en la misma red— el p95 es **~85 ms contra un presupuesto de 400** (21 %). El modo de 370 ms era **el proxy de Docker Desktop en Windows**, que se atasca ~300 ms cuando cruza un resultado grande: la misma consulta de 1.600 filas tarda 2 ms dentro del contenedor y pega picos de 320 ms desde el host. **INC-016** trae las once cosas que se descartaron midiendo | P8 | **Pero deja una decisión abierta: las tres suites de rendimiento corren en el host y nunca han medido el sistema.** Ver abajo |
 | 6 | **El coste de armar el contexto de las vistas no está medido.** Cinco consultas más el costeo de la carta, por (ubicación, mes) | P8 | Nada hoy. **P9 lo multiplica por el número de ubicaciones** y tiene presupuesto de 800 ms |
+
+---
+
+| 9 | **El consolidado de diez ubicaciones ya no cabe en su presupuesto de §5: 940,9 ms contra 800.** Medido con `npm run bench` al cerrar P16-A1, dos corridas con la máquina en reposo (940,9 y 962,6 ms). **No es regresión del paquete**: las consultas y sus recuentos de llamada son los mismos que en P15, y normalizado al «suelo del entorno» que el propio bench mide (validar sesión: 4,5 ms en P15, 6,5 ms hoy) el consolidado cuesta 143,7 suelos frente a los 149,6 de entonces — relativamente, igual. Lo que cambió es la máquina. **Pero el número absoluto es rojo y el umbral no se sube** (AUDITORIA.md I8) | P16-A1 | **Decisión tuya.** El arreglo está diseñado desde P9: vistas materializadas para períodos cerrados (ADR-012 §7), que es la deuda #2 de abajo y cuya condición de pago era exactamente esta. Las opciones: (a) pagarla ahora, en un paquete propio; (b) medirla primero en CI o en el VPS —donde no hay 5,7 GB de base de desarrollo compitiendo— y decidir con ese número; (c) aceptarla hasta el piloto, que tiene **dos** ubicaciones y no la toca. **Mi recomendación: (c) ahora y (b) en el ensayo de despliegue**, porque el piloto no lo necesita y medirlo en la máquina donde va a correr es más barato que optimizar a ciegas |
+| 10 | **`npm run bench` no lo ejecuta CI.** Corre `npm run audit` y `migrate:verify`, no el bench. El presupuesto del consolidado no lo vigila nada automático — es el riesgo que la propia fila I8 de `AUDITORIA.md` declaraba en voz alta, y que se cumplió: el bench llevaba **dos paquetes sin poder arrancar** (INC-017, recurrencia 1) | P16-A1 | Añadirlo a CI cuesta ~3 minutos por corrida (crea y destruye una base con 220.000 movimientos). ¿Se añade, o se queda como paso manual obligatorio de los paquetes que tocan lectura? |
 
 ---
 

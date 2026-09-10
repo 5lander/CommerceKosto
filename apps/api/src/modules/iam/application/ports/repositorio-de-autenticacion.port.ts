@@ -8,6 +8,7 @@
  * arquitectura intenta impedir.
  */
 
+import type { CorreoAEncolar } from '../../../../shared/application/correo/correo-a-encolar';
 import type { AuditOutcome } from '../../../../shared/application/ports/audit-log.port';
 import type {
   CompanyId,
@@ -89,9 +90,53 @@ export interface ContextoDeSesion {
   readonly ubicacionesDeCompany: readonly LocationId[];
 }
 
+/** Lo que devuelve `password_reset_consume`: a quien pertenece el token que se acaba de gastar. */
+export interface UsuarioRestablecido {
+  readonly userId: UserId;
+  readonly companyId: CompanyId;
+}
+
 export interface RepositorioDeAutenticacion {
   /** Unica lectura sin tenant efectivo del sistema. Va por `auth_lookup`. */
   buscarCredencial(email: string): Promise<CredencialDeLogin | null>;
+
+  /**
+   * Crea el token de restablecimiento y encola su correo en UNA operacion, sin
+   * tenant (`password_reset_request`, D-16.47). Sin usuario activo no hace
+   * nada y devuelve lo mismo: la respuesta no dice si el correo existe.
+   */
+  solicitarRestablecimiento(entrada: {
+    readonly email: string;
+    readonly tokenHash: string;
+    readonly expiraEn: Date;
+    readonly correo: CorreoAEncolar;
+  }): Promise<void>;
+
+  /**
+   * Gasta el token si no estaba usado ni caducado (`password_reset_consume`).
+   * `null` para inexistente, usado o caducado: los tres iguales, a proposito.
+   */
+  consumirRestablecimiento(entrada: {
+    readonly tokenHash: string;
+    readonly ahora: Date;
+  }): Promise<UsuarioRestablecido | null>;
+
+  /**
+   * El correo de un usuario de la company, bajo tenant. La politica de
+   * contrasenas lo necesita para rechazar una que lo contenga.
+   */
+  correoDelUsuario(entrada: { readonly companyId: CompanyId; readonly userId: UserId }): Promise<string | null>;
+
+  /**
+   * Deja un correo en `email_outbox` bajo el tenant del usuario. Hoy lo usa
+   * solo el aviso de bloqueo del login: lo entrega el despachador, como la
+   * invitacion y el restablecimiento (ADR-025). La API no envia nada.
+   */
+  encolarCorreo(entrada: {
+    readonly companyId: CompanyId;
+    readonly userId: UserId;
+    readonly correo: CorreoAEncolar;
+  }): Promise<void>;
 
   fallosRecientes(entrada: {
     readonly email: string;

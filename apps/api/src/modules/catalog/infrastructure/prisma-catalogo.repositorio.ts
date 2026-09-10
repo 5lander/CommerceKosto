@@ -46,6 +46,8 @@ import type {
   ArticuloLeido,
   DatosDeArticuloEnLote,
   DatosDeItemEnLote,
+  DatosParaActualizarArticulo,
+  DatosParaActualizarGrupo,
   DatosParaActualizarItem,
   DatosParaCrearArticulo,
   DatosParaCrearItem,
@@ -54,6 +56,7 @@ import type {
   RepositorioDeCatalogo,
   ResultadoDeAlta,
   ResultadoDeAltaDeItem,
+  ResultadoDeCambio,
 } from '../application/ports/repositorio-de-catalogo.port';
 import type { Dimension, UnidadDelCatalogo } from '../domain/conversion';
 
@@ -66,6 +69,23 @@ const DIMENSIONES: ReadonlySet<string> = new Set(['MASA', 'VOLUMEN', 'CONTEO']);
 
 function esDuplicado(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === CODIGO_DE_DUPLICADO;
+}
+
+/**
+ * Un `updateMany` con `company_id` en el WHERE, traducido a lo que el puerto
+ * promete. Cero filas es «no existe en tu company»; un `P2002` es que el
+ * nombre nuevo ya lo usa otra fila. Lo comparten grupos y artículos.
+ */
+async function intentarCambio(
+  cambio: () => Promise<{ readonly count: number }>,
+): Promise<ResultadoDeCambio> {
+  try {
+    const resultado = await cambio();
+    return resultado.count > 0 ? 'actualizado' : 'no_encontrado';
+  } catch (error) {
+    if (esDuplicado(error)) return 'nombre_en_uso';
+    throw error;
+  }
 }
 
 /**
@@ -106,11 +126,12 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
   public async crearGrupo(entrada: {
     readonly companyId: CompanyId;
     readonly nombre: string;
+    readonly ivaTarifa: string | null;
   }): Promise<ResultadoDeAlta<ItemGroupId>> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       try {
         const fila = await tx.itemGroup.create({
-          data: { companyId: entrada.companyId, name: entrada.nombre },
+          data: { companyId: entrada.companyId, name: entrada.nombre, ivaTarifa: entrada.ivaTarifa },
           select: { id: true },
         });
         return { clase: 'creado', id: aGroupId(fila.id) };
@@ -127,12 +148,36 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
     return this.transaccion.run(companyId, async (tx) => {
       const filas = await tx.itemGroup.findMany({
         where: { companyId },
-        select: { id: true, name: true },
+        select: CAMPOS_DE_GRUPO,
         orderBy: { name: 'asc' },
       });
 
-      return filas.map((f) => ({ id: aGroupId(f.id), nombre: f.name }));
+      return filas.map(comoGrupoLeido);
     });
+  }
+
+  public async buscarGrupo(entrada: {
+    readonly companyId: CompanyId;
+    readonly grupoId: ItemGroupId;
+  }): Promise<GrupoLeido | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.itemGroup.findFirst({
+        where: { id: entrada.grupoId, companyId: entrada.companyId },
+        select: CAMPOS_DE_GRUPO,
+      });
+      return fila === null ? null : comoGrupoLeido(fila);
+    });
+  }
+
+  public async actualizarGrupo(datos: DatosParaActualizarGrupo): Promise<ResultadoDeCambio> {
+    return this.transaccion.run(datos.companyId, async (tx) =>
+      intentarCambio(() =>
+        tx.itemGroup.updateMany({
+          where: { id: datos.grupoId, companyId: datos.companyId },
+          data: { name: datos.nombre, ivaTarifa: datos.ivaTarifa },
+        }),
+      ),
+    );
   }
 
   public async crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAltaDeItem> {
@@ -239,6 +284,7 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
             presentationAmount: datos.presentacion,
             presentationUnit: datos.unidadDePresentacion,
             conversionFactor: datos.factorDeConversion,
+            ivaTarifa: datos.ivaTarifa,
             status: ESTADO_ACTIVO,
           },
           select: { id: true },
@@ -263,32 +309,42 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
           companyId: entrada.companyId,
           ...(entrada.itemId === null ? {} : { itemId: entrada.itemId }),
         },
-        select: {
-          id: true,
-          itemId: true,
-          name: true,
-          brand: true,
-          supplier: true,
-          presentationAmount: true,
-          presentationUnit: true,
-          conversionFactor: true,
-          status: true,
-        },
+        select: CAMPOS_DE_ARTICULO,
         orderBy: { name: 'asc' },
       });
 
-      return filas.map((f) => ({
-        id: aArticleId(f.id),
-        itemId: aItemId(f.itemId),
-        nombre: f.name,
-        marca: f.brand,
-        proveedor: f.supplier,
-        presentacion: f.presentationAmount.toFixed(),
-        unidadDePresentacion: f.presentationUnit,
-        factorDeConversion: f.conversionFactor.toFixed(),
-        estado: f.status,
-      }));
+      return filas.map(comoArticuloLeido);
     });
+  }
+
+  public async buscarArticulo(entrada: {
+    readonly companyId: CompanyId;
+    readonly articuloId: PurchaseArticleId;
+  }): Promise<ArticuloLeido | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.purchaseArticle.findFirst({
+        where: { id: entrada.articuloId, companyId: entrada.companyId },
+        select: CAMPOS_DE_ARTICULO,
+      });
+      return fila === null ? null : comoArticuloLeido(fila);
+    });
+  }
+
+  public async actualizarArticulo(datos: DatosParaActualizarArticulo): Promise<ResultadoDeCambio> {
+    return this.transaccion.run(datos.companyId, async (tx) =>
+      intentarCambio(() =>
+        tx.purchaseArticle.updateMany({
+          where: { id: datos.articuloId, companyId: datos.companyId },
+          data: {
+            name: datos.nombre,
+            brand: datos.marca,
+            supplier: datos.proveedor,
+            ivaTarifa: datos.ivaTarifa,
+            status: datos.estado,
+          },
+        }),
+      ),
+    );
   }
 
   /**
@@ -388,6 +444,7 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
           presentationAmount: articulo.presentacion,
           presentationUnit: articulo.unidadDePresentacion,
           conversionFactor: articulo.factorDeConversion,
+          ivaTarifa: articulo.ivaTarifa,
           status: ESTADO_ACTIVO,
         })),
       });
@@ -395,6 +452,59 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
       return { clase: 'escrito', filas: datos.articulos.length };
     });
   }
+}
+
+const CAMPOS_DE_GRUPO = { id: true, name: true, ivaTarifa: true } as const;
+
+function comoGrupoLeido(fila: {
+  id: string;
+  name: string;
+  ivaTarifa: { toFixed: () => string } | null;
+}): GrupoLeido {
+  return {
+    id: aGroupId(fila.id),
+    nombre: fila.name,
+    ivaTarifa: fila.ivaTarifa === null ? null : fila.ivaTarifa.toFixed(),
+  };
+}
+
+const CAMPOS_DE_ARTICULO = {
+  id: true,
+  itemId: true,
+  name: true,
+  brand: true,
+  supplier: true,
+  presentationAmount: true,
+  presentationUnit: true,
+  conversionFactor: true,
+  ivaTarifa: true,
+  status: true,
+} as const;
+
+function comoArticuloLeido(fila: {
+  id: string;
+  itemId: string;
+  name: string;
+  brand: string | null;
+  supplier: string | null;
+  presentationAmount: { toFixed: () => string };
+  presentationUnit: string;
+  conversionFactor: { toFixed: () => string };
+  ivaTarifa: { toFixed: () => string };
+  status: string;
+}): ArticuloLeido {
+  return {
+    id: aArticleId(fila.id),
+    itemId: aItemId(fila.itemId),
+    nombre: fila.name,
+    marca: fila.brand,
+    proveedor: fila.supplier,
+    presentacion: fila.presentationAmount.toFixed(),
+    unidadDePresentacion: fila.presentationUnit,
+    factorDeConversion: fila.conversionFactor.toFixed(),
+    ivaTarifa: fila.ivaTarifa.toFixed(),
+    estado: fila.status,
+  };
 }
 
 const CAMPOS_DE_ITEM = {

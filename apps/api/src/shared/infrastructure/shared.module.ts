@@ -15,36 +15,32 @@
 
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 
-import { AUDIT_LOG_PORT } from '../application/ports/audit-log.port';
+import { LimitadorDeTasa } from '../application/limite-de-tasa/limitador';
+import { AUDIT_LOG_PORT, type AuditLogPort } from '../application/ports/audit-log.port';
 import { FILE_STORAGE_PORT } from '../application/ports/file-storage.port';
 import { MAILER_PORT } from '../application/ports/mailer.port';
+import { REGISTRO_DE_LIMITES, type RegistroDeLimites } from '../application/ports/registro-de-limites.port';
 import { CONFIGURATION, type Configuration } from './config/environment';
+import { mailerProvider } from './correo/mailer.provider';
 import { FakeFileStorage } from './fakes/fake-file-storage';
-import { FakeMailer } from './fakes/fake-mailer';
 import { PrismaAuditLogRepository } from './persistence/prisma-audit-log.repository';
 import { PrismaConnection } from './persistence/prisma-connection';
+import { PrismaRegistroDeLimites } from './persistence/prisma-registro-de-limites';
 import { TenantTransaction } from './persistence/tenant-transaction';
 
 class AdapterNotImplementedError extends Error {
-  public constructor(variable: string, paquete: string) {
+  public constructor(variable: string, valor: string, paquete: string) {
     super(
-      `${variable}=real, pero el adaptador real no existe todavia (llega en ${paquete}). ` +
+      `${variable}=${valor}, pero ese adaptador no existe todavia (llega en ${paquete}). ` +
         'Pon `fake` o implementalo: la aplicacion no arranca con un selector que no puede cumplir.',
     );
     this.name = 'AdapterNotImplementedError';
   }
 }
 
-function mailerProvider(config: Configuration): Provider {
-  if (config.mailAdapter === 'real') {
-    throw new AdapterNotImplementedError('MAIL_ADAPTER', 'P1');
-  }
-  return { provide: MAILER_PORT, useClass: FakeMailer };
-}
-
 function fileStorageProvider(config: Configuration): Provider {
   if (config.storageAdapter === 'real') {
-    throw new AdapterNotImplementedError('STORAGE_ADAPTER', 'P10');
+    throw new AdapterNotImplementedError('STORAGE_ADAPTER', config.storageAdapter, 'P10');
   }
   return { provide: FILE_STORAGE_PORT, useClass: FakeFileStorage };
 }
@@ -55,6 +51,16 @@ export class SharedModule {
   public static forRoot(config: Configuration): DynamicModule {
     const configuration: Provider = { provide: CONFIGURATION, useValue: config };
     const auditLog: Provider = { provide: AUDIT_LOG_PORT, useClass: PrismaAuditLogRepository };
+    const registroDeLimites: Provider = { provide: REGISTRO_DE_LIMITES, useClass: PrismaRegistroDeLimites };
+    // Un caso de uso de `application`: sin decorador, construido aqui con sus
+    // dos puertos, como los de `iam.module.ts`. Es transversal (lo usan cuatro
+    // endpoints de `iam`) y por eso vive en `shared` y se exporta.
+    const limitador: Provider = {
+      provide: LimitadorDeTasa,
+      inject: [REGISTRO_DE_LIMITES, AUDIT_LOG_PORT],
+      useFactory: (registro: RegistroDeLimites, auditoria: AuditLogPort): LimitadorDeTasa =>
+        new LimitadorDeTasa({ registro, auditoria }),
+    };
 
     return {
       module: SharedModule,
@@ -63,10 +69,23 @@ export class SharedModule {
         PrismaConnection,
         TenantTransaction,
         auditLog,
-        mailerProvider(config),
+        registroDeLimites,
+        limitador,
+        // La API no envia correo desde P16-A1 (ADR-025): encola. El selector se
+        // honra igual, con la MISMA eleccion que usa el despachador, para que un
+        // `.env` que pida `resend` sin clave falle aqui tambien y no solo alla.
+        mailerProvider({ mailAdapter: config.mailAdapter, resend: config.resend, isProduction: config.isProduction }),
         fileStorageProvider(config),
       ],
-      exports: [CONFIGURATION, PrismaConnection, TenantTransaction, AUDIT_LOG_PORT, MAILER_PORT, FILE_STORAGE_PORT],
+      exports: [
+        CONFIGURATION,
+        PrismaConnection,
+        TenantTransaction,
+        AUDIT_LOG_PORT,
+        MAILER_PORT,
+        FILE_STORAGE_PORT,
+        LimitadorDeTasa,
+      ],
     };
   }
 }

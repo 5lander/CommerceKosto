@@ -132,6 +132,7 @@ describe('catálogo', () => {
         marca: null,
         proveedor: null,
         factorExplicito: null,
+        ivaTarifa: '0.15',
         ...cuerpo,
       });
   }

@@ -11,7 +11,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
 import { RELOJ, type Reloj } from '../../../shared/application/ports/reloj.port';
 import { ListarArticulos } from '../../catalog/application/casos-de-uso/articulos';
-import { LeerItem, ListarItems } from '../../catalog/application/casos-de-uso/items';
+import { LeerItem, ListarGrupos, ListarItems } from '../../catalog/application/casos-de-uso/items';
+import { TarifasDeIva } from '../../catalog/application/casos-de-uso/tarifas-de-iva';
 import {
   REPOSITORIO_DE_PRECIOS,
   type RepositorioDePrecios,
@@ -40,4 +41,11 @@ export class DependenciasDePreciosNest {
 
   @Inject(ListarItems)
   public readonly listarItems!: ListarItems;
+
+  @Inject(ListarGrupos)
+  public readonly listarGrupos!: ListarGrupos;
+
+  /** Artículo y grupo: los dos niveles de la tarifa de IVA (D-16.9). */
+  @Inject(TarifasDeIva)
+  public readonly tarifasDeIva!: TarifasDeIva;
 }

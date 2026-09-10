@@ -186,8 +186,9 @@ describe('rendimiento del costeo con volumen realista', () => {
 
     await duena.query(
       `INSERT INTO purchase_article
-         (company_id, item_id, name, presentation_amount, presentation_unit, conversion_factor, status)
-       SELECT $1, i.id, 'Presentacion ' || i.name, 1000, 'kg', 1000, 'ACTIVE'
+         (company_id, item_id, name, presentation_amount, presentation_unit, conversion_factor,
+          iva_tarifa, status)
+       SELECT $1, i.id, 'Presentacion ' || i.name, 1000, 'kg', 1000, 0.15, 'ACTIVE'
        FROM item i WHERE i.company_id = $1`,
       [company],
     );

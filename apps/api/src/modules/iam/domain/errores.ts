@@ -100,6 +100,22 @@ export class ContrasenaDebilError extends ErrorDeDominio {
 }
 
 /**
+ * El enlace de restablecimiento no sirve — y NO se dice por que.
+ *
+ * Vacio, inexistente, ya usado y caducado dan el MISMO error, igual que en la
+ * activacion: quien prueba tokens no debe poder distinguir «no existe» de «ya
+ * se uso», porque lo segundo confirma que hubo una cuenta detras. Es 400 y no
+ * 401: no hay sesion que invalidar, hay una peticion que no vale.
+ */
+export class TokenDeRestablecimientoInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('El enlace de restablecimiento no es valido o ya caduco. Pide uno nuevo.');
+  }
+}
+
+/**
  * La ubicacion pedida no esta en el alcance de quien pregunta.
  *
  * ES LA ESCALADA HORIZONTAL, y vive en `iam` porque es una regla sobre la

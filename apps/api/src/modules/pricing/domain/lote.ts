@@ -15,6 +15,7 @@
  * ES DOMINIO PURO.
  */
 
+import { motivoDeTarifaInvalida } from '../../../shared/domain/iva/tarifa';
 import {
   PRIMERA_POSICION,
   clavePorNombre,
@@ -33,7 +34,7 @@ export interface PrecioDelLote {
   /** El NOMBRE del artículo de compra. `null` en una preparación (R10). */
   readonly articulo: string | null;
   readonly precio: string;
-  /** `null` toma la tasa de la company. La de la factura manda sobre ella. */
+  /** `null` toma la del artículo o la del grupo (D-16.9). La de la factura manda. */
   readonly ivaCompra: string | null;
   readonly origen: OrigenDePrecio;
   readonly nota: string | null;
@@ -80,8 +81,7 @@ function mensajeDePrecioRepetido(precio: PrecioDelLote, posicion: number): strin
 function motivoDelPrecio(precio: PrecioDelLote): string | null {
   if (precio.item.trim().length === 0) return 'La fila no dice de qué ítem es este precio.';
   if (!DECIMAL.test(precio.precio)) return `El precio «${precio.precio}» no es un número.`;
-  if (precio.ivaCompra !== null && !DECIMAL.test(precio.ivaCompra)) {
-    return `El IVA de compra «${precio.ivaCompra}» no es un número.`;
-  }
-  return null;
+  // Con su fila, como cualquier problema del archivo (D-16.44): un 15 donde va
+  // 0.15 no puede salir como un 400 suelto sin número.
+  return precio.ivaCompra === null ? null : motivoDeTarifaInvalida(precio.ivaCompra);
 }

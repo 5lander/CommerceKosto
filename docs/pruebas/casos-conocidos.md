@@ -464,6 +464,34 @@ Un producto con receta y sin rendimiento capturado. Es el estado normal de un pr
 
 ---
 
+## CC-IVA-01..04 — El IVA de compra en dos niveles (P16-A1, D-16.9)
+
+**Qué prueba:** la primera línea de SPEC §12 aplicada al **total de la factura que teclea el bodeguero**, y la precedencia con la que se elige la tarifa: cuerpo > artículo > grupo, sin valor por defecto. Es la fórmula que ya cubría CC-007 para el precio de referencia, ahora compartida con el libro de inventario (`shared/domain/iva/neteo.ts`, D-16.40).
+**Origen:** construidos y **calculados a mano antes que el código**, el 2026-09-09. No hay caso en el Excel: el Excel no tiene libro de inventario, y sus precios ya entran neteados por `T1`.
+
+**Parámetro fijo:** `bruto = 115.00` (una factura con IVA del 15 % sobre 100.00).
+
+| Caso | `tarifa` | `iva_recuperable` | `neto = recuperable ? bruto / (1 + tarifa) : bruto` | **Esperado** |
+|---|---|---|---|---|
+| **CC-IVA-01** | `0.15` | `true` | `115.00 / 1.15` | **`100.00`** exacto (`100.000000000000` a escala 12) |
+| **CC-IVA-02** | `0.15` | `false` | `115.00` — el IVA es costo (R13) | **`115.00`** |
+| **CC-IVA-03** | `0` | `true` y `false` | `115.00 / 1` y `115.00` | **`115.00`** en los dos: con tarifa cero, recuperar o no da lo mismo |
+| **CC-IVA-04** | cuerpo `0.08`, artículo `0.15`, grupo `0.12` | `true` | la precedencia elige **`0.08`**; con bruto `108.00`: `108.00 / 1.08` | tarifa aplicada **`0.08`**, neto **`100.00`** |
+
+**Y lo que persiste el libro (D-16.10), en CC-IVA-01:** `total_bruto = 115.000000000000`, `iva_tarifa_aplicada = 0.150000000000`, `iva_recuperable_aplicado = true`, `total_cost = 100.000000000000`, `desglose_conocido = true`.
+
+**Las aserciones que discriminan**
+
+| # | Aserción | Qué implementación mata |
+|---|---|---|
+| 1 | CC-IVA-02 devuelve `115.00`, no `100.00` | La que netea siempre e ignora R13 |
+| 2 | CC-IVA-04 aplica `0.08` y no `0.15` | La que lee el artículo antes que el cuerpo, o la que sigue leyendo `company_settings.iva_compra` |
+| 3 | Sin cuerpo, sin artículo y sin grupo, la compra **se rechaza** (400) | La que rellena con `0.15` «por defecto» — que es exactamente lo que D-16.9 prohíbe |
+
+Se prueban en `shared/domain/iva/neteo.spec.ts` y `precedencia.spec.ts` (dominio puro, base apagada) y de punta a punta en `test/integracion/iva-de-compra.spec.ts`, leyendo la fila con la dueña.
+
+---
+
 ## Cobertura — estado tras P5
 
 Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se redactaron en la fase PLAN de P5, antes de tocar el motor**, y el motor se implementó contra ellos.

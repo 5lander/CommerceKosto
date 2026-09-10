@@ -21,7 +21,8 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
 import { RELOJ, type Reloj } from '../../../shared/application/ports/reloj.port';
-import { LeerItem, ListarItems } from '../../catalog/application/casos-de-uso/items';
+import { LeerItem, ListarGrupos, ListarItems } from '../../catalog/application/casos-de-uso/items';
+import { TarifasDeIva } from '../../catalog/application/casos-de-uso/tarifas-de-iva';
 import {
   AsegurarPeriodo,
   CerrarPeriodo,
@@ -30,6 +31,7 @@ import {
 } from '../../periods/application/casos-de-uso/periodos';
 import { CalendarioDePeriodos } from '../../periods/domain/periodo';
 import { CALENDARIO_DE_PERIODOS } from '../../periods/infrastructure/dependencias-de-periodos';
+import { LeerAjustes } from '../../pricing/application/casos-de-uso/ajustes';
 import { CostosDeItems } from '../../pricing/application/casos-de-uso/costos-de-items';
 import { LeerCarta } from '../../recipes/application/casos-de-uso/carta';
 import {
@@ -51,6 +53,17 @@ export class DependenciasDeInventarioNest {
 
   @Inject(ListarItems)
   public readonly listarItems!: ListarItems;
+
+  /** Los dos escalones de abajo de la tarifa de IVA de una compra (D-16.9). */
+  @Inject(TarifasDeIva)
+  public readonly tarifasDeIva!: TarifasDeIva;
+
+  @Inject(ListarGrupos)
+  public readonly listarGrupos!: ListarGrupos;
+
+  /** La recuperabilidad del IVA es de la company (R13), y la guarda `pricing`. */
+  @Inject(LeerAjustes)
+  public readonly leerAjustes!: LeerAjustes;
 
   @Inject(CostosDeItems)
   public readonly costosDeItems!: CostosDeItems;

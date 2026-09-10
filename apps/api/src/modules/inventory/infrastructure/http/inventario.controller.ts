@@ -141,6 +141,7 @@ export class InventarioController {
       costoTotal: cuerpo.costoTotal,
       purchaseArticleId:
         cuerpo.purchaseArticleId === null ? null : aPurchaseArticleId(cuerpo.purchaseArticleId),
+      ivaTarifa: cuerpo.ivaTarifa,
       occurredAt: new Date(cuerpo.occurredAt),
       note: cuerpo.note,
     });

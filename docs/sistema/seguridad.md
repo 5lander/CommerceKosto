@@ -17,6 +17,7 @@ Las tres son independientes: si una falla, las otras dos siguen de pie.
 | `costeo_migrator` | Migraciones (solo el CLI de Prisma) | Dueño del esquema y de las tablas. `NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT` |
 | `costeo_app` | Aplicación cliente | **No superusuario, no dueño.** Sujeto a RLS. Sin `CREATE`, sin `TEMPORARY`, sin membresías. Timeouts fijados en el rol |
 | `costeo_backoffice` | Back office (P11) | **El único rol con `BYPASSRLS`: ve todos los tenants a la vez.** No superusuario, no dueño, `NOCREATEROLE`, `NOINHERIT`, `CONNECTION LIMIT 4`. Sus privilegios se conceden **tabla por tabla** en la migración de P11, nunca por `DEFAULT PRIVILEGES`, y no incluyen `DELETE` en ninguna ni `SELECT` sobre recetas o precios. Vive **solo** en el proceso del back office. El riesgo asumido y sus cuatro condiciones, en **ADR-017** |
+| `costeo_despachador` | El despachador de correo (P16-A1) | **`NOBYPASSRLS`**: ve la cola entera por una política permisiva sobre **exactamente dos tablas** —`email_outbox` (`SELECT, UPDATE`) y `rate_limit_hit` (`DELETE`, y `SELECT` solo sobre `at`)— y `42501` sobre todo lo demás, probado tabla por tabla. `CONNECTION LIMIT 2`, `NOINHERIT`, timeouts en el rol. Vive **solo** en el tercer binario (`despachador.ts`, servicio `correo`); la API no lee su cadena y su esquema de entorno no acepta la de la API. **ADR-025** |
 
 Los `DEFAULT PRIVILEGES` conceden `SELECT` e `INSERT`, **nunca `UPDATE` ni `DELETE`**: esos se conceden tabla por tabla, en la migración que la crea. El orden inverso tiene el fallo invertido — si alguien olvidara un `REVOKE`, el libro de inventario dejaría de ser append-only **en silencio**.
 
@@ -176,6 +177,32 @@ P0 no tiene autenticación ni datos de negocio: lo que existe es el andamiaje qu
 
 Los cuatro motivos de rechazo dan **el mismo mensaje**. El motivo real solo va a `audit_log`.
 
+**El aviso de bloqueo al titular se encola, no se envía** *(P16-A1, ADR-025)*: al quinto fallo, `IniciarSesion` deja una fila `BLOQUEO` en `email_outbox` bajo el tenant de la cuenta —sin enlace y sin datos, `datos = {}`— y la entrega el despachador. Hasta entonces salía por `MailerPort` directamente desde la API, cuyo adaptador en producción es `fake`: el aviso existía solo en memoria del proceso. Solo se encola si la cuenta existe; encolarlo siempre haría del login un relay de correo.
+
+### El restablecimiento sin sesión y el canal de tiempo *(P16-A1)*
+
+`POST /auth/password/olvido` responde 202 con el mismo cuerpo exista o no el correo, y hace el mismo trabajo en Node en los dos casos (token, caducidad, enlace, llamada a `password_reset_request`). **Lo que sí difiere es lo que la base hace por dentro**: con usuario activo, la definer inserta el token y el correo (dos `INSERT`: un índice único, dos claves foráneas y un `jsonb`); sin usuario, solo el `SELECT`. Es un residuo estructural de milisegundos, y se asume en vez de disimularlo —escribir algo también en el ramal vacío mezclaría el limitador con la definer y no cerraría el canal del todo—. Lo acota el límite de tasa (10/h por IP, 3/h por destinatario; D-16.50), que impide muestrearlo, y `correo-transaccional.spec.ts` fija que la diferencia de medianas entre los dos ramales se queda por debajo de 50 ms: la escala de un `INSERT`, nunca la de un hash de Argon2id (que es lo que un cambio descuidado metería en un solo ramal).
+
+**Las cinco funciones `SECURITY DEFINER`, y las dos que escriben.** P1 dejó tres de solo lectura
+y ADR-006 escribió que «cualquier cuarta merece la misma discusión»; ADR-025 (decisión 3) es esa
+discusión. Las cinco, con las mismas tres cerraduras (`SET search_path = pg_catalog, public`,
+`REVOKE EXECUTE FROM PUBLIC`, `GRANT` solo a `costeo_app`) y sin ningún filtro más que su clave:
+
+| Función | Desde | Lee / escribe | Clave de entrada |
+|---|---|---|---|
+| `auth_lookup(email)` | P1 | lee | el correo, en el login |
+| `session_lookup(token_hash)` | P1 | lee | el hash de la sesión, una vez por petición |
+| `invitation_lookup(token_hash)` | P1 | lee | el hash de la invitación, al activar |
+| **`password_reset_request(p_email, p_token_hash, p_expires_at, p_datos)`** | P16-A1 | **escribe** el token y su correo, con el `company_id` que la propia función lee; sin usuario `ACTIVE`, nada y la misma respuesta | el correo |
+| **`password_reset_consume(p_token_hash, p_ahora)`** | P16-A1 | **escribe** `used_at` si no estaba usado ni caducado y devuelve `(user_id, company_id)`, con lo que la app sigue **por su camino normal** bajo tenant | el hash del token |
+
+Lo que las acota: `password_reset_token` no tiene política para `costeo_app` y tiene sus privilegios
+revocados enteros; con `request` no se sabe si un correo existe, y con `consume` no se prueba un
+token sin gastarlo. **Que sean exactamente cinco, y que solo esas dos escriban, es parte de la
+decisión.**
+
+**Y el token en claro vive solo en `email_outbox.datos`, mientras el correo está en vuelo.** Esa columna la lee únicamente `costeo_despachador`: `costeo_app` y `costeo_backoffice` tienen `SELECT` por columnas, todas menos `datos`, así que ni una aplicación comprometida que fije cualquier tenant con `set_config` ni el back office con su `BYPASSRLS` pueden leer un token en vuelo. Ninguna de las tres rutas (invitar, reenviar, `/olvido`) lo escribe en `audit_log`; la prueba lo comprueba leyendo el log con el rol del back office, porque el migrator solo tiene política de `INSERT` y un `count(*)` suyo daría 0 aunque el token estuviera dentro (INC-007).
+
 ### Argon2id
 
 `m=65536, t=3, p=1`, explícitos y no los de la librería: los valores por defecto cambian entre versiones, y un cambio silencioso en el coste de hashear es a la vez un problema de seguridad (si baja) y una caída de servicio (si sube).
@@ -194,6 +221,70 @@ Escala 1 → 5 → 15 → 60 min, contando desde el **último** fallo: insistir 
 **El umbral por IP es un apartamiento razonado de la lectura literal de SEGURIDAD.md §2.1**, que da un solo número para los dos ejes. Con cinco, cinco errores repartidos entre cinco empleados de un mismo restaurante bloquean el local completo durante una hora, y cualquiera puede dispararlo desde la acera con el wifi del sitio. Lo que el eje de IP tiene que cortar es el rociado de contraseñas, y 25 fallos en una hora sigue siendo un techo bajísimo. Razonado en ADR-006; reversible: son dos constantes.
 
 **Los contadores viven en PostgreSQL, no en Redis** (decisión del usuario): el bloqueo de una cuenta **sobrevive a un reinicio**. Con un almacén volátil, un flush levanta todos los bloqueos activos sin que nadie se entere.
+
+### La IP del cliente tras el proxy, y el límite de tasa *(P16-A1)*
+
+**Detrás de Caddy toda petición llega con la IP de Caddy en el socket.** Desde P14b el despliegue
+tiene proxy y hasta P16-A1 la API seguía tomando `socket.remoteAddress`, con un comentario que
+decía «cuando el despliegue tenga proxy de confianza…»: el bloqueo por IP del login (25 fallos por
+hora) habría sido un **bloqueo global** al vigésimo quinto fallo de cualquiera (INC-022). Ahora hay
+un solo camino, `shared/infrastructure/http/ip-del-cliente.ts`, y lo usan el login, el back office,
+el limitador global (`LimitadorGlobalGuard`, subclase del `ThrottlerGuard` con `getTracker`) y el
+límite de tasa:
+
+- se cree el **último salto** de `X-Forwarded-For` **solo si el socket está en `PROXY_DE_CONFIANZA`**
+  (IPv4, CIDR v4 o IPv6 exacta; en producción, **la IP fija de Caddy**, `172.28.0.10`, dentro de la
+  subred fija `172.28.0.0/24` de la red de compose —no la subred entera, que incluye la pasarela
+  `172.28.0.1` y los demás contenedores, cualquiera de los cuales podría entonces elegir su IP—;
+  en desarrollo, vacía = el socket). El último y no el primero: el primero lo puso quien quiso;
+- si la cabecera no parsea como IP —puerto, `for=`, zona, basura— se cae al socket: `login_attempt.ip`
+  y `session.ip` son `INET` y una cadena inválida reventaría el login;
+- `::ffff:a.b.c.d` se normaliza a `a.b.c.d`, y las IPv6 a su forma canónica, para que la lista y las
+  claves signifiquen lo que dicen;
+- **con par no confiable la cabecera se ignora**, que es lo que impide esquivar un límite cambiándola
+  o envenenar la IP de un tercero. Probado en `ip-tras-el-proxy.spec.ts` (falseada, no cambia la
+  clave) y `limite-de-tasa.spec.ts` (par confiable, sí cambia).
+
+**El límite de tasa de D-16.50** (`LimitadorDeTasa`, `shared/application/limite-de-tasa/`) protege
+los cuatro endpoints que escriben sin sesión o mandan correo, con la misma regla que el login
+(`shared/domain/acceso/politica-de-intentos.ts`, generalizada) y ventana de una hora:
+
+| Endpoint | `kind` | Por IP | Por destinatario |
+|---|---|---|---|
+| `POST /auth/password/olvido` | `password.olvido` | 10/h | 3/h |
+| `POST /auth/password/restablecimiento` | `password.restablecimiento` | 10/h | — |
+| `POST /usuarios` | `usuario.invitar` | 30/h | 3/h |
+| `POST /usuarios/:id/reenvio-de-invitacion` | `usuario.reenvio` | 30/h | 3/h |
+
+El golpe se registra **siempre** —permitido o no, 202 o 400—, el límite corre **antes** del trabajo
+(antes de gastar un token, antes de encolar) y al superarlo la respuesta es 429
+`LIMITE_DE_SOLICITUDES` con `Retry-After` y el minuto en el mensaje: el tercer 429 del sistema,
+distinto de `ACCESO_BLOQUEADO` (la cuenta) y de `TOO_MANY_REQUESTS` (el limitador global). Las claves
+de `rate_limit_hit` son `ip:<ip>` o `correo:<sha256 del correo normalizado>`: no se guardan correos
+de desconocidos. `rate_limit_hit` está **fuera del ámbito de tenant** (como `login_attempt`): es
+una exención de ámbito, no de RLS —tiene `ENABLE + FORCE` y política permisiva—, y la purga a las
+24 h la hace el despachador (D-16.28). Es también lo que acota el canal de tiempo residual de
+`/olvido` descrito arriba: diez muestras por hora no dan para medir milisegundos.
+
+**Contar y anotar son un solo acto por clave, y no es un detalle.** La primera versión leía el
+recuento en una transacción y escribía el golpe en otra; bajo peticiones **simultáneas** de la misma
+clave todas leían el mismo recuento y todas pasaban (la revisión adversarial lo midió: treinta
+`/olvido` a la vez desde una IP, treinta aceptadas; doce al mismo buzón, doce correos). Un límite de
+leer-luego-escribir no es un límite: limita en serie, que es justo como un atacante no pide. Ahora
+`RegistroDeLimites.golpear` abre **una** transacción por eje que toma
+`pg_advisory_xact_lock(hashtext(kind), hashtext(clave))`, lee los golpes anteriores y anota el nuevo:
+el bloqueo consultivo serializa solo a las peticiones de la misma clave y muere al confirmar; con
+`READ COMMITTED`, la lectura que sigue al bloqueo ve lo que la anterior confirmó. La 🔴 que lo fija
+lanza N peticiones con `Promise.all` y exige exactamente `umbral` aceptadas (`limite-de-tasa.spec.ts`).
+
+**La lectura va acotada y la auditoría es de transición**, por la misma razón: quien insiste
+bloqueado sigue dejando golpes. Se leen solo los `umbral × escalones + 1` más recientes
+(`golpesQueDeciden`), que es todo lo que la regla necesita para decidir lo mismo que con la hora
+entera; y `system.ratelimit.exceeded` queda en `audit_log` —sin company y sin el correo en `detail`—
+**una vez por ronda**, en el golpe que abre o escala el bloqueo (`abreBloqueo`, la misma regla que el
+aviso de bloqueo del login), no en cada 429: `audit_log` es append-only y no se purga, y auditar cada
+rechazo dejaría a un anónimo bloqueado escribir miles de filas por hora. Los demás rechazos quedan en
+`rate_limit_hit` (que sí se purga) y en el log de peticiones.
 
 ### Sesiones
 

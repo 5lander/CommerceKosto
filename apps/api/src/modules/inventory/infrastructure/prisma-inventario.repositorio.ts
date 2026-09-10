@@ -40,6 +40,7 @@ import {
 } from '../../../shared/domain/identity/identificadores';
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
+import { exigirDesgloseEnCompra, type DesgloseDeCompra } from '../domain/compra';
 import { DIRECCION_DE, type TipoDeMovimiento } from '../domain/movimiento';
 import type {
   AgregadoDeItem,
@@ -85,6 +86,9 @@ const CAMPOS = {
   type: true,
   quantity: true,
   totalCost: true,
+  totalBruto: true,
+  ivaTarifaAplicada: true,
+  ivaRecuperableAplicado: true,
   occurredAt: true,
   recordedAt: true,
   transferId: true,
@@ -101,6 +105,9 @@ interface FilaDeMovimiento {
   readonly type: string;
   readonly quantity: Decimal;
   readonly totalCost: Decimal | null;
+  readonly totalBruto: Decimal | null;
+  readonly ivaTarifaAplicada: Decimal | null;
+  readonly ivaRecuperableAplicado: boolean | null;
   readonly occurredAt: Date;
   readonly recordedAt: Date;
   readonly transferId: string | null;
@@ -118,6 +125,7 @@ function comoMovimiento(fila: FilaDeMovimiento): MovimientoLeido {
     tipo: fila.type as TipoDeMovimiento,
     cantidad: aEscalaDeAlmacenamiento(fila.quantity),
     costoTotal: fila.totalCost === null ? null : aEscalaDeAlmacenamiento(fila.totalCost),
+    desglose: desgloseDe(fila),
     occurredAt: fila.occurredAt,
     recordedAt: fila.recordedAt,
     transferId: fila.transferId === null ? null : aTransferId(fila.transferId),
@@ -125,6 +133,25 @@ function comoMovimiento(fila: FilaDeMovimiento): MovimientoLeido {
     corrigeA: fila.reversesMovementId === null ? null : aMovementId(fila.reversesMovementId),
     corregidoPor: fila.correccion === null ? null : aMovementId(fila.correccion.id),
     note: fila.note,
+  };
+}
+
+/**
+ * El desglose sale entero o no sale: el CHECK `inventory_movement_desglose_coherente`
+ * garantiza que los tres campos van juntos, así que basta con mirar uno.
+ */
+function desgloseDe(fila: FilaDeMovimiento): DesgloseDeCompra | null {
+  if (
+    fila.totalBruto === null ||
+    fila.ivaTarifaAplicada === null ||
+    fila.ivaRecuperableAplicado === null
+  ) {
+    return null;
+  }
+  return {
+    totalBruto: aEscalaDeAlmacenamiento(fila.totalBruto),
+    ivaTarifaAplicada: aEscalaDeAlmacenamiento(fila.ivaTarifaAplicada),
+    ivaRecuperableAplicado: fila.ivaRecuperableAplicado,
   };
 }
 
@@ -143,6 +170,10 @@ interface FilaParaInsertar {
   readonly direction: string;
   readonly quantity: string;
   readonly totalCost: string | null;
+  readonly totalBruto: string | null;
+  readonly ivaTarifaAplicada: string | null;
+  readonly ivaRecuperableAplicado: boolean | null;
+  readonly desgloseConocido: boolean;
   readonly purchaseArticleId: string | null;
   readonly transferId: string | null;
   readonly productionId: string | null;
@@ -152,7 +183,12 @@ interface FilaParaInsertar {
   readonly note: string | null;
 }
 
-/** `direction` se DERIVA del tipo aquí: no hay forma de recibirla mal. */
+/**
+ * `direction` se DERIVA del tipo aquí: no hay forma de recibirla mal. Y una
+ * COMPRA nueva sin desglose se para aquí (D-16.25): la base no la distingue de
+ * una anterior a P16-A1, así que la guarda es de aplicación y vive en la
+ * única función por la que entra toda fila del libro.
+ */
 function comoFila(
   movimiento: MovimientoParaGuardar,
   contexto: {
@@ -162,6 +198,8 @@ function comoFila(
     readonly productionId: ProductionId | null;
   },
 ): FilaParaInsertar {
+  exigirDesgloseEnCompra(movimiento);
+
   return {
     companyId: contexto.companyId,
     locationId: movimiento.locationId,
@@ -170,6 +208,10 @@ function comoFila(
     direction: DIRECCION_DE[movimiento.tipo],
     quantity: movimiento.cantidad,
     totalCost: movimiento.costoTotal,
+    totalBruto: movimiento.desglose?.totalBruto ?? null,
+    ivaTarifaAplicada: movimiento.desglose?.ivaTarifaAplicada ?? null,
+    ivaRecuperableAplicado: movimiento.desglose?.ivaRecuperableAplicado ?? null,
+    desgloseConocido: movimiento.desglose !== null,
     purchaseArticleId: movimiento.purchaseArticleId,
     transferId: contexto.transferId,
     productionId: contexto.productionId,

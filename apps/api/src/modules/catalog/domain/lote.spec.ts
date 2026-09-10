@@ -38,6 +38,7 @@ function articulo(parcial: Partial<ArticuloDelLote> = {}): ArticuloDelLote {
     presentacion: '10',
     unidadDePresentacion: 'kg',
     factorExplicito: null,
+    ivaTarifa: null,
     ...parcial,
   };
 }
@@ -137,5 +138,22 @@ describe('lote de artículos', () => {
    */
   it('una unidad bien formada pasa aunque no exista en el catálogo', () => {
     expect(problemasDelLoteDeArticulos([articulo({ unidadDePresentacion: 'quintal' })])).toEqual([]);
+  });
+});
+
+describe('la tarifa de IVA del artículo (D-16.44)', () => {
+  it('un 15 donde va 0.15 se rechaza con su posición, junto a los demás problemas', () => {
+    const problemas = problemasDelLoteDeArticulos([
+      articulo(),
+      articulo({ nombre: 'Tomate funda', ivaTarifa: '15' }),
+      articulo({ nombre: 'Tomate malla', presentacion: 'x' }),
+    ]);
+
+    expect(problemas.map((p) => p.posicion)).toEqual([2, 3]);
+    expect(problemas[0]?.motivo).toMatch(/0\.15, no 15/u);
+  });
+
+  it('el blanco pasa: la tarifa la pondrá el grupo, o la fila se rechazará en el caso de uso', () => {
+    expect(problemasDelLoteDeArticulos([articulo({ ivaTarifa: null })])).toEqual([]);
   });
 });

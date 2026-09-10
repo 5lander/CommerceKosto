@@ -228,7 +228,7 @@ Toda la lógica lee de aquí. En el SaaS son configuración **por company**.
 | Parámetro | Valor en el Excel | Uso |
 |---|---|---|
 | IVA de venta | 0.15 | Los PVP están CON IVA. El food cost se calcula sobre venta neta. |
-| IVA de compra recuperable | SI | Si SI, el IVA pagado no es costo. Si NO, el costo sube. |
+| IVA de compra recuperable | SI | Si SI, el IVA pagado no es costo. Si NO, el costo sube. **Es el único parámetro de IVA de compra que vive en la company** (R13). |
 | Provisión de merma no atribuible | 0.02 | Solo lo que el rendimiento por ingrediente NO explica. |
 | Food cost objetivo mínimo | 0.25 | |
 | Food cost máximo aceptable | 0.32 | Sobre esto, semáforo rojo. |
@@ -237,6 +237,14 @@ Toda la lógica lee de aquí. En el SaaS son configuración **por company**.
 | Días operativos al mes | 22 | |
 | Días de cobertura objetivo | 7 | Define el punto de reorden. |
 | Regla de popularidad | 0.70 | Estándar Kasavana-Smith. |
+
+> **La TARIFA de IVA de compra NO es un parámetro de la company** (P16-A1, D-16.9). El Excel
+> la traía por insumo en `T1`, y en el SaaS vive en **dos niveles**: en el **artículo de compra**
+> (obligatoria: la factura del saco de harina dice 0 % y la del detergente 15 %) y, para las
+> compras sin artículo, en el **grupo del ítem** (opcional). Por encima de los dos, la que traiga
+> la propia petición o fila del archivo. **Nunca hay un valor por defecto**: sin tarifa en ningún
+> nivel, la compra —o el precio de referencia— se rechaza y el mensaje dice dónde ponerla.
+> `company_settings.iva_compra` dejó de leerse (D-16.43) y se retira en P16-B.
 
 > **Por qué la merma es 2% y no 4%** (nota del autor en el Excel): antes un único 4%
 > cubría cáscara, hoja botada, derrame y error de pase. Ahora cada insumo declara su
@@ -254,6 +262,33 @@ sobrecosto_merma = costo_neto_uso - costo_bruto_uso
 
 Dividir por el rendimiento **encarece** el insumo: es el costo de comprar producto que
 se pierde al limpiarlo.
+
+**De dónde salen `iva_compra` e `iva_recuperable` (P16-A1, D-16.9):**
+
+```
+iva_compra      = tarifa de la petición ?? tarifa del artículo de compra ?? tarifa del grupo del ítem
+                  (sin ninguna: ERROR — nunca se asume una tarifa)
+iva_recuperable = company_settings.iva_compra_recuperable   (R13; nunca por ítem)
+```
+
+**Una preparación (`PRODUCIDO`) no entra en esa precedencia: su `iva_compra` es 0** (D-16.51). Su
+precio de referencia es el costo estándar por unidad de uso (R10), que ya es neto —sale de insumos
+neteados uno a uno— y netearlo otra vez lo dejaría dividido entre `1 + tarifa`. Nace con 0 ignore lo
+que diga su grupo; cualquier otra tarifa en la petición o en la fila se rechaza.
+
+**La misma primera línea netea el libro de inventario.** El bodeguero teclea el **total de la
+factura con IVA** (`total_bruto`), y cada `COMPRA` persiste los cuatro importes (D-16.10):
+
+```
+total_cost               = iva_recuperable ? total_bruto / (1 + iva_compra) : total_bruto
+iva_tarifa_aplicada      = iva_compra en el momento de la compra
+iva_recuperable_aplicado = iva_recuperable en el momento de la compra
+desglose_conocido        = true
+```
+
+Son la **foto del momento**: cambiar el ajuste después no reescribe el libro (D-16.42). Las
+`COMPRA` anteriores a P16-A1 quedan con `desglose_conocido = false` y `total_cost` tal como se
+tecleó; no se rellenan (D-16.18). `compras_del_mes` (§16) sigue sumando `total_cost`.
 
 ```
 consumo_teorico_mes = Σ(consumo_mes de las líneas de receta que usan este ítem)

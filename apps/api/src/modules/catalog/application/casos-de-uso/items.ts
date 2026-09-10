@@ -13,13 +13,20 @@
  * la aplicación no tiene `DELETE` sobre estas tablas.
  */
 
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
 import type { ItemGroupId, ItemId } from '../../../../shared/domain/identity/identificadores';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { LimiteDelPlanError } from '../../../iam/domain/errores';
-import { ConflictoDeCatalogoError, EntradaDeCatalogoInvalidaError, ItemNoEncontradoError } from '../../domain/errores';
+import {
+  ConflictoDeCatalogoError,
+  EntradaDeCatalogoInvalidaError,
+  GrupoNoEncontradoError,
+  ItemNoEncontradoError,
+} from '../../domain/errores';
 import {
   mensajeDelProblemaDeItem,
   problemaDeItem,
@@ -180,32 +187,80 @@ export class ListarItems {
   }
 }
 
+export interface DatosDeGrupo {
+  readonly nombre: string;
+  /**
+   * La tarifa de IVA que heredan las compras SIN ARTÍCULO de los ítems del
+   * grupo (D-16.9). `null` = el grupo no define ninguna, y esas compras se
+   * rechazan hasta que alguien la ponga. Nunca se asume una.
+   */
+  readonly ivaTarifa: string | null;
+}
+
 export class CrearGrupo {
   public constructor(private readonly deps: DependenciasDeCatalogo) {}
 
-  public async ejecutar(sesion: SesionActiva, nombre: string): Promise<ItemGroupId> {
+  public async ejecutar(sesion: SesionActiva, datos: DatosDeGrupo): Promise<ItemGroupId> {
     const resultado = await this.deps.repositorio.crearGrupo({
       companyId: sesion.companyId,
-      nombre: nombre.trim(),
+      nombre: datos.nombre.trim(),
+      ivaTarifa: tarifaDeGrupo(datos.ivaTarifa),
     });
 
-    if (resultado.clase === 'nombre_en_uso') {
-      throw new ConflictoDeCatalogoError('Ya existe un grupo con ese nombre.');
-    }
+    if (resultado.clase === 'nombre_en_uso') throw new GrupoRepetidoError();
 
-    await this.deps.auditoria.record({
-      eventType: 'catalog.group.created',
-      outcome: 'success',
-      actorType: 'USER',
+    await registrarEventoDeUsuario({
+      auditoria: this.deps.auditoria,
       actorId: sesion.userId,
       companyId: sesion.companyId,
-      ip: null,
-      userAgent: null,
+      eventType: 'catalog.group.created',
       detail: { grupoId: resultado.id },
     });
 
     return resultado.id;
   }
+}
+
+/** `PUT /catalogo/grupos/:id` — D-16.45: el nombre y la tarifa, estado completo. */
+export class ActualizarGrupo {
+  public constructor(private readonly deps: DependenciasDeCatalogo) {}
+
+  /** @throws {GrupoNoEncontradoError} @throws {ConflictoDeCatalogoError} */
+  public async ejecutar(
+    sesion: SesionActiva,
+    datos: DatosDeGrupo & { readonly grupoId: ItemGroupId },
+  ): Promise<void> {
+    const ivaTarifa = tarifaDeGrupo(datos.ivaTarifa);
+
+    const resultado = await this.deps.repositorio.actualizarGrupo({
+      companyId: sesion.companyId,
+      grupoId: datos.grupoId,
+      nombre: datos.nombre.trim(),
+      ivaTarifa,
+    });
+
+    if (resultado === 'no_encontrado') throw new GrupoNoEncontradoError();
+    if (resultado === 'nombre_en_uso') throw new GrupoRepetidoError();
+
+    await registrarEventoDeUsuario({
+      auditoria: this.deps.auditoria,
+      actorId: sesion.userId,
+      companyId: sesion.companyId,
+      eventType: 'catalog.group.updated',
+      detail: { grupoId: datos.grupoId, ivaTarifa: ivaTarifa ?? 'null' },
+    });
+  }
+}
+
+class GrupoRepetidoError extends ConflictoDeCatalogoError {
+  public constructor() {
+    super('Ya existe un grupo con ese nombre.');
+  }
+}
+
+/** `null` pasa tal cual; una cadena tiene que ser una fracción. */
+function tarifaDeGrupo(tarifa: string | null): string | null {
+  return tarifa === null ? null : exigirTarifaValida(tarifa).toStorageString();
 }
 
 export class ListarGrupos {

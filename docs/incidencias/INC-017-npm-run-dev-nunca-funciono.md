@@ -6,7 +6,7 @@
 | **Paquete** | P10 |
 | **Área** | build · despliegue |
 | **Tiempo perdido** | ~25 min (encontrarlo fue gratis; entender por qué, no) |
-| **Recurrencias** | 0 |
+| **Recurrencias** | **1** (P16-A1, 2026-09-10: `npm run bench`) |
 
 > **Lo interesante no es el fallo: es que sobreviviera diez paquetes.** Un comando del `package.json` que no arranca es fácil de arreglar. Que nadie se diera cuenta en P0…P9 dice algo del sistema de comprobaciones, y eso es lo que esta ficha viene a cerrar.
 
@@ -70,3 +70,45 @@ Este es el segundo caso. La regla existe:
 **Lo que la regla NO cubre, dicho para que nadie la crea más lista de lo que es:** solo mira `node <ruta>`. Un `prisma migrate deploy` o un `eslint .` los resuelve npm por su cuenta, y comprobarlos exigiría reimplementar esa resolución. Cubre el caso que ha fallado dos veces —una ruta escrita a mano en el manifiesto— y nada más.
 
 **Y lo que sigue sin cubrir nadie:** que el comando *arranque*. La regla comprueba que el archivo existe, no que funcione. `dev` habría pasado esta regla durante los diez paquetes, porque `src/main.ts` sí existía. Lo que lo habría cazado es alguien ejecutándolo — y eso, hoy por hoy, no lo hace ningún check.
+
+---
+
+## Recurrencia 1 — `npm run bench`, roto desde P11 · 2026-09-10 (P16-A1)
+
+**Y pasó exactamente por donde esta ficha dijo que pasaría.**
+
+```
+$ npm run bench
+· Sembrando el volumen sintetico (tarda; son ~220.000 movimientos)
+psql:<stdin>:43: ERROR:  column "max_locations" of relation "company" does not exist
+LINE 1: INSERT INTO company (id, name, status, max_locations)
+```
+
+**Causa raíz:** P11 borró `company.max_locations` y puso el límite en la tabla
+`plan` («dos sitios donde vive el mismo límite son dos sitios que un día dejan de
+coincidir», D5). `scripts/lib/volumen.sql` —que P15 había escrito dos días
+antes— se quedó insertándola. El commit de P11 no la tocó porque **nada la
+enlaza**: no es TypeScript (knip no lo ve), no es una migración (M1–M11 no lo
+ven), y el `script-de-package-json-apunta-a-nada` de esta misma ficha solo
+comprueba que `scripts/bench.mjs` exista, que existía.
+
+**Cuánto sobrevivió:** dos paquetes (P11 y P14/P14b). `npm run bench` está fuera
+de `npm run audit` a propósito —tarda dos minutos, AUDITORIA.md I8— y **eso es
+justo lo que lo dejó pudrirse**: la fila I8 de la auditoría avisaba de este
+riesgo con estas palabras, «un medidor fuera del pre-commit puede decaer sin que
+nadie se entere», y se cumplió por la vía más tonta.
+
+**Arreglo:** `INSERT INTO company (id, name, status, plan_code) … 'PROFESIONAL'`.
+El plan se eligió por el volumen que el propio archivo siembra: 10 ubicaciones,
+500 ítems y 200 productos **no caben en `BASICO`** (300 productos), y medir sobre
+una company cuyo plan no admite su propio volumen sería medir un caso que la
+aplicación habría rechazado.
+
+**Lo que esta recurrencia añade, y no es una regla nueva:** el SQL suelto que
+acompaña a un script —`volumen.sql`, `grants.sql`, `roles.sql`— es código que
+ninguna herramienta del proyecto verifica. Cuando una migración borre una
+columna, `grep` por su nombre en `scripts/` y `docker/` es más barato que
+descubrirlo dos paquetes después. **La prevención sigue siendo la misma que dice
+arriba: ejecutarlo.** Por eso el bench pasa a ser obligatorio en el paquete que
+toque el camino de lectura, que es lo que I8 ya pedía y P16-A1 fue el primero en
+cumplir.

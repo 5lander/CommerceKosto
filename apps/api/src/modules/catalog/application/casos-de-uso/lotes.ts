@@ -20,6 +20,7 @@
 
 import { auditarLote } from '../../../../shared/application/auditoria-de-lote';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
+import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
 import { Quantity, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ProblemaDelLote } from '../../../../shared/domain/lote/problemas';
@@ -44,6 +45,14 @@ import type {
   ItemLeido,
   RepositorioDeCatalogo,
 } from '../ports/repositorio-de-catalogo.port';
+
+/** Lo que el lote de artículos lee UNA vez para resolver todas sus filas. */
+interface ContextoDeArticulos {
+  readonly items: ReadonlyMap<string, ItemLeido>;
+  readonly unidades: readonly UnidadDelCatalogo[];
+  /** Tarifa de IVA por id de grupo; `null` donde el grupo no la define. */
+  readonly tarifasDeGrupo: ReadonlyMap<string, string | null>;
+}
 
 export interface DependenciasDeLotesDeCatalogo {
   readonly repositorio: RepositorioDeCatalogo;
@@ -154,27 +163,22 @@ export class CrearArticulosEnLote {
   }
 
   /**
-   * Calcula el factor de cada fila con **dos lecturas para todo el lote**, no
-   * dos por fila: el catálogo de unidades y los ítems de la company. Es la
-   * diferencia entre 3 consultas y 3N, que es lo que `CrearArticulo` hace por
-   * fila y aquí sería un N+1 de manual.
+   * Calcula el factor y resuelve la tarifa de cada fila con **tres lecturas
+   * para todo el lote**, no tres por fila: el catálogo de unidades, los ítems
+   * de la company y sus grupos. Es la diferencia entre 4 consultas y 4N, que
+   * es lo que `CrearArticulo` hace por fila y aquí sería un N+1 de manual.
    */
   private async conFactor(
     sesion: SesionActiva,
     articulos: readonly ArticuloDelLote[],
   ): Promise<readonly DatosDeArticuloEnLote[]> {
-    const unidades = await this.deps.repositorio.unidades();
-    const items = await this.deps.repositorio.listarItems({
-      companyId: sesion.companyId,
-      soloActivos: false,
-    });
-    const porNombre = new Map(items.map((i) => [i.nombre.trim().toLocaleLowerCase(), i]));
+    const contexto = await this.leerContexto(sesion);
 
     const problemas: ProblemaDelLote[] = [];
     const preparados: DatosDeArticuloEnLote[] = [];
 
     for (const [indice, articulo] of articulos.entries()) {
-      const calculado = factorPara(articulo, porNombre, unidades);
+      const calculado = prepararArticulo(articulo, contexto);
       if (typeof calculado === 'string') {
         problemas.push({ posicion: indice + PRIMERA_POSICION, motivo: calculado });
         continue;
@@ -185,23 +189,62 @@ export class CrearArticulosEnLote {
     if (problemas.length > 0) throw new LoteDeCatalogoInvalidoError(problemas);
     return preparados;
   }
+
+  private async leerContexto(sesion: SesionActiva): Promise<ContextoDeArticulos> {
+    const [unidades, items, grupos] = await Promise.all([
+      this.deps.repositorio.unidades(),
+      this.deps.repositorio.listarItems({ companyId: sesion.companyId, soloActivos: false }),
+      this.deps.repositorio.listarGrupos(sesion.companyId),
+    ]);
+
+    return {
+      unidades,
+      items: new Map(items.map((i) => [i.nombre.trim().toLocaleLowerCase(), i])),
+      tarifasDeGrupo: new Map(grupos.map((g) => [g.id, g.ivaTarifa])),
+    };
+  }
 }
 
 /**
- * El factor de una fila, o el motivo por el que no se puede calcular.
+ * La fila resuelta, o el motivo por el que no se puede.
  *
  * Devolver `string` para el fallo y no lanzar es lo que permite recoger TODOS
  * los motivos del archivo en una pasada. `ConversionInvalidaError` se captura
  * aquí y **no se silencia**: su mensaje es exactamente lo que se devuelve.
+ *
+ * **LA TARIFA DE IVA: FILA > GRUPO DEL ÍTEM, Y SIN NINGUNA LA FILA SE RECHAZA**
+ * (D-16.44). «Nunca 0.15» vale también para el importador: una columna
+ * ausente no es una tarifa, y el mensaje dice qué hacer, como con una unidad
+ * desconocida.
  */
-function factorPara(
+function prepararArticulo(
   articulo: ArticuloDelLote,
-  items: ReadonlyMap<string, ItemLeido>,
-  unidades: readonly UnidadDelCatalogo[],
+  contexto: ContextoDeArticulos,
 ): DatosDeArticuloEnLote | string {
-  const item = items.get(articulo.item.trim().toLocaleLowerCase());
+  const item = contexto.items.get(articulo.item.trim().toLocaleLowerCase());
   if (item === undefined) return `No existe ningún ítem llamado «${articulo.item.trim()}».`;
 
+  const ivaTarifa = elegirTarifa({
+    cuerpo: articulo.ivaTarifa,
+    articulo: null,
+    grupo: item.grupoId === null ? null : (contexto.tarifasDeGrupo.get(item.grupoId) ?? null),
+  });
+  if (ivaTarifa === null) {
+    return `Falta la tarifa de IVA de «${articulo.nombre.trim()}»: ponla en la columna «iva» del archivo o en el grupo del ítem. Nunca se asume una.`;
+  }
+
+  return conFactor(articulo, { item, unidades: contexto.unidades, ivaTarifa });
+}
+
+function conFactor(
+  articulo: ArticuloDelLote,
+  resuelto: {
+    readonly item: ItemLeido;
+    readonly unidades: readonly UnidadDelCatalogo[];
+    readonly ivaTarifa: string;
+  },
+): DatosDeArticuloEnLote | string {
+  const { item, unidades, ivaTarifa } = resuelto;
   const compra = buscarUnidad(unidades, unidadDeUso(articulo.unidadDePresentacion));
   const uso = buscarUnidad(unidades, unidadDeUso(item.unidadDeUso));
   if (compra === null) return `La unidad «${articulo.unidadDePresentacion}» no está en el catálogo.`;
@@ -227,6 +270,7 @@ function factorPara(
       presentacion: articulo.presentacion,
       unidadDePresentacion: compra.codigo,
       factorDeConversion: factor.toStorageString(),
+      ivaTarifa: Ratio.fromDecimalString(ivaTarifa).toStorageString(),
     };
   } catch (error) {
     if (error instanceof ConversionInvalidaError) {

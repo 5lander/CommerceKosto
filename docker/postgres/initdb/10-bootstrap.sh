@@ -17,14 +17,16 @@ set -euo pipefail
 : "${COSTEO_MIGRATOR_PASSWORD:?falta COSTEO_MIGRATOR_PASSWORD}"
 : "${COSTEO_APP_PASSWORD:?falta COSTEO_APP_PASSWORD}"
 : "${COSTEO_BACKOFFICE_PASSWORD:?falta COSTEO_BACKOFFICE_PASSWORD}"
+: "${COSTEO_DESPACHADOR_PASSWORD:?falta COSTEO_DESPACHADOR_PASSWORD}"
 
 directorio="$(dirname "$0")/sql"
 
-echo "[initdb] creando roles costeo_migrator, costeo_app y costeo_backoffice"
+echo "[initdb] creando roles costeo_migrator, costeo_app, costeo_backoffice y costeo_despachador"
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
      -v migrator_password="$COSTEO_MIGRATOR_PASSWORD" \
      -v app_password="$COSTEO_APP_PASSWORD" \
      -v backoffice_password="$COSTEO_BACKOFFICE_PASSWORD" \
+     -v despachador_password="$COSTEO_DESPACHADOR_PASSWORD" \
      -f "$directorio/roles.sql"
 
 # La base sombra que Prisma necesita para `migrate dev` y para generar los

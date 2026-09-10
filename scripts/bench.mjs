@@ -27,6 +27,9 @@
  * declararlos. Al reves, `costeo_app` se queda sin permiso sobre nada y el
  * medidor mediria una base que no se parece a produccion.
  *
+ * `--informe=<carpeta>` escribe ahi el detalle de las consultas mas caras; sin
+ * la bandera no se escribe ningun archivo.
+ *
  * `--conservar` deja la base en pie con sus credenciales impresas, para
  * reproducir a mano lo que se acabe de medir.
  */
@@ -48,7 +51,29 @@ const SQL_CREAR = 'CREATE DATABASE :"base" OWNER costeo_migrator';
 
 const RUTA_GRANTS = resolve(RAIZ, 'docker', 'postgres', 'initdb', 'sql', 'grants.sql');
 const RUTA_VOLUMEN = resolve(RAIZ, 'scripts', 'lib', 'volumen.sql');
-const RUTA_INFORME = resolve(RAIZ, 'docs', 'pasos', 'P15');
+/**
+ * Donde se escribe el informe de las consultas mas caras.
+ *
+ * SE PASA POR ARGUMENTO Y NO SE FIJA A UN PAQUETE. Estaba clavado en
+ * `docs/pasos/P15/`, asi que la primera corrida de otro paquete PISO la
+ * evidencia de P15 —un documento de auditoria ya commiteado— sin decir nada.
+ * Un informe de una medicion de hoy no puede sobrescribir el de otra de hace
+ * dos paquetes: son dos hechos distintos.
+ *
+ *   npm run bench -- --informe=docs/pasos/P16-A1
+ *
+ * Sin la bandera no se escribe ningun archivo: la salida por consola ya trae
+ * los cuatro presupuestos, que es lo que se mira el 90 % de las veces.
+ */
+function rutaDelInforme() {
+  const bandera = process.argv.find((arg) => arg.startsWith('--informe='));
+  if (bandera === undefined) return null;
+  const relativa = bandera.slice('--informe='.length);
+  if (relativa === '') {
+    throw new Error('--informe= necesita una carpeta, por ejemplo --informe=docs/pasos/P16-A1');
+  }
+  return resolve(RAIZ, relativa);
+}
 const RUTA_MEDIDOR = resolve(RAIZ, 'apps', 'api', 'dist', 'bench.js');
 
 const MS_POR_SEGUNDO = 1000;
@@ -228,9 +253,14 @@ function cerrar({ administrativa, aplicacion, contrasena }) {
 
 /** @param {string} salida la salida cruda de `SQL_MAS_CARAS`, una fila por linea */
 function escribirInforme(salida) {
+  const carpeta = rutaDelInforme();
+  if (carpeta === null) {
+    process.stdout.write(['  (sin --informe=<carpeta>: no se escribe el detalle de consultas)', ''].join('\n'));
+    return;
+  }
   anunciar('Recogiendo las consultas mas caras de la corrida');
-  mkdirSync(RUTA_INFORME, { recursive: true });
-  const destino = resolve(RUTA_INFORME, 'CONSULTAS-MAS-CARAS.md');
+  mkdirSync(carpeta, { recursive: true });
+  const destino = resolve(carpeta, 'CONSULTAS-MAS-CARAS.md');
   const valla = '```';
 
   const cuerpo = salida
@@ -244,7 +274,7 @@ function escribirInforme(salida) {
     .join('\n');
 
   const cabecera = [
-    '# P15 · las diez consultas mas caras del volumen',
+    '# Las diez consultas mas caras del volumen sintetico',
     '',
     '> Generado por `npm run bench` desde `pg_stat_statements`, ordenado por',
     '> tiempo TOTAL: una consulta de 3 ms que corre mil veces pesa mas que una',

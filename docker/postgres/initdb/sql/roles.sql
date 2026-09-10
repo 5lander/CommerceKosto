@@ -70,3 +70,24 @@ ALTER ROLE costeo_backoffice SET idle_in_transaction_session_timeout = '10s';
 ALTER ROLE costeo_backoffice SET lock_timeout                        = '3s';
 ALTER ROLE costeo_backoffice SET search_path                         = 'public';
 ALTER ROLE costeo_backoffice CONNECTION LIMIT 4;
+
+-- Rol del DESPACHADOR DE CORREO (P16-A1, ADR-025). Es el proceso que saca los
+-- correos de `email_outbox` y los entrega; corre APARTE de la aplicacion y con
+-- su propio pool, como el back office. Pero NO puentea RLS: lo que ve lo ve por
+-- una politica permisiva sobre exactamente DOS tablas —`email_outbox` y
+-- `rate_limit_hit`—, y sobre el resto no tiene ni SELECT. Un rol que solo puede
+-- leer la cola y borrar contadores viejos no puede leer una receta aunque el
+-- proceso que lo usa se vea comprometido. Los GRANT, tabla por tabla, los
+-- concede la migracion de P16-A1.
+--
+-- Dos conexiones: una pasada del despachador es una transaccion corta con
+-- `FOR UPDATE SKIP LOCKED`; la segunda es margen para la sonda de salud.
+CREATE ROLE costeo_despachador
+  LOGIN PASSWORD :'despachador_password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+
+ALTER ROLE costeo_despachador SET statement_timeout                  = '30s';
+ALTER ROLE costeo_despachador SET idle_in_transaction_session_timeout = '10s';
+ALTER ROLE costeo_despachador SET lock_timeout                        = '3s';
+ALTER ROLE costeo_despachador SET search_path                         = 'public';
+ALTER ROLE costeo_despachador CONNECTION LIMIT 2;

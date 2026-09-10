@@ -490,7 +490,7 @@ graph TD
     HDR --> PINO["pino-http: genReqId → correlation_id<br/>entra en AsyncLocalStorage<br/>sale en x-correlation-id"]
     PINO --> ROUTE{¿la ruta existe?}
     ROUTE -->|no| FILT
-    ROUTE -->|sí| GUARD[ThrottlerGuard]
+    ROUTE -->|sí| GUARD["LimitadorGlobalGuard<br/>(ThrottlerGuard con ipDelCliente, P16-A1)"]
     GUARD -->|excede| FILT
     GUARD --> INT[TimeoutInterceptor]
     INT --> CTRL[controlador]
@@ -509,21 +509,27 @@ graph TB
         MON["money/ · Money · Ratio · Count · Quantity"]
         UNI[unidad/ · UnidadDeUso]
     end
-    subgraph app["shared/application — solo interfaces"]
+    subgraph app["shared/application — interfaces y dos casos de uso transversales"]
         PA[AuditLogPort]
         PM[MailerPort]
         PS[FileStoragePort]
+        PR[RegistroDeLimites]
+        LIM["limite-de-tasa/ · LimitadorDeTasa (P16-A1)"]
+        COR["correo/ · plantillas y CorreoAEncolar (P16-A1)"]
     end
     subgraph infra["shared/infrastructure"]
         CFG[config/ · esquema Zod]
         OBS[observability/ · correlación y logger]
-        PER[persistence/ · PrismaConnection]
-        HTTP[http/ · cabeceras, error, timeout]
+        PER["persistence/ · PrismaConnection · outbox · registro de límites"]
+        HTTP["http/ · cabeceras, error, timeout · ipDelCliente · LimitadorGlobalGuard"]
         HLT[health/ · /health y /ready]
         FK[fakes/ · correo y almacenamiento]
+        MAIL["correo/ · consola · resend · mailer.provider (P16-A1)"]
     end
-    PER -.implementa.-> PA
+    PER -.implementa.-> PA & PR
     FK -.implementan.-> PM & PS
+    MAIL -.implementa.-> PM
+    LIM --> PR
     MON --> DEC
     MON --> UNI
 ```
@@ -614,3 +620,114 @@ mal, alguno no cuadra.
 El aspecto. Lo que hay es medición con navegador —Chrome sin cabeza, capturas y
 `scrollWidth` contra `clientWidth`—, y es lo que encontró los dos fallos reales
 de P14: la barra partida en dos filas y un desbordamiento que resultó no existir.
+
+---
+
+## El correo transaccional y el restablecimiento de contraseña (desde P16-A1)
+
+**La API no envía correo. Encola.** Toda escritura que anuncia algo por correo —invitar, reenviar,
+pedir un restablecimiento, el aviso de bloqueo del login— deja su fila en `email_outbox` **dentro
+de la misma transacción** que crea lo anunciado. Quien entrega es un **tercer proceso**, el
+despachador (`apps/api/src/despachador.ts`, servicio `correo` en compose), con su propio rol
+`costeo_despachador`, que ve exactamente dos tablas y ninguna otra (ADR-025).
+
+```mermaid
+sequenceDiagram
+    participant A as ADMIN (navegador)
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL
+    participant D as Despachador (costeo_despachador)
+    participant R as Resend
+    participant B as Buzon del invitado
+
+    A->>API: POST /usuarios (email)
+    API->>DB: golpear(usuario.invitar, ip) y golpear(usuario.invitar, correo:sha256) - una transaccion por clave
+    API->>DB: BEGIN - set_config(company) - INSERT app_user INVITED - INSERT email_outbox PENDIENTE - COMMIT
+    API-->>A: 202, siempre (no dice si el correo ya existia)
+
+    loop cada CORREO_INTERVALO_MS (5 s)
+        D->>DB: SELECT ... FOR UPDATE SKIP LOCKED LIMIT lote, y reserva de 5 min en la misma transaccion
+        D->>DB: renovarReserva(fila) con la firma de la pasada (0 filas: se cede)
+        D->>R: POST /emails (from, to, subject, text), timeout 10 s
+        alt 2xx
+            R-->>D: aceptado
+            D->>DB: UPDATE ENVIADO, sent_at, datos = plantilla + destinatario
+        else error o timeout
+            R-->>D: 4xx, 5xx o nada
+            D->>DB: UPDATE intentos + 1, error, siguiente_intento_en (1, 2, 4, 8 min); FALLIDO al quinto con datos saneado
+        end
+        D->>DB: DELETE FROM rate_limit_hit WHERE at < ahora - 24 h
+        D->>D: latido en CORREO_LATIDO (el healthcheck del contenedor)
+    end
+
+    R->>B: correo con APP_URL/activacion?token=... y su caducidad
+```
+
+Lo que el diagrama no enseña y conviene saber:
+
+- **`datos` lleva el enlace con el token en claro mientras el correo está en vuelo, y solo el
+  despachador puede leerlo.** `costeo_app` y `costeo_backoffice` tienen `SELECT` por columnas,
+  todas menos esa. Al cerrar el correo, `datos` pasa a ser `{plantilla, destinatario}`.
+- **`SKIP LOCKED` no basta solo.** El bloqueo de fila muere al confirmar y el envío ocurre fuera:
+  por eso la pasada **reserva** las filas cinco minutos (`siguiente_intento_en`) y renueva la
+  reserva fila a fila. Dos despachadores a la vez —el contenedor viejo y el nuevo en un
+  redespliegue— no mandan el mismo correo dos veces. La única ventana que queda son los
+  milisegundos entre el `2xx` y el `UPDATE`, y está dicha en ADR-025.
+- **Un fallo de envío no para la pasada; un fallo al marcar sí.** El primero se anota y el
+  siguiente correo se intenta. El segundo sube sin tocar la fila: un correo que el proveedor
+  aceptó no debe quedar `PENDIENTE` con un error de base en la columna que leen la aplicación y el
+  back office.
+- **`SIGTERM` termina la pasada en curso y después cierra el pool.** Sin `enableShutdownHooks()`
+  de Nest, que haría lo contrario; una regla de `audit:forbidden` lo vigila.
+- **El back office ve la salud, no el contenido**: `GET /correo/salud` devuelve
+  `{pendientesAntiguos, fallidos, ultimoEnvio}` y nada más.
+
+### El restablecimiento de contraseña ocurre sin sesión, y por eso pasa por dos funciones definer
+
+Quien olvidó su contraseña no puede entrar, así que no hay tenant que fijar. Las dos escrituras van
+por `password_reset_request` y `password_reset_consume` —las únicas dos funciones `SECURITY
+DEFINER` que escriben—, y todo lo demás lo hace la aplicación por su camino normal, bajo el
+`company_id` que la segunda devuelve.
+
+```mermaid
+sequenceDiagram
+    participant U as Persona sin sesion
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL (definer como costeo_migrator)
+    participant D as Despachador
+
+    U->>API: POST /auth/password/olvido (email)
+    API->>DB: golpear(password.olvido, ip:...) y golpear(password.olvido, correo:sha256)
+    API->>API: token de 256 bits, SHA-256, expires_at = ahora + HORAS_DE_RESTABLECIMIENTO
+    API->>DB: SELECT password_reset_request(email, hash, expires_at, datos)
+    Note over DB: con usuario ACTIVE: INSERT password_reset_token + INSERT email_outbox (company_id del usuario)<br/>sin usuario: nada, y devuelve igual
+    API->>DB: audit_log auth.password.reset_requested (ANONYMOUS, con IP, sin company, sin el correo)
+    API-->>U: 202 con cuerpo vacio, exista o no el correo
+    D-->>U: correo con APP_URL/restablecer?token=... (caduca en 1 h)
+
+    U->>API: POST /auth/password/restablecimiento (token, contrasena)
+    API->>DB: golpear(password.restablecimiento, ip:...)
+    API->>DB: SELECT user_id, company_id FROM password_reset_consume(hash, ahora)
+    Note over DB: UPDATE used_at si no estaba usado ni caducado y el usuario sigue ACTIVE; si no, ninguna fila
+    API->>DB: run(company_id): leer el correo, politica de contrasenas, Argon2id, revocar TODAS las sesiones, audit auth.password.reset_completed
+    API-->>U: 204 (o 400 ENTRADA_INVALIDA con el mismo mensaje para token vacio, inexistente, usado o caducado)
+```
+
+Tres cosas que son la decisión entera:
+
+- **La respuesta de `/olvido` es la misma exista o no el correo**, y el trabajo en Node también.
+  Lo que difiere es lo que la base hace por dentro (dos `INSERT` con usuario, ninguno sin él): un
+  residuo de milisegundos que se reconoce, se acota con el límite de tasa —diez muestras por hora
+  no dan para medirlo— y se mide con una prueba de medianas.
+- **El token se gasta antes de mirar la contraseña.** Una contraseña débil obliga a pedir otro
+  enlace; la alternativa dejaba vivo un token contra el que ya se falló.
+- **Restablecer revoca todas las sesiones** (SEGURIDAD.md §2.2), incluida la que alguien pudiera
+  tener abierta con la contraseña vieja.
+
+### Lo que cuenta por IP cuenta por la IP del cliente, no por la del proxy
+
+Desde P14b hay un proxy delante (Caddy), y hasta P16-A1 la API tomaba `socket.remoteAddress`:
+la IP de Caddy, para todos. `ipDelCliente` (`shared/infrastructure/http/`) es el único camino y
+cree el último salto de `X-Forwarded-For` solo si el socket está en `PROXY_DE_CONFIANZA`. Lo usan
+el login, el back office, el limitador global de 300/min y el límite de tasa de las cuatro rutas
+(ADR-026, INC-022).

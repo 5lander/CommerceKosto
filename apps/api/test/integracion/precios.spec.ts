@@ -96,6 +96,7 @@ describe('precios de referencia', () => {
         presentacion: '2',
         unidadDePresentacion: 'kg',
         factorExplicito: null,
+        ivaTarifa: '0.15',
       });
     expect(articulo.status).toBe(CREADO);
 

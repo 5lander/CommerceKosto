@@ -30,12 +30,15 @@ import { resolve } from 'node:path';
 
 import type { CompanyId } from '../../../../shared/domain/identity/identificadores';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { ipDelCliente } from '../../../../shared/infrastructure/http/ip-del-cliente';
+import { PROXIES_DE_CONFIANZA } from '../proxies-de-confianza';
 import {
   cookieBorrada,
   cookieDeSesion,
   leerCookie,
 } from '../../../iam/infrastructure/http/cookies';
 import { LeerAccesosDelBackoffice, LeerAuditoria } from '../../application/casos-de-uso/auditoria';
+import { LeerSaludDelCorreo } from '../../application/casos-de-uso/correo';
 import {
   CambiarEstadoDeCompany,
   CambiarPlan,
@@ -83,6 +86,13 @@ import {
 export class SesionDelOperador {
   @Inject(IniciarSesionDeOperador) public readonly iniciar!: IniciarSesionDeOperador;
   @Inject(CerrarSesionDeOperador) public readonly cerrar!: CerrarSesionDeOperador;
+  /**
+   * Desde donde se cree `X-Forwarded-For` (D-16.49). Viaja con la sesion
+   * porque la IP es un dato de quien pide —el login del operador y el motivo
+   * de cada acceso la registran— y el controlador ya tiene sus tres
+   * dependencias.
+   */
+  @Inject(PROXIES_DE_CONFIANZA) public readonly proxiesDeConfianza!: readonly string[];
 }
 
 @Injectable()
@@ -99,6 +109,7 @@ export class LaCartera {
 export class LosRegistros {
   @Inject(LeerAuditoria) public readonly auditoria!: LeerAuditoria;
   @Inject(LeerAccesosDelBackoffice) public readonly accesos!: LeerAccesosDelBackoffice;
+  @Inject(LeerSaludDelCorreo) public readonly saludDelCorreo!: LeerSaludDelCorreo;
 }
 
 /**
@@ -196,7 +207,7 @@ export class BackofficeController {
     const token = await this.sesion.iniciar.ejecutar({
       email: cuerpo.email,
       contrasena: cuerpo.contrasena,
-      ip: ipDe(peticion),
+      ip: ipDelCliente(peticion, this.sesion.proxiesDeConfianza),
       userAgent: null,
     });
 
@@ -237,7 +248,7 @@ export class BackofficeController {
   public async listarCompanies(
     @Req() peticion: PeticionConOperador,
   ): Promise<unknown> {
-    return this.cartera.listar.ejecutar(peticionDe(peticion));
+    return this.cartera.listar.ejecutar(peticionDe(peticion, this.sesion.proxiesDeConfianza));
   }
 
   @Get('companies/:id')
@@ -245,7 +256,7 @@ export class BackofficeController {
     @Param('id', ParseUUIDPipe) id: string,
     @Req() peticion: PeticionConOperador,
   ): Promise<unknown> {
-    return this.cartera.ver.ejecutar(peticionDe(peticion), id as CompanyId);
+    return this.cartera.ver.ejecutar(peticionDe(peticion, this.sesion.proxiesDeConfianza), id as CompanyId);
   }
 
   @Post('companies')
@@ -254,7 +265,7 @@ export class BackofficeController {
     @Body(new EsquemaPipe(CUERPO_DE_NUEVA_COMPANY)) cuerpo: CuerpoDeNuevaCompany,
     @Req() peticion: PeticionConOperador,
   ): Promise<{ readonly id: string }> {
-    const id = await this.cartera.crear.ejecutar(peticionDe(peticion), cuerpo);
+    const id = await this.cartera.crear.ejecutar(peticionDe(peticion, this.sesion.proxiesDeConfianza), cuerpo);
     return { id };
   }
 
@@ -265,7 +276,7 @@ export class BackofficeController {
     @Body(new EsquemaPipe(CUERPO_DE_CAMBIO_DE_PLAN)) cuerpo: CuerpoDeCambioDePlan,
     @Req() peticion: PeticionConOperador,
   ): Promise<void> {
-    await this.cartera.cambiarPlan.ejecutar(peticionDe(peticion), {
+    await this.cartera.cambiarPlan.ejecutar(peticionDe(peticion, this.sesion.proxiesDeConfianza), {
       companyId: id as CompanyId,
       plan: cuerpo.plan,
     });
@@ -278,7 +289,7 @@ export class BackofficeController {
     @Body(new EsquemaPipe(CUERPO_DE_CAMBIO_DE_ESTADO)) cuerpo: CuerpoDeCambioDeEstado,
     @Req() peticion: PeticionConOperador,
   ): Promise<void> {
-    await this.cartera.cambiarEstado.ejecutar(peticionDe(peticion), {
+    await this.cartera.cambiarEstado.ejecutar(peticionDe(peticion, this.sesion.proxiesDeConfianza), {
       companyId: id as CompanyId,
       estado: cuerpo.estado,
     });
@@ -289,7 +300,7 @@ export class BackofficeController {
     @Param('id', ParseUUIDPipe) id: string,
     @Req() peticion: PeticionConOperador,
   ): Promise<unknown> {
-    return this.registros.auditoria.ejecutar(peticionDe(peticion), id as CompanyId);
+    return this.registros.auditoria.ejecutar(peticionDe(peticion, this.sesion.proxiesDeConfianza), id as CompanyId);
   }
 
   /**
@@ -302,6 +313,20 @@ export class BackofficeController {
   public async accesosDelBackoffice(): Promise<unknown> {
     return this.registros.accesos.ejecutar();
   }
+
+  /**
+   * La salud de la cola de correo (D-16.27c): `{pendientesAntiguos, fallidos,
+   * ultimoEnvio}`. Contadores e instantes; NUNCA destinatarios ni `datos`.
+   *
+   * NO PIDE MOTIVO NI DEJA FILA EN `backoffice_access_log`: no se lee ningún
+   * dato de ningún tenant, son agregados sobre la cola entera. El porqué,
+   * completo, en `LeerSaludDelCorreo`. Sigue exigiendo sesión: el guard es
+   * global.
+   */
+  @Get('correo/salud')
+  public async saludDelCorreo(): Promise<unknown> {
+    return this.registros.saludDelCorreo.ejecutar();
+  }
 }
 
 /**
@@ -313,7 +338,7 @@ export class BackofficeController {
  * «faltan 20 caracteres, escribe para qué necesitas ver estos datos». Un
  * control que se explica mal se rodea; uno que dice qué hacer, se cumple.
  */
-function peticionDe(peticion: PeticionConOperador): PeticionDeOperador {
+function peticionDe(peticion: PeticionConOperador, proxiesDeConfianza: readonly string[]): PeticionDeOperador {
   const crudo = peticion.headers[CABECERA_DE_MOTIVO];
 
   return {
@@ -322,7 +347,7 @@ function peticionDe(peticion: PeticionConOperador): PeticionDeOperador {
     // unirlas: dos motivos distintos en la misma petición no son un motivo más
     // largo, son una petición que alguien armó a mano.
     motivo: (Array.isArray(crudo) ? crudo[0] : crudo) ?? '',
-    ip: ipDe(peticion),
+    ip: ipDelCliente(peticion, proxiesDeConfianza),
   };
 }
 
@@ -342,6 +367,3 @@ function operadorDe(peticion: PeticionConOperador): OperadorActivo {
   return peticion.operador;
 }
 
-function ipDe(peticion: IncomingMessage): string | null {
-  return peticion.socket.remoteAddress ?? null;
-}

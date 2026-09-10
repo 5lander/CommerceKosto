@@ -66,9 +66,16 @@ POSTGRES_SUPERUSER=postgres
 POSTGRES_SUPERUSER_PASSWORD=
 COSTEO_MIGRATOR_PASSWORD=
 COSTEO_APP_PASSWORD=
+# El rol del back office (P11): el UNICO que puentea RLS.
+COSTEO_BACKOFFICE_PASSWORD=
+# El rol del despachador de correo (P16-A1): solo ve la cola y el limite de tasa.
+COSTEO_DESPACHADOR_PASSWORD=
 
 DATABASE_URL=postgresql://costeo_app:@db:5432/costeo?schema=public&connection_limit=10&pool_timeout=10
 MIGRATION_DATABASE_URL=postgresql://costeo_migrator:@localhost:5432/costeo?schema=public
+# Los dos procesos aparte, por el puerto directo (127.0.0.1), nunca por PgBouncer.
+BACKOFFICE_DATABASE_URL=postgresql://costeo_backoffice:@localhost:5432/costeo?schema=public&connection_limit=4&pool_timeout=10
+DESPACHADOR_DATABASE_URL=postgresql://costeo_despachador:@localhost:5432/costeo?schema=public&connection_limit=2&pool_timeout=10
 
 NODE_ENV=production
 LOG_LEVEL=info
@@ -76,8 +83,31 @@ PORT=3000
 REQUEST_TIMEOUT_MS=15000
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX=300
-MAIL_ADAPTER=fake
 STORAGE_ADAPTER=fake
+
+# --- Correo transaccional (P16-A1, ADR-025) ---
+# La API solo encola; quien envia es el servicio `correo`, con este selector:
+#   resend   envia de verdad (exige RESEND_API_KEY y RESEND_REMITENTE, con el
+#            dominio verificado en Resend: DKIM, SPF y DMARC)
+#   consola  escribe los correos en `docker compose logs correo` (sin cuenta)
+# `fake` no arranca en produccion.
+MAIL_ADAPTER=resend
+RESEND_API_KEY=
+RESEND_REMITENTE=
+# La URL PUBLICA del frontend, sin barra final: de aqui salen los enlaces.
+APP_URL=https://
+HORAS_DE_RESTABLECIMIENTO=1
+# Minutos de `PENDIENTE` a partir de los cuales el back office avisa.
+CORREO_MINUTOS_DE_ALERTA=15
+
+# --- La IP del cliente tras el proxy (P16-A1, D-16.49) ---
+# Detras de Caddy toda peticion llega con la IP de Caddy; la del cliente va en
+# X-Forwarded-For y solo se cree si el socket es de esta lista. Es la IP FIJA
+# de Caddy en la red de compose (docker-compose.prod.yml), y SOLO esa: la
+# subred entera incluiria la pasarela y los demas contenedores. Si se cambia
+# alli, se cambia aqui y se hace `docker compose down` + `up`: un `restart` no
+# basta.
+PROXY_DE_CONFIANZA=172.28.0.10
 
 DOMINIO=
 CORREO_TLS=
@@ -93,7 +123,7 @@ fi
 
 echo
 echo "[vps] listo. Lo que falta, y lo haces tu:"
-echo "  1. Rellenar $DIRECTORIO_SECRETOS/.env (las tres contrasenas, DOMINIO, CORREO_TLS)"
+echo "  1. Rellenar $DIRECTORIO_SECRETOS/.env (las cinco contrasenas y sus cuatro cadenas, DOMINIO, CORREO_TLS, APP_URL, RESEND_*)"
 echo "  2. Apuntar el DNS del dominio a la IP de esta maquina y ESPERAR a que propague"
 echo "  3. git clone del repositorio en $DIRECTORIO_APP"
 echo "  4. bash scripts/vps/desplegar.sh"

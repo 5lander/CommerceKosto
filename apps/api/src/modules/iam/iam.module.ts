@@ -26,24 +26,33 @@ import { RelojDelSistema } from '../../shared/infrastructure/time/reloj-del-sist
 import { CambiarContrasena } from './application/casos-de-uso/cambiar-contrasena';
 import { CerrarSesion } from './application/casos-de-uso/cerrar-sesion';
 import { IniciarSesion } from './application/casos-de-uso/iniciar-sesion';
+import {
+  RestablecerContrasena,
+  SolicitarRestablecimiento,
+} from './application/casos-de-uso/restablecer-contrasena';
 import { ValidarSesion } from './application/casos-de-uso/validar-sesion';
 import { CrearUbicacion, ListarUbicaciones } from './application/casos-de-uso/ubicaciones';
 import {
   AceptarInvitacion,
   AsignarRol,
   InvitarUsuario,
+  ReenviarInvitacion,
   RevocarRol,
 } from './application/casos-de-uso/usuarios';
+import { ENLACES } from './application/ports/enlaces.port';
 import { GENERADOR_DE_TOKENS } from './application/ports/generador-de-tokens.port';
 import { HASHER_DE_CONTRASENAS } from './application/ports/hasher-de-contrasenas.port';
 import { REPOSITORIO_DE_AUTENTICACION } from './application/ports/repositorio-de-autenticacion.port';
 import { REPOSITORIO_DE_ORGANIZACION } from './application/ports/repositorio-de-organizacion.port';
 import { Argon2Hasher } from './infrastructure/argon2-hasher';
 import { DependenciasDeIam } from './infrastructure/dependencias-de-iam';
+import { EnlacesDeLaApp } from './infrastructure/enlaces-de-la-app';
 import { GeneradorDeTokensCriptografico } from './infrastructure/generador-de-tokens';
 import { AuthController } from './infrastructure/http/auth.controller';
 import { ContrasenaController } from './infrastructure/http/contrasena.controller';
+import { InvitacionesDeUsuario } from './infrastructure/http/invitaciones-de-usuario';
 import { PermisosGuard } from './infrastructure/http/permisos.guard';
+import { Restablecimiento } from './infrastructure/http/restablecimiento';
 import { SesionGuard } from './infrastructure/http/sesion.guard';
 import { UbicacionesController } from './infrastructure/http/ubicaciones.controller';
 import { RolesDeUsuario } from './infrastructure/http/roles-de-usuario';
@@ -59,6 +68,7 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
     { provide: REPOSITORIO_DE_AUTENTICACION, useClass: PrismaAutenticacionRepositorio },
     { provide: REPOSITORIO_DE_ORGANIZACION, useClass: PrismaOrganizacionRepositorio },
     { provide: RELOJ, useClass: RelojDelSistema },
+    { provide: ENLACES, useClass: EnlacesDeLaApp },
 
     DependenciasDeIam,
 
@@ -82,6 +92,12 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
       inject: [DependenciasDeIam],
       useFactory: (deps: DependenciasDeIam): CambiarContrasena => new CambiarContrasena(deps),
     },
+    {
+      provide: Restablecimiento,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): Restablecimiento =>
+        new Restablecimiento(new SolicitarRestablecimiento(deps), new RestablecerContrasena(deps)),
+    },
 
     {
       provide: CrearUbicacion,
@@ -94,14 +110,14 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
       useFactory: (deps: DependenciasDeIam): ListarUbicaciones => new ListarUbicaciones(deps),
     },
     {
-      provide: InvitarUsuario,
+      provide: InvitacionesDeUsuario,
       inject: [DependenciasDeIam],
-      useFactory: (deps: DependenciasDeIam): InvitarUsuario => new InvitarUsuario(deps),
-    },
-    {
-      provide: AceptarInvitacion,
-      inject: [DependenciasDeIam],
-      useFactory: (deps: DependenciasDeIam): AceptarInvitacion => new AceptarInvitacion(deps),
+      useFactory: (deps: DependenciasDeIam): InvitacionesDeUsuario =>
+        new InvitacionesDeUsuario(
+          new InvitarUsuario(deps),
+          new ReenviarInvitacion(deps),
+          new AceptarInvitacion(deps),
+        ),
     },
     {
       provide: RolesDeUsuario,

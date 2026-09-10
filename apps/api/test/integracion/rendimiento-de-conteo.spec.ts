@@ -285,6 +285,7 @@ describe('rendimiento del conteo fisico', () => {
           cantidad: '1',
           costoTotal: '1.00',
           purchaseArticleId: null,
+          ivaTarifa: '0',
           occurredAt: '2026-06-15T12:00:00.000Z',
           note: null,
         });

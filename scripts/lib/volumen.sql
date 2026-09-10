@@ -38,8 +38,22 @@ CREATE FUNCTION bench_uuid(familia int, n int) RETURNS uuid
   $$;
 
 -- ---------------------------------------------------------------- companies --
-INSERT INTO company (id, name, status, max_locations)
-SELECT bench_uuid(1, n), 'Company de volumen ' || n, 'ACTIVE', 20
+--
+-- `plan_code` Y NO `max_locations`: P11 borro esa columna y puso el limite en
+-- la tabla `plan`, «dos sitios donde vive el mismo limite son dos sitios que un
+-- dia dejan de coincidir» (D5). Este archivo se quedo insertandola y `npm run
+-- bench` llevaba desde entonces muriendo con «column "max_locations" of
+-- relation "company" does not exist» — sin que nadie lo viera, porque el bench
+-- esta fuera de `npm run audit` a proposito (AUDITORIA.md I8) y nadie lo
+-- ejecuto en dos paquetes. Es INC-017 otra vez: un script que apunta a algo que
+-- ya no funciona.
+--
+-- PROFESIONAL y no BASICO: lo que se siembra aqui —10 ubicaciones, 500 items,
+-- 200 productos— cabe en el primero (25/2000/1000) y NO en el segundo, que
+-- permite 300 productos. Medir sobre una company cuyo plan no admite su propio
+-- volumen seria medir un caso que la aplicacion habria rechazado.
+INSERT INTO company (id, name, status, plan_code)
+SELECT bench_uuid(1, n), 'Company de volumen ' || n, 'ACTIVE', 'PROFESIONAL'
 FROM generate_series(1, 5) n;
 
 -- --------------------------------------------------------------- ubicaciones --
@@ -85,9 +99,9 @@ FROM generate_series(2, 5) c, generate_series(1, 50) n;
 
 -- ----------------------------------------------------- articulos y precios --
 INSERT INTO purchase_article (id, company_id, item_id, name, presentation_amount,
-                              presentation_unit, conversion_factor, status)
+                              presentation_unit, conversion_factor, iva_tarifa, status)
 SELECT bench_uuid(5, n), bench_uuid(1, 1), bench_uuid(4, n), 'Presentacion ' || n,
-       1, (ARRAY['kg', 'g', 'lt', 'ml', 'unid'])[1 + n % 5], 1, 'ACTIVE'
+       1, (ARRAY['kg', 'g', 'lt', 'ml', 'unid'])[1 + n % 5], 1, 0.15, 'ACTIVE'
 FROM generate_series(1, 500) n;
 
 -- CONFIRMED a proposito: un precio SUGGESTED no entra en el costeo (R5), y el

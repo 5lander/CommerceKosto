@@ -15,9 +15,17 @@
  * las cinco primeras horas UTC de cada día 1 son del mes anterior en Ecuador. Es
  * INC-013, y el que la convierte es quien llama a este caso de uso — aquí lo que
  * llega ya es un instante.
+ *
+ * **LA TARIFA DE IVA DE CADA COMPRA: FILA > GRUPO DEL ÍTEM** (D-16.44). El
+ * archivo nunca trae artículo, así que el escalón del medio no existe aquí.
+ * Sin tarifa, la fila se rechaza con su número, como un ítem desconocido:
+ * «nunca 0.15» vale también para el importador. Los grupos y el ajuste de la
+ * company se leen UNA vez para todo el lote.
  */
 
 import type { ItemId, LocationId } from '../../../../shared/domain/identity/identificadores';
+import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import {
   PRIMERA_POSICION,
   clavePorNombre,
@@ -26,6 +34,7 @@ import {
 import { Quantity } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
+import { desglosarCompra, type CompraDesglosada } from '../../domain/compra';
 import { MovimientoDeLoteInvalidoError } from '../../domain/errores';
 import {
   motivoDelMovimiento,
@@ -35,6 +44,21 @@ import {
 import { conSignoDelTipo } from '../../domain/movimiento';
 import type { MovimientoParaGuardar } from '../ports/repositorio-de-inventario.port';
 import { exigirLibroEscribible, type DependenciasDeInventario } from './movimientos';
+
+/** Lo que el lote necesita de cada ítem, resuelto por nombre. */
+interface ItemDelLote {
+  readonly id: ItemId;
+  readonly unidadDeUso: string;
+  /** La tarifa del grupo del ítem; `null` si no tiene grupo o el grupo no define. */
+  readonly ivaTarifaDelGrupo: string | null;
+}
+
+/** Lo que se lee UNA vez para todo el lote. */
+interface ContextoDelLote {
+  readonly locationId: LocationId;
+  readonly items: ReadonlyMap<string, ItemDelLote>;
+  readonly ivaRecuperable: boolean;
+}
 
 export class RegistrarMovimientosEnLote {
   public constructor(private readonly deps: DependenciasDeInventario) {}
@@ -51,8 +75,8 @@ export class RegistrarMovimientosEnLote {
 
     await this.exigirLibroEscribibleParaTodos(sesion, entrada);
 
-    const items = await this.itemsPorNombre(sesion);
-    const preparados = preparar(entrada.movimientos, entrada.locationId, items);
+    const contexto = await this.leerContexto(sesion, entrada.locationId);
+    const preparados = preparar(entrada.movimientos, contexto);
 
     const ids = await this.deps.repositorio.registrarVarios({
       companyId: sesion.companyId,
@@ -101,13 +125,29 @@ export class RegistrarMovimientosEnLote {
     }
   }
 
-  private async itemsPorNombre(
-    sesion: SesionActiva,
-  ): Promise<ReadonlyMap<string, { readonly id: ItemId; readonly unidadDeUso: string }>> {
-    const items = await this.deps.listarItems.ejecutar(sesion, false);
-    return new Map(
-      items.map((i) => [clavePorNombre(i.nombre), { id: i.id, unidadDeUso: i.unidadDeUso }]),
-    );
+  /** Tres lecturas para todo el lote —ítems, grupos, ajuste—, no tres por fila. */
+  private async leerContexto(sesion: SesionActiva, locationId: LocationId): Promise<ContextoDelLote> {
+    const [items, grupos, ajustes] = await Promise.all([
+      this.deps.listarItems.ejecutar(sesion, false),
+      this.deps.listarGrupos.ejecutar(sesion),
+      this.deps.leerAjustes.ejecutar(sesion),
+    ]);
+    const tarifaDeGrupo = new Map<string, string | null>(grupos.map((g) => [g.id, g.ivaTarifa]));
+
+    return {
+      locationId,
+      ivaRecuperable: ajustes.ivaCompraRecuperable,
+      items: new Map(
+        items.map((i) => [
+          clavePorNombre(i.nombre),
+          {
+            id: i.id,
+            unidadDeUso: i.unidadDeUso,
+            ivaTarifaDelGrupo: i.grupoId === null ? null : (tarifaDeGrupo.get(i.grupoId) ?? null),
+          },
+        ]),
+      ),
+    };
   }
 }
 
@@ -123,14 +163,13 @@ function claveDeMes(fecha: Date): string {
  */
 function preparar(
   movimientos: readonly MovimientoDelLote[],
-  locationId: LocationId,
-  items: ReadonlyMap<string, { readonly id: ItemId; readonly unidadDeUso: string }>,
+  contexto: ContextoDelLote,
 ): readonly MovimientoParaGuardar[] {
   const problemas: ProblemaDelLote[] = [];
   const preparados: MovimientoParaGuardar[] = [];
 
   for (const [indice, movimiento] of movimientos.entries()) {
-    const preparado = prepararUno(movimiento, locationId, items);
+    const preparado = prepararUno(movimiento, contexto);
     if (typeof preparado === 'string') {
       problemas.push({ posicion: indice + PRIMERA_POSICION, motivo: preparado });
       continue;
@@ -144,30 +183,59 @@ function preparar(
 
 function prepararUno(
   movimiento: MovimientoDelLote,
-  locationId: LocationId,
-  items: ReadonlyMap<string, { readonly id: ItemId; readonly unidadDeUso: string }>,
+  contexto: ContextoDelLote,
 ): MovimientoParaGuardar | string {
   const motivo = motivoDelMovimiento(movimiento);
   if (motivo !== null) return motivo;
 
-  const item = items.get(clavePorNombre(movimiento.item));
+  const item = contexto.items.get(clavePorNombre(movimiento.item));
   if (item === undefined) return `No existe ningún ítem llamado «${movimiento.item.trim()}».`;
 
   const cantidad = conSignoDelTipo(
     movimiento.tipo,
     Quantity.of(movimiento.cantidad, unidadDeUso(item.unidadDeUso)),
   );
+  const compra = compraDelLote(movimiento, item, contexto.ivaRecuperable);
+  if (typeof compra === 'string') return compra;
 
   return {
-    locationId,
+    locationId: contexto.locationId,
     itemId: item.id,
     tipo: movimiento.tipo,
     cantidad: cantidad.toStorageString(),
-    costoTotal: movimiento.costoTotal,
+    costoTotal: compra === null ? movimiento.costoTotal : compra.costoTotal,
+    desglose: compra === null ? null : compra.desglose,
     purchaseArticleId: null,
     reversesMovementId: null,
     occurredAt: movimiento.occurredAt,
     note: movimiento.note,
   };
+}
+
+/**
+ * El desglose de una COMPRA del lote, `null` si la fila no es compra, o el
+ * motivo por el que no se puede. `motivoDelMovimiento` ya garantizó el importe.
+ */
+function compraDelLote(
+  movimiento: MovimientoDelLote,
+  item: ItemDelLote,
+  ivaRecuperable: boolean,
+): CompraDesglosada | string | null {
+  if (movimiento.tipo !== 'COMPRA' || movimiento.costoTotal === null) return null;
+
+  const tarifa = elegirTarifa({
+    cuerpo: movimiento.ivaTarifa,
+    articulo: null,
+    grupo: item.ivaTarifaDelGrupo,
+  });
+  if (tarifa === null) {
+    return `Falta la tarifa de IVA de esta compra: ponla en la columna «iva» del archivo o en el grupo de «${movimiento.item.trim()}». Nunca se asume una.`;
+  }
+
+  return desglosarCompra({
+    bruto: movimiento.costoTotal,
+    tarifa: exigirTarifaValida(tarifa),
+    recuperable: ivaRecuperable,
+  });
 }
 

@@ -21,7 +21,8 @@ export type CodigoDeDominio =
   | 'RECURSO_NO_ENCONTRADO'
   | 'LIMITE_DEL_PLAN'
   | 'CONFLICTO'
-  | 'ENTRADA_INVALIDA';
+  | 'ENTRADA_INVALIDA'
+  | 'LIMITE_DE_SOLICITUDES';
 
 /**
  * `mensaje` SALE AL CLIENTE TAL CUAL. Todo lo que se escriba aqui es publico:

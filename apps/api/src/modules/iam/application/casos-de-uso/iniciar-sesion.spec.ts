@@ -14,8 +14,9 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CorreoAEncolar } from '../../../../shared/application/correo/correo-a-encolar';
+import { renderizar } from '../../../../shared/application/correo/plantillas';
 import type { AuditEvent, AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
-import type { MailerPort, OutgoingMail } from '../../../../shared/application/ports/mailer.port';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import {
   companyId,
@@ -61,6 +62,7 @@ class RepositorioDoble implements RepositorioDeAutenticacion {
   public fallos: FallosRecientes = { porCuenta: [], porIp: [] };
   public readonly intentos: string[] = [];
   public readonly sesiones: NuevaSesion[] = [];
+  public readonly encolados: Parameters<RepositorioDeAutenticacion['encolarCorreo']>[0][] = [];
   public olvidos = 0;
   public hashesGuardados = 0;
 
@@ -103,15 +105,26 @@ class RepositorioDoble implements RepositorioDeAutenticacion {
     this.hashesGuardados += 1;
     return Promise.resolve();
   }
+  public solicitarRestablecimiento(): Promise<void> {
+    return Promise.resolve();
+  }
+  public consumirRestablecimiento(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  public correoDelUsuario(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  public encolarCorreo(entrada: Parameters<RepositorioDeAutenticacion['encolarCorreo']>[0]): Promise<void> {
+    this.encolados.push(entrada);
+    return Promise.resolve();
+  }
 }
 
 describe('IniciarSesion', () => {
   let repositorio: RepositorioDoble;
   let hasher: HasherDeContrasenas;
   let auditoria: AuditLogPort;
-  let correo: MailerPort;
   let eventos: AuditEvent[];
-  let correos: OutgoingMail[];
   let verificados: (string | null)[];
   let caso: IniciarSesion;
   let coincide: boolean;
@@ -120,7 +133,6 @@ describe('IniciarSesion', () => {
   beforeEach(() => {
     repositorio = new RepositorioDoble();
     eventos = [];
-    correos = [];
     verificados = [];
     coincide = true;
     pideRehash = false;
@@ -146,16 +158,9 @@ describe('IniciarSesion', () => {
       },
     };
 
-    correo = {
-      send: async (mail) => {
-        correos.push(mail);
-        return Promise.resolve();
-      },
-    };
-
     const reloj: Reloj = { ahora: () => AHORA };
 
-    const deps: DependenciasDeIniciarSesion = { repositorio, hasher, tokens, auditoria, correo, reloj };
+    const deps: DependenciasDeIniciarSesion = { repositorio, hasher, tokens, auditoria, reloj };
     caso = new IniciarSesion(deps);
   });
 
@@ -356,14 +361,24 @@ describe('IniciarSesion', () => {
   });
 
   describe('aviso al titular', () => {
-    it('el quinto fallo lo dispara', async () => {
+    /** El unico aviso encolado, o falla: aqui nunca hay dos. */
+    function unicoAviso(): CorreoAEncolar {
+      const [aviso, ...resto] = repositorio.encolados;
+      if (aviso === undefined || resto.length > 0) {
+        throw new Error(`se esperaba exactamente un aviso, hay ${String(repositorio.encolados.length)}`);
+      }
+      return aviso.correo;
+    }
+
+    it('el quinto fallo lo ENCOLA, bajo la company y el usuario de la cuenta', async () => {
       coincide = false;
       repositorio.fallos = { porCuenta: fallosRecientes(4), porIp: [] };
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos).toHaveLength(1);
-      expect(correos[0]?.to).toBe(CORREO);
+      expect(repositorio.encolados).toHaveLength(1);
+      expect(repositorio.encolados[0]).toMatchObject({ companyId: COMPANY, userId: USUARIO });
+      expect(unicoAviso()).toEqual({ destinatario: CORREO, plantilla: 'BLOQUEO', datos: {} });
     });
 
     it('el segundo fallo no', async () => {
@@ -372,25 +387,27 @@ describe('IniciarSesion', () => {
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos).toEqual([]);
+      expect(repositorio.encolados).toEqual([]);
     });
 
-    it('NUNCA se envia si la cuenta no existe: seria un relay de correo', async () => {
+    it('NUNCA se encola si la cuenta no existe: seria un relay de correo', async () => {
       repositorio.credencial = null;
       repositorio.fallos = { porCuenta: fallosRecientes(4), porIp: [] };
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos).toEqual([]);
+      expect(repositorio.encolados).toEqual([]);
     });
 
-    it('el aviso no lleva enlaces: seria indistinguible de una suplantacion', async () => {
+    it('el aviso no lleva enlaces ni datos: seria indistinguible de una suplantacion', async () => {
       coincide = false;
       repositorio.fallos = { porCuenta: fallosRecientes(4), porIp: [] };
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos[0]?.body).not.toMatch(/https?:\/\//u);
+      const aviso = unicoAviso();
+      expect(aviso.datos).toEqual({});
+      expect(renderizar(aviso, 'costeo-saas').body).not.toMatch(/https?:\/\//u);
     });
   });
 

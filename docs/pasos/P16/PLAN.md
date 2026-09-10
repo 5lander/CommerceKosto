@@ -27,17 +27,17 @@ importación; entrega al piloto tras las pantallas operativas, con cinco evidenc
 | U1 | Shell **como Commerce**: barra lateral por grupos, sección por entidad, listado → alta → ficha → edición en **página propia**, `← Volver`, confirmación en línea | Route group `(app)`, `navegacion.ts`, gating por permiso, `typedRoutes` |
 | U2 | **Inicio** con el resumen del mes | `/inicio`; BODEGA ve `/analitica/reposicion` |
 | U3 | Los cuatro bloques sin backend tienen **SPEC escrito y presentado**; solo se **construye P20** | P17, P18, P19 diferidos por decisión de producto |
-| U4 | **Token CSRF completo** (SEGURIDAD.md §4.2) | P16-A2, ADR-020 |
+| U4 | **Token CSRF completo** (SEGURIDAD.md §4.2) | P16-A2, ADR-021 |
 | U5 → **D-16.9** | El bodeguero escribe **el total de la factura con IVA**. Dos niveles: tarifa por artículo, recuperabilidad por company. **Neteo solo si `iva_compra_recuperable = true`; si es `false`, el IVA entra íntegro al plato** | Fase 1 |
 | **D-16.10** | Todo `COMPRA` persiste `total_bruto`, `iva_tarifa_aplicada`, `iva_recuperable_aplicado`, `costo_total_neto` | Fase 1 |
-| **D-16.11** | Reemplazos totales con **concurrencia optimista**: 409 `CONFLICTO_DE_VERSION` | Fase 2, ADR-022 |
+| **D-16.11** | Reemplazos totales con **concurrencia optimista**: 409 `CONFLICTO_DE_VERSION` | Fase 2, ADR-023 |
 | **D-16.12** | **Correo transaccional** es alcance mínimo: invitación y recuperación | Fase 3 |
-| **D-16.15** | El despachador **no** usa el rol de la app ni bypass; ADR-024; 🔴 dos companies → envía los dos | D-16.23 |
+| **D-16.15** | El despachador **no** usa el rol de la app ni bypass; ADR-025; 🔴 dos companies → envía los dos | D-16.23 |
 | **D-16.16** | Proveedor único: **Resend**. Adaptadores `fake`, `consola`, `resend`; `RESEND_API_KEY`, `RESEND_REMITENTE` | Fase 3 |
 | **D-16.17** | Límite de tasa **por IP y por destinatario** en `olvido`, `restablecimiento`, `POST /usuarios`, `reenvio-de-invitacion`; 429 con código propio; 🔴 por endpoint. **La IP se obtiene por el mismo camino que `login_attempt` (proxy de confianza), nunca leyendo `X-Forwarded-For` directamente; 🔴 cabecera falseada desde fuera del proxy no cambia la clave de límite** | D-16.24, D-16.36 |
 | **D-16.18** | Los `COMPRA` anteriores **no** se rellenan; «sin desglose» como estado; datos de ejemplo re-importados | D-16.25 |
 | **D-16.19** | `email_outbox.company_id` nullable; índices por estado en outbox y tokens | Fase 3 |
-| **D-16.20** | ADR-022: deuda del 409 espurio entre sucursales por `product.version`; señal: primer conflicto sin usuario concurrente → versión por `(product, location)` | Fase 2 |
+| **D-16.20** | ADR-023: deuda del 409 espurio entre sucursales por `product.version`; señal: primer conflicto sin usuario concurrente → versión por `(product, location)` | Fase 2 |
 | **D-16.21** | P20 **en memoria, sin reanudar, sin antivirus, solo CSV**, con tope de `Content-Length` y de filas | P20 |
 | **D-16.22** | `verificar-pantalla.mjs` **no** se construye | Verificación |
 | **D-16.26** | Los endpoints públicos de restablecimiento **no operan bajo tenant**: dos funciones `SECURITY DEFINER` (patrón de `session_lookup` e `invitation_lookup`): una busca el usuario activo por correo, crea `password_reset_token` y encola en `email_outbox` **en una sola operación** (sin usuario → no hace nada y devuelve lo mismo); otra consume el token (un uso, caducidad) y devuelve `user_id`. 🔴 `/olvido` sin sesión encola; `/restablecimiento` sin sesión consume | D-16.31 |
@@ -45,7 +45,7 @@ importación; entrega al piloto tras las pantallas operativas, con cinco evidenc
 | **D-16.28** | `rate_limit_hit` fuera del ámbito de tenant, exención registrada en la doc de seguridad; purga en cada pasada del despachador; 🔴 la tabla no crece tras la ventana | D-16.32 |
 | **D-16.29** | `import_job` persiste el **SHA-256**; la confirmación lo recalcula → 409 `ARCHIVO_DISTINTO`. En SPEC §24 | D-16.33 |
 | **D-16.30** | Evidencia 1 del piloto: el respaldo se **copia fuera del VPS** (destino nombrado en el runbook) y la restauración probada **parte de la copia remota** | Parada |
-| **D-16.34** | **El token en claro existe en la base solo mientras el correo está en vuelo:** al marcar `ENVIADO`, o `FALLIDO` tras el tope, el despachador reemplaza `email_outbox.datos` por `{plantilla, destinatario}` sin enlace. Ninguna lectura del outbox (`GET /correo/salud`, `GET /usuarios.correoInvitacion`) expone `datos`. `HORAS_DE_RESTABLECIMIENTO` con valor por defecto **1**. ADR-024 registra la alternativa descartada (cifrado del campo con clave del despachador) y su señal: más de un operador con acceso a la base. 🔴 tras `ENVIADO`, `datos` no contiene `token=`; 🔴 la respuesta cruda de `/correo/salud` no contiene `datos` | Fase 3 |
+| **D-16.34** | **El token en claro existe en la base solo mientras el correo está en vuelo:** al marcar `ENVIADO`, o `FALLIDO` tras el tope, el despachador reemplaza `email_outbox.datos` por `{plantilla, destinatario}` sin enlace. Ninguna lectura del outbox (`GET /correo/salud`, `GET /usuarios.correoInvitacion`) expone `datos`. `HORAS_DE_RESTABLECIMIENTO` con valor por defecto **1**. ADR-025 registra la alternativa descartada (cifrado del campo con clave del despachador) y su señal: más de un operador con acceso a la base. 🔴 tras `ENVIADO`, `datos` no contiene `token=`; 🔴 la respuesta cruda de `/correo/salud` no contiene `datos` | Fase 3 |
 | **D-16.35** | Evidencia 1: el dump se **cifra en el VPS antes de subirse** (herramienta y gestión de la clave nombradas en `respaldos-y-restauracion.md`; **la clave no vive en el mismo destino que el respaldo**) y la restauración probada incluye el **descifrado desde la copia remota** | D-16.37 |
 | **D-16.38** | (adición a D-16.37) La clave privada de `age` tiene **al menos dos copias en lugares independientes entre sí** (gestor de contraseñas + copia física, o segundo gestor sin credenciales compartidas), registradas en `respaldos-y-restauracion.md` **sin revelar dónde**. La evidencia 1 descifra con **una copia distinta del equipo donde se generó el par**, y lo dice en la evidencia | Parada |
 | U6 | Entran las cuatro opcionales (simulador, desglose, costo de uso, editar sucursal) | P16-B/C; bench |
@@ -116,7 +116,7 @@ resto) · el glob `.tsx` de `audit:complexity` va en «Armazón».
 | CSV `MOVIMIENTOS` y `SugerirPrecio`: misma precedencia | |
 | **`CC-IVA-01..04`** (no recupera×>0: `GET /costeo` cambia) | |
 | **Re-importación de los datos de ejemplo**; evidencia en `CONSTRUCCION.md` | |
-| SPEC **R13**; `docs/apis/app-cliente.md`; ADR-023 | |
+| SPEC **R13**; `docs/apis/app-cliente.md`; ADR-024 | |
 
 ### IP del cliente tras el proxy (D-16.36)
 
@@ -128,29 +128,29 @@ resto) · el glob `.tsx` de `audit:complexity` va en «Armazón».
 |---|---|
 | `MailerPort.send` **se conserva**; `Plantilla`, `EncolarCorreo` en `shared/application` | |
 | `email_outbox(id, company_id NULL, user_id NULL, destinatario, plantilla, datos jsonb, estado, intentos, error, created_at, sent_at)`; índices `(estado, created_at)`, `(user_id, created_at DESC)`; política app + política del despachador. **Encola en la misma transacción** | D-16.19, D-16.27(b) |
-| **`datos` en vuelo solamente (D-16.34):** al pasar a `ENVIADO`, o a `FALLIDO` tras el tope, el despachador escribe `datos = {plantilla, destinatario}`; ninguna lectura devuelve `datos`; `HORAS_DE_RESTABLECIMIENTO` por defecto **1** (`DIAS_DE_INVITACION` como hoy). 🔴 tras `ENVIADO` no hay `token=`; 🔴 `/correo/salud` crudo sin `datos`. ADR-024: alternativa descartada (cifrar el campo con clave del despachador) y señal (más de un operador con acceso a la base) | |
+| **`datos` en vuelo solamente (D-16.34):** al pasar a `ENVIADO`, o a `FALLIDO` tras el tope, el despachador escribe `datos = {plantilla, destinatario}`; ninguna lectura devuelve `datos`; `HORAS_DE_RESTABLECIMIENTO` por defecto **1** (`DIAS_DE_INVITACION` como hoy). 🔴 tras `ENVIADO` no hay `token=`; 🔴 `/correo/salud` crudo sin `datos`. ADR-025: alternativa descartada (cifrar el campo con clave del despachador) y señal (más de un operador con acceso a la base) | |
 | `password_reset_token(id, user_id, token_hash, expires_at, used_at, created_at)`; índices; **sin política de app** | D-16.31 |
 | **`password_reset_request` / `password_reset_consume`** (definer) | D-16.26 |
 | Rol **`costeo_despachador`**; `scripts/rol-despachador.mjs`; `DESPACHADOR_DATABASE_URL` solo en `modules/correo/`; reglas de auditoría | D-16.23 |
-| Despachador `despachador.ts` (proceso aparte; servicio `correo`, `restart: unless-stopped`) y `npm run correo:despachar`: `FOR UPDATE SKIP LOCKED`, render, `send`, reintentos hasta 5, `FALLIDO`, **saneado de `datos`**, **purga de `rate_limit_hit`**. 🔴 dos companies; 🔴 su rol no lee otras tablas | ADR-024 |
+| Despachador `despachador.ts` (proceso aparte; servicio `correo`, `restart: unless-stopped`) y `npm run correo:despachar`: `FOR UPDATE SKIP LOCKED`, render, `send`, reintentos hasta 5, `FALLIDO`, **saneado de `datos`**, **purga de `rate_limit_hit`**. 🔴 dos companies; 🔴 su rol no lee otras tablas | ADR-025 |
 | Adaptadores `fake` · `consola` · **`resend`** (`fetch`, probado contra servidor falso). Ninguna prueba envía correo real | D-16.16 |
 | `APP_URL` | |
 | Invitación: `InvitarUsuario` encola; enlace + caducidad; `user_id` del invitado | |
 | **Reenviar invitación**: `ReenviarInvitacion` (nuevo token, invalida el anterior, encola, D-16.17); `POST /usuarios/:id/reenvio-de-invitacion` | Pantalla 32 |
 | Restablecimiento: `POST /auth/password/olvido` (**siempre 202**, tiempo constante) → `password_reset_request`; `POST /auth/password/restablecimiento` → `password_reset_consume`, política, **revoca sesiones** | |
 | **Salud en el back office**: `GET /correo/salud` → `{pendientesAntiguos, fallidos, ultimoEnvio}` (solo contadores e instantes), `CORREO_MINUTOS_DE_ALERTA`; tarjeta en `cartera` | D-16.27(c) |
-| **Límite de tasa**: `LimitadorDeTasa` + `rate_limit_hit` (RLS permisiva); umbrales por `kind`; 429 `LIMITE_DE_SOLICITUDES`; cuatro endpoints; IP por `ipDelCliente`. 🔴 por endpoint, IP y destinatario; 🔴 purga; 🔴 cabecera falseada | ADR-025 |
+| **Límite de tasa**: `LimitadorDeTasa` + `rate_limit_hit` (RLS permisiva); umbrales por `kind`; 429 `LIMITE_DE_SOLICITUDES`; cuatro endpoints; IP por `ipDelCliente`. 🔴 por endpoint, IP y destinatario; 🔴 purga; 🔴 cabecera falseada | ADR-026 |
 | Pruebas: token dos veces → 400; caducado → 400; enumeración imposible por respuesta y tiempo; outbox transaccional; reintentos y tope; `/olvido` y `/restablecimiento` **sin sesión** | |
 | **Envío real manual, en el runbook** (DKIM/SPF/DMARC en Resend, fuera de spam); evidencia en `CONSTRUCCION.md`. Depende del usuario | |
 | Rutas públicas: `/olvide`, `/restablecer` | Pantalla 1b |
 
 ## P16-A2 — API · shared + sesión + CSRF + lecturas de catálogo + arreglos
 
-`error.filter.ts` (tres errores → 400) · `PERIODO_SIN_DATOS` → 404 · **CSRF** (`session.csrf_token`, `X-CSRF-Token`, 403 `CSRF_INVALIDO`, helper de pruebas, ADR-020) · `GET /auth/sesion` → `{ userId, permisos, alcance, csrf }` · CORS + `DELETE` · `CONSULTA_*` `.strict()` · `nombre` en ventas y menu-engineering · `GET /catalogo/unidades`, `GET /catalogo/items/:id`, `GET /catalogo/articulos/:id`, `CrearItem` valida unidad, P2002 → 409, `PUT /catalogo/articulos/:id`, `PUT /catalogo/grupos/:id` · doc al día.
+`error.filter.ts` (tres errores → 400) · `PERIODO_SIN_DATOS` → 404 · **CSRF** (`session.csrf_token`, `X-CSRF-Token`, 403 `CSRF_INVALIDO`, helper de pruebas, ADR-021) · `GET /auth/sesion` → `{ userId, permisos, alcance, csrf }` · CORS + `DELETE` · `CONSULTA_*` `.strict()` · `nombre` en ventas y menu-engineering · `GET /catalogo/unidades`, `GET /catalogo/items/:id`, `GET /catalogo/articulos/:id`, `CrearItem` valida unidad, P2002 → 409, `PUT /catalogo/articulos/:id`, `PUT /catalogo/grupos/:id` · doc al día.
 
 ## P16-B — API · pricing + recipes/products + costing + concurrencia · `npm run bench`
 
-**`product.version`, `item.version`** + `exigirVersion`; tres PUT exigen `version` → 409 `CONFLICTO_DE_VERSION`; ADR-022 (+ D-16.20); 🔴 dos escrituras · `GET /precios/pendientes`; `vigente`; `GET /precios/costos?fecha`; `EsquemaPipe`; validaciones de `SugerirPrecio` · `GET /productos/:id`; `GET /productos/:id/ubicaciones`; `GET /productos/ubicaciones?locationId`; `GET/PUT /productos/:id/componentes`; `GET /recetas/versiones`; `GET /recetas/propagacion?productId`; error de empaque · `semaforoFoodCost`; `GET /costeo/:id?pvp=`; `CostosDto.lineas`.
+**`product.version`, `item.version`** + `exigirVersion`; tres PUT exigen `version` → 409 `CONFLICTO_DE_VERSION`; ADR-023 (+ D-16.20); 🔴 dos escrituras · `GET /precios/pendientes`; `vigente`; `GET /precios/costos?fecha`; `EsquemaPipe`; validaciones de `SugerirPrecio` · `GET /productos/:id`; `GET /productos/:id/ubicaciones`; `GET /productos/ubicaciones?locationId`; `GET/PUT /productos/:id/componentes`; `GET /recetas/versiones`; `GET /recetas/propagacion?productId`; error de empaque · `semaforoFoodCost`; `GET /costeo/:id?pvp=`; `CostosDto.lineas`.
 
 ## P16-C — API · inventory + usuarios/roles/sucursales + concurrencia
 
@@ -273,7 +273,7 @@ Tipti · `/empaques` · `/consumos` manual · presets ±10 % · «fuga por plato
 
 ## Documentación
 
-`docs/pasos/P16-A1|A2|B|C|P20/` (`CONSTRUCCION.md` + `AUDITORIA-RESULTADO.md`), `docs/apis/app-cliente.md`, `CHANGELOG`, `ESTADO`, runbooks (`despliegue.md`: servicio `correo`, rol del despachador, `PROXY_DE_CONFIANZA`; `puesta-en-marcha.md`: Resend, DKIM/SPF/DMARC, envío real manual, destino remoto y clave de `age`; `respaldos-y-restauracion.md`: cifrado, gestión y rotación de la clave, **las dos copias independientes de la privada sin revelar su ubicación**, restauración desde la copia remota), `docs/SEGURIDAD.md` y `docs/sistema/seguridad.md` (exención de `rate_limit_hit`; las dos definer que escriben; el token en vuelo; la IP tras el proxy), `docs/incidencias/INC-022`. ADRs: **ADR-019** armazón y kit · **ADR-020** CSRF · **ADR-021** lecturas del frontend · **ADR-022** concurrencia (+ D-16.20) · **ADR-023** IVA en dos niveles · **ADR-024** correo (outbox, rol y proceso, definer, token en vuelo y alternativa descartada) · **ADR-025** límite de tasa e IP tras el proxy. SPEC: R13; §22–§26.
+`docs/pasos/P16-A1|A2|B|C|P20/` (`CONSTRUCCION.md` + `AUDITORIA-RESULTADO.md`), `docs/apis/app-cliente.md`, `CHANGELOG`, `ESTADO`, runbooks (`despliegue.md`: servicio `correo`, rol del despachador, `PROXY_DE_CONFIANZA`; `puesta-en-marcha.md`: Resend, DKIM/SPF/DMARC, envío real manual, destino remoto y clave de `age`; `respaldos-y-restauracion.md`: cifrado, gestión y rotación de la clave, **las dos copias independientes de la privada sin revelar su ubicación**, restauración desde la copia remota), `docs/SEGURIDAD.md` y `docs/sistema/seguridad.md` (exención de `rate_limit_hit`; las dos definer que escriben; el token en vuelo; la IP tras el proxy), `docs/incidencias/INC-022`. ADRs: **ADR-020** armazón y kit · **ADR-021** CSRF · **ADR-022** lecturas del frontend · **ADR-023** concurrencia (+ D-16.20) · **ADR-024** IVA en dos niveles · **ADR-025** correo (outbox, rol y proceso, definer, token en vuelo y alternativa descartada) · **ADR-026** límite de tasa e IP tras el proxy. SPEC: R13; §22–§26.
 
 ## Referencias del diseño detallado
 

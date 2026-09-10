@@ -14,6 +14,7 @@ function movimiento(parcial: Partial<MovimientoDelLote> = {}): MovimientoDelLote
     tipo: 'COMPRA',
     cantidad: '10',
     costoTotal: '25.00',
+    ivaTarifa: null,
     occurredAt: CUANDO,
     note: null,
     ...parcial,
@@ -74,5 +75,24 @@ describe('lote de movimientos', () => {
 
   it('una fila sin ítem se rechaza', () => {
     expect(problemasDelLoteDeMovimientos([movimiento({ item: '' })])).toHaveLength(1);
+  });
+});
+
+describe('la tarifa de IVA de la fila (D-16.44)', () => {
+  it('un 15 donde va 0.15 se rechaza con su posición, junto a los demás problemas', () => {
+    const problemas = problemasDelLoteDeMovimientos([
+      movimiento(),
+      movimiento({ ivaTarifa: '15' }),
+      movimiento({ costoTotal: null }),
+    ]);
+
+    expect(problemas.map((p) => p.posicion)).toEqual([2, 3]);
+    expect(problemas[0]?.motivo).toMatch(/0\.15, no 15/u);
+  });
+
+  it('una tarifa que no es número se rechaza; un cero explícito y el blanco pasan', () => {
+    expect(problemasDelLoteDeMovimientos([movimiento({ ivaTarifa: '15%' })])).toHaveLength(1);
+    expect(problemasDelLoteDeMovimientos([movimiento({ ivaTarifa: '0' })])).toEqual([]);
+    expect(problemasDelLoteDeMovimientos([movimiento({ ivaTarifa: null })])).toEqual([]);
   });
 });
