@@ -30,6 +30,7 @@ import { appendOnlyRules } from './rules/append-only.rules.mjs';
 import { tenantRules } from './rules/tenant.rules.mjs';
 import { catalogRules } from './rules/catalog.rules.mjs';
 import { backofficeRules } from './rules/backoffice.rules.mjs';
+import { frontendRules } from './rules/frontend.rules.mjs';
 import { repoRules } from './rules/repo.rules.mjs';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -78,6 +79,7 @@ const reglasDeContenido = [
   ...tenantRules,
   ...catalogRules,
   ...backofficeRules,
+  ...frontendRules,
 ];
 
 /** Archivos versionados o nuevos, nunca los ignorados. */

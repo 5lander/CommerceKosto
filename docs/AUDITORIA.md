@@ -172,7 +172,7 @@
 | I6 | Concurrencia acotada en todo `Promise.all` sobre I/O |
 | I7 | Cachés nuevos cumplen las tres condiciones (lectura≫escritura, staleness tolerable, invalidación definida) |
 | I8 | Presupuestos de rendimiento medidos y en verde (p95) — **`npm run bench`, ver abajo** |
-| I9 | Presupuesto de bundle en verde *(solo P12/P13)* |
+| I9 | Presupuesto de bundle en verde — **`npm run medir-bundle`** tras `npm run build --workspace @costeo/web`, en todo commit que toque `apps/web`. Mide en gzip lo que el navegador baja por pantalla: piso ≤ 200 KiB, pantalla ≤ 350 KiB. Si se pasa, se arregla la pantalla, no el umbral |
 | I10 | Optimizaciones no triviales documentadas con antes/después |
 
 ### I8 — `npm run bench` no está en `npm run audit`, y hay que saberlo

@@ -8,9 +8,121 @@
 
 ## Estado actual
 
-**Fase en curso:** ninguna. **El plan P0–P15 está completo y el sistema se ha desplegado entero en local.**
-**Último commit:** `P14b: la cadena de despliegue del frontend, y los tres fallos que destapó el ensayo`
-**Fecha de última actualización:** 2026-09-08
+**Fase en curso:** **Pasada P16 → P20**. Commit 0 (Tooling) cerrado; **siguiente: P16-A1** (IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy), que empieza por RECARGA y su propio `docs/pasos/P16-A1/`. El plan P0–P15 está completo y el sistema se ha desplegado entero en local.
+**Último commit:** `P16 · commit 0: tooling de la pasada — decisiones registradas, cuatro guardianes y el medidor de bundle`
+**Fecha de última actualización:** 2026-09-09
+
+## Pasada P16 → P20 — la aplicación completa · EN CURSO desde 2026-09-09
+
+> **El plan completo (versión 6) está en `docs/pasos/P16/PLAN.md`.** Esta sección es lo que sobrevive
+> a una compactación: las decisiones cerradas, el tablero y dónde se retoma. Si el plan y esta sección
+> difieren, manda el plan; si el plan y el código difieren, manda el código y se corrige el tablero.
+
+### Por qué existe
+
+El backend tiene 36 escrituras y la interfaz usaba **5 de 41 rutas, dos de ellas de escritura**. Un
+dueño no podía dar de alta un insumo, escribir una receta, subir un precio ni registrar la compra de
+hoy. «Solo veo datos cargados, no veo nada que yo pueda cargar» (el usuario, 2026-09-09). Se
+construye todo, en una pasada, **como Noctis Commerce** y **con lo que trae la referencia visual**.
+
+### La referencia visual está en disco, no en git
+
+`docs/Sistema ejemplo/` — **ignorada en `.gitignore`**, como el Excel. Es una aplicación Vite ajena
+con 18 vistas y su propio `package.json`; versionarla la metería bajo los doce checks (de hecho ya
+ponía `audit:forbidden` en rojo por un script que apunta a un `dist/` inexistente). Se lee para el
+armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: pedirla al usuario.
+
+### Tablero — se actualiza EN CADA COMMIT, no al final
+
+| Commit | Qué | Estado | Hash | Capturas | Bundle gzip (piso / mayor) | Decisiones |
+|---|---|---|---|---|---|---|
+| 0 · Tooling | Fase 0 + tres reglas de `apps/web` + `medir-bundle` + `multer` forzado a 2.3.0 (INC-021) | ✅ 2026-09-09 | *(el de este commit)* | — | 127 KiB / 139 KiB | D-16.39 |
+| P16-A1 | IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy | ⬜ | | — | | |
+| P16-A2 | `shared` + sesión + CSRF + lecturas de catálogo + arreglos | ⬜ | | — | | |
+| P16-B | pricing + recipes/products + costing + `version` de product/item · `npm run bench` | ⬜ | | — | | |
+| P16-C | inventory + usuarios/roles/sucursales + `version` de period | ⬜ | | — | | |
+| Armazón (pantalla 1) | route group `(app)`, navegación, kit, migración de las 4 pantallas | ⬜ | | | | |
+| Pantallas 1b–27 | una fila por pantalla al commitear | ⬜ | | | | |
+| ⏸ Entrega al piloto | cinco evidencias (abajo) | ⬜ | | | | |
+| ⏸ SPEC §24 → P20 | importación desde la UI, tras aprobar el SPEC | ⬜ | | | | |
+| Pantallas 28–33 | consolidado, períodos, ajustes, sucursales, usuarios, contraseña | ⬜ | | | | |
+| ⏸ SPEC §22 · §23 · §25/§26 | escritos y presentados, **no construidos** | ⬜ | | | | |
+
+### Decisiones del usuario — cerradas, no se reabren
+
+| # | Decisión |
+|---|---|
+| U1 | Shell **como Commerce**: barra lateral por grupos, sección por entidad, listado → alta → ficha → edición en página propia, `← Volver`, confirmación en línea |
+| U2 | **Inicio** con el resumen del mes; BODEGA ve reposición |
+| U3 | Los cuatro bloques sin backend tienen SPEC escrito y presentado; **solo se construye P20** |
+| U4 | **Token CSRF completo** (SEGURIDAD.md §4.2) |
+| U5 → D-16.9 | El bodeguero escribe **el total de la factura con IVA**. Dos niveles: tarifa por artículo, recuperabilidad por company. **Neteo solo si `iva_compra_recuperable = true`**; si no, el IVA entra íntegro al plato |
+| D-16.10 | Todo `COMPRA` persiste `total_bruto`, `iva_tarifa_aplicada`, `iva_recuperable_aplicado`, `costo_total_neto` |
+| D-16.11 | Reemplazos totales con **concurrencia optimista**: 409 `CONFLICTO_DE_VERSION` |
+| D-16.12 | Correo transaccional en alcance mínimo: **invitación y recuperación** |
+| D-16.15 | El despachador **no** usa el rol de la app ni bypass; 🔴 dos companies → envía los dos |
+| D-16.16 | Proveedor único: **Resend**. Adaptadores `fake` · `consola` · `resend` |
+| D-16.17 | Límite de tasa **por IP y por destinatario** en olvido, restablecimiento, `POST /usuarios` y reenvío de invitación; 429 con código propio. La IP llega por el proxy de confianza, nunca leyendo `X-Forwarded-For` directamente; 🔴 cabecera falseada desde fuera no cambia la clave |
+| D-16.18 | Los `COMPRA` anteriores **no se rellenan**: «sin desglose» es un estado; datos de ejemplo re-importados |
+| D-16.19 | `email_outbox.company_id` nullable; índices por estado |
+| D-16.20 | ADR-022 registra la deuda del 409 espurio entre sucursales por `product.version`; señal: primer conflicto sin usuario concurrente |
+| D-16.21 | P20 **en memoria, sin reanudar, sin antivirus, solo CSV**, con tope de `Content-Length` y de filas |
+| D-16.22 | `verificar-pantalla.mjs` **no** se construye |
+| D-16.26 | Los endpoints públicos de restablecimiento no operan bajo tenant: **dos funciones `SECURITY DEFINER`** (una crea token + encola en una operación; otra consume y devuelve `user_id`) |
+| D-16.27 | Observabilidad del correo: `restart: unless-stopped`; `GET /usuarios` trae `correoInvitacion {estado, error?}` y la pantalla ofrece «Reenviar» si `FALLIDO`; salud «PENDIENTE > N min» en el back office |
+| D-16.28 | `rate_limit_hit` fuera del ámbito de tenant, con exención documentada; purga en cada pasada del despachador; 🔴 no crece |
+| D-16.29 | `import_job` persiste **SHA-256**; la confirmación lo recalcula → 409 `ARCHIVO_DISTINTO` |
+| D-16.30 | Evidencia 1 del piloto: respaldo **copiado fuera del VPS**, restauración probada **desde la copia remota** |
+| D-16.34 | El token en claro vive en la base **solo mientras el correo está en vuelo**: al pasar a `ENVIADO` o `FALLIDO`, `datos` queda en `{plantilla, destinatario}`; ninguna lectura del outbox expone `datos`; `HORAS_DE_RESTABLECIMIENTO` = 1 por defecto; ADR-024 registra el cifrado del campo como alternativa descartada y su señal (más de un operador con acceso a la base) |
+| D-16.35 | El dump se **cifra en el VPS antes de subirse**; la clave no vive con el respaldo; la restauración probada descifra desde la copia remota |
+| D-16.38 | La clave privada tiene **al menos dos copias independientes** (gestor + copia física o segundo gestor), anotadas en el runbook sin decir dónde; la evidencia 1 descifra con una copia **distinta del equipo donde se generó el par**, y lo dice |
+| U6 | Entran las cuatro opcionales: simulador de PVP, desglose del costo, costo de uso, editar sucursal |
+| U7 | Tipti fuera (D8); back office fuera de `apps/web` |
+| U8 | Parada **«entrega al piloto»** con cinco evidencias; P20 después de las pantallas operativas |
+
+### Decisiones mías — registradas aquí, detalladas en el plan
+
+| # | Decisión |
+|---|---|
+| D-16.1 | La rejilla de ventas manda todas las filas con valor, con la `version` leída (desviación consciente de la letra de §10) |
+| D-16.2 | «Mes sin abrir» = `code === 'PERIODO_SIN_DATOS'` |
+| D-16.3 | `GET /costeo` gana `semaforoFoodCost`; nada se decide en el cliente |
+| D-16.4 | Fechas por `lib/fechas.ts` a `12:00Z`; mes por defecto en `America/Guayaquil` |
+| D-16.5 | El mes vive en la URL |
+| D-16.6 | Sin permiso = en sitio, fail-closed |
+| D-16.7 | No hay `/empaques` (el empaque es un ítem, ADR-008) |
+| D-16.8 | Paquetes de API antes de cualquier pantalla |
+| D-16.13 | Concurrencia con **columna `version` entera** en `period`, `product`, `item` (ninguna tabla tiene `updated_at`) |
+| D-16.14 | El correo **extiende `MailerPort`** como transporte |
+| D-16.23 | Rol **`costeo_despachador`** (`NOBYPASSRLS`, `CONNECTION LIMIT 2`, solo `email_outbox` y `DELETE` en `rate_limit_hit`), **proceso aparte** (`despachador.ts`, servicio `correo`); reglas de auditoría para `DESPACHADOR_DATABASE_URL` |
+| D-16.24 | `LimitadorDeTasa` en `shared/application` reutiliza `evaluarIntentos`; tabla `rate_limit_hit(kind, clave, ip, at)`; 429 `LIMITE_DE_SOLICITUDES` |
+| D-16.25 | `desglose_conocido boolean NOT NULL DEFAULT false` + CHECK; toda `COMPRA` nueva nace `true` |
+| D-16.31 | `password_reset_request(p_email, p_token_hash, p_datos)` y `password_reset_consume(p_token_hash)`, definer, patrón de `session_lookup`; las dos únicas definer **que escriben**; `password_reset_token` sin política para `costeo_app` |
+| D-16.32 | La lista de exenciones de M6 **sigue vacía**: `rate_limit_hit` con RLS y política permisiva |
+| D-16.33 | `import_job.sha256 text NOT NULL` (64 hex, CHECK); `storage_key` vale `''` en la UI |
+| D-16.36 | **Hoy la API toma la IP del socket** (`auth.controller.ts:91`, `backoffice.controller.ts:345`) y detrás de Caddy toda petición llega con la IP del proxy: el bloqueo por IP del login sería un **bloqueo global**. `ipDelCliente(peticion)` en `shared/infrastructure/http/` con `PROXY_DE_CONFIANZA`; lo usan login, back office y el limitador; **INC-022** |
+| D-16.37 | Cifrado del respaldo con **`age`** (asimétrico): pública en `/etc/costeo/respaldo.pub`, privada solo en el gestor; `preparar.sh` instala `age` y su `.env` gana `RESPALDO_CLAVE_PUBLICA` y `PROXY_DE_CONFIANZA`; `descifrar-respaldo.sh`; descartado `gpg --symmetric` |
+| D-16.39 | `docs/Sistema ejemplo/` se ignora en git y el plan se copia a `docs/pasos/P16/PLAN.md` para que sobreviva a la compactación |
+
+### P17 · P18 · P19 — diferidos por decisión de producto, no por bloqueo técnico
+
+| SPEC | Qué se escribe | Preguntas abiertas para el usuario |
+|---|---|---|
+| §22 Butcher test | Fórmulas de rendimiento equivalente; sugiere, no aplica | Equivalente vs físico (R12) |
+| §23 Recepción HACCP | Acta + `COMPRA` en la misma `run()`; `RECHAZADO` no toca el libro; acta inmutable; neteo por D-16.9 | Devoluciones; actor cuando registra BODEGA |
+| §25 USAR + §26 multimodelo | Plan de cuentas; **R15: `EBITDA_USAR − utilidad_operativa = 0.00`**; Miller/Pavesic ponderados; ABC con `labor_minutes` | 5000 teórico o real; cargas sociales; mapa categoría → cuenta |
+
+### Parada «entrega al piloto» — las cinco evidencias
+
+1. Respaldo automático **cifrado con `age`**, copiado fuera del VPS, y restauración completa probada en base vacía **desde la copia remota, descifrado incluido, con una copia de la clave distinta del equipo de origen**.
+2. Invitación real entregada a una bandeja real del piloto, **fuera de spam**.
+3. Datos del piloto cargados con `npm run importar`; `iva_compra_recuperable` fijado **según su contador**.
+4. Tres productos del piloto con costo conocido, contrastados contra `GET /costeo`, **diferencias explicadas por escrito**.
+5. Las 27 capturas (1280 y 360 px, por rol) y `npm run medir-bundle` en verde.
+
+**Lo que solo el usuario aporta, y la parada espera a ello:** VPS, destino remoto del respaldo, la clave privada en dos copias, dominio, cuenta de Resend con DKIM/SPF/DMARC, datos del piloto y la confirmación del contador.
+
+---
 
 ### EL PROYECTO CAMBIÓ DE MODO — leer esto antes que nada
 
@@ -21,7 +133,7 @@ por pantalla.
 
 ### Dónde se retoma exactamente
 
-**No queda código pendiente, y el hueco del despliegue del frontend está cerrado.** `apps/web` tiene
+**(Escrito al cerrar P14b; el 2026-09-09 el usuario abrió la Pasada P16, arriba: SÍ queda código.)** El hueco del despliegue del frontend está cerrado. `apps/web` tiene
 su `Dockerfile`, su servicio en `docker-compose.prod.yml` y su enrutado en Caddy, y la pila entera
 —base, pooler, API, interfaz y proxy— **se levantó y se recorrió de punta a punta en local**: login,
 catálogo importado, costeo mirado en pantalla, ventas cargadas y respaldo restaurado.
@@ -367,14 +479,14 @@ Lo implementado:
 |---|---|---|
 | `audit:types` | ✅ | Cuatro proyectos: API, interfaz del back office, tooling y `apps/web` |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | **36 reglas sobre 360 archivos.** En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie) y P14b añadió dos: `dockerfile-no-copia-lo-que-el-codigo-importa` (INC-018) y `no-comparar-decimales-con-localecompare` (INC-020) |
+| `audit:forbidden` | ✅ | **40 reglas sobre 361 archivos.** En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie); P14b añadió dos reglas (INC-018, INC-020); el commit 0 de P16 añadió las tres del frontend (`no-fecha-a-medianoche`, `no-number-en-frontend`, `no-tipti`) y `override-de-npm-reflejado-en-el-lock` (INC-021); el archivo 361 es `scripts/medir-bundle.mjs` |
 | `audit:arch` | ✅ | 291 módulos, 1284 dependencias |
 | `audit:deadcode` | ✅ | Sin lista blanca |
 | `audit:complexity` | ✅ | |
 | `audit:duplication` | ✅ | **0 clones** |
 | `audit:migrations` | ✅ | M1–M11 · **13 migraciones** |
 | `audit:secrets` | ✅ | Sobre `**/*`, incluidos los `.woff2` |
-| `audit:deps` | ✅ | 4 vulnerabilidades aceptadas y documentadas |
+| `audit:deps` | ✅ | 4 vulnerabilidades aceptadas y documentadas. **`multer` va forzado a 2.3.0 por `overrides`** (P16 commit 0, INC-021): se retira cuando `@nestjs/platform-express` fije `multer ≥ 2.3.0` |
 | `audit:sec-headers` | ✅ | 18 pruebas |
 | `audit:tests` | ✅ | **585 unitarias** (sin base) + **313 de integración**; 5 saltadas con motivo (INC-016) |
 

@@ -4,6 +4,37 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · commit 0 — Tooling de la pasada · 2026-09-09
+
+**Empieza la pasada P16 → P20: la aplicación completa.** El backend tenía 36 escrituras y la
+interfaz usaba 5 de 41 rutas, dos de ellas de escritura. Se construye todo, como Noctis Commerce y
+con la referencia visual de `docs/Sistema ejemplo/`, con parada de entrega al piloto tras las
+pantallas operativas. El plan aprobado (versión 6) vive en `docs/pasos/P16/PLAN.md`; las 47
+decisiones cerradas —U1–U8 y D-16.1…D-16.39— en `ESTADO.md`, **registradas antes del primer commit
+de código**, que es lo que la Fase 0 exigía.
+
+**Tres reglas de `audit:forbidden` para `apps/web`, antes de la primera pantalla nueva:**
+`no-fecha-a-medianoche` (INC-013: una fecha a `T00:00Z` del día 1 es del mes anterior en Ecuador),
+`no-number-en-frontend` (cierra `parseInt`, `Number(variable)` y `.toNumber()`, que
+`no-restricted-syntax` dejaba pasar) y `no-tipti` (D8). De 36 a 39 reglas —**40** con la de INC-021— sobre **361
+archivos** (el +1 es el script nuevo, y el contador lo delata como pide INC-007), con guardián: cinco
+líneas coladas, cinco infracciones, revertidas.
+
+**`npm run medir-bundle`.** Lee el último build y suma por ruta el JavaScript que el navegador baja
+para pintarla, en bruto y **en gzip, que es lo que viaja** (Next comprime por defecto; Caddy solo
+reenvía). Hoy: piso 126,9 KiB, pantalla más cara 138,6. Presupuesto 200 / 350. Con el umbral bajado
+a mano falla en cinco de siete rutas, y `AUDITORIA.md` I9 lo pide en todo commit que toque `apps/web`.
+
+`docs/Sistema ejemplo/` queda fuera de git: es una app ajena que ya ponía `audit:forbidden` en rojo.
+
+**Y `audit:deps` paró el commit, con razón:** cuatro CVE altos nuevos de `multer@2.2.0`, que
+`@nestjs/platform-express` fija exacto y **sí** viaja a la imagen de producción, así que no se acepta:
+ se fuerza `multer@2.3.0` con `overrides`. El arreglo costó 45 minutos porque npm ignora un override
+nuevo cuando ya existe lockfile —dice «up to date» y deja la versión vieja—; es **INC-021**, y deja
+una regla: todo `overrides` de la raíz tiene que verse reflejado en el lock, o el check falla.
+
+---
+
 ## P14b — La cadena de despliegue del frontend, y los tres fallos que destapó el ensayo · 2026-09-08
 
 **`apps/web` ya se despliega, y la pila entera se levantó y se recorrió en local antes de tocar

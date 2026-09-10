@@ -174,6 +174,38 @@ function archivoInvocado(comando) {
   return /\.(mjs|cjs|js|ts)$/u.test(objetivo) ? objetivo : null;
 }
 
+
+/**
+ * Aplana `overrides`: `{a: "1"}` y `{x: {a: "1"}}` dan los dos `[["a", "1"]]`.
+ * Solo se miran versiones exactas: un rango no dice que version tiene que
+ * estar en el lock, y este proyecto no usa rangos en `overrides`.
+ * @param {{overrides?: Record<string, unknown>}} manifiesto
+ * @returns {Array<[string, string]>}
+ */
+function paresDeOverrides(manifiesto) {
+  /** @type {Array<[string, string]>} */
+  const pares = [];
+  for (const [nombre, valor] of Object.entries(manifiesto.overrides ?? {})) {
+    if (typeof valor === 'string') pares.push([nombre, valor]);
+    else if (valor !== null && typeof valor === 'object') pares.push(...paresDeOverrides({ overrides: /** @type {Record<string, unknown>} */ (valor) }));
+  }
+  return pares.filter(([, version]) => /^\d+\.\d+\.\d+/.test(version));
+}
+
+/**
+ * Todas las copias de un paquete en el lock: la izada y las anidadas. Una
+ * anidada con otra version es la senal de que el override no se aplico.
+ * @param {Record<string, {version?: string}>} paquetes
+ * @param {string} nombre
+ * @returns {Array<{clave: string, version: string}>}
+ */
+function copiasEnElLock(paquetes, nombre) {
+  const sufijo = `node_modules/${nombre}`;
+  return Object.entries(paquetes)
+    .filter(([clave]) => clave === sufijo || clave.endsWith(`/${sufijo}`))
+    .map(([clave, entrada]) => ({ clave, version: entrada.version ?? '' }));
+}
+
 export const repoRules = [
   {
     id: 'script-de-package-json-apunta-a-nada',
@@ -507,6 +539,36 @@ export const repoRules = [
       }
 
       return hallazgos;
+    },
+  },
+  {
+    id: 'override-de-npm-reflejado-en-el-lock',
+    descripcion: 'Un `overrides` de la raiz cuya version no es la que `package-lock.json` instala',
+    porQue:
+      'npm IGNORA un override nuevo cuando ya existe lockfile: `npm install` dice "up to date" y deja la ' +
+      'version vieja, sin un solo aviso. Y si se borra la entrada del lock para forzarlo, descarta el ' +
+      'paquete entero. Un override que no se ve en el lock es una correccion de seguridad que uno cree ' +
+      'aplicada y no lo esta. Ver docs/incidencias/INC-021: la entrada se trasplanta de una resolucion ' +
+      'sin lock y se verifica con `npm ci`.',
+    referencia: 'docs/incidencias/INC-021 · AUDITORIA.md C26',
+    desde: 'P16',
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      if (!archivos.includes('package.json') || !archivos.includes('package-lock.json')) return [];
+      const lock = /** @type {{packages?: Record<string, {version?: string}>}} */ (JSON.parse(leer('package-lock.json')));
+      const paquetes = lock.packages ?? {};
+      return paresDeOverrides(JSON.parse(leer('package.json'))).flatMap(([nombre, version]) =>
+        copiasEnElLock(paquetes, nombre)
+          .filter((copia) => copia.version !== version)
+          .map((copia) => ({
+            ruta: 'package-lock.json',
+            linea: 0,
+            extracto: `overrides pide ${nombre}@${version}, el lock instala ${copia.clave} en ${copia.version}`,
+          })),
+      );
     },
   },
 ];
