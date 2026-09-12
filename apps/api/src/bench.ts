@@ -42,9 +42,9 @@ import {
   ValidarSesion,
   type SesionActiva,
 } from './modules/iam/application/casos-de-uso/validar-sesion';
-import { GuardarReceta } from './modules/recipes/application/casos-de-uso/recetas';
+import { GuardarReceta, LeerReceta } from './modules/recipes/application/casos-de-uso/recetas';
 import { loadConfiguration } from './shared/infrastructure/config/environment';
-import type { ItemId, LocationId, ProductId } from './shared/domain/identity/identificadores';
+import type { ItemId, LocationId, ProductId, RecipeId } from './shared/domain/identity/identificadores';
 
 const SALIDA_CON_ERROR = 1;
 
@@ -191,7 +191,6 @@ function presupuestosDeNegocio(app: INestApplicationContext): readonly Presupues
   const costear = app.get(CostearCarta);
   const inventario = app.get(VistasDelMes).inventario;
   const consolidado = app.get(VistasDeLaCadena).total;
-  const guardar = app.get(GuardarReceta);
 
   return [
     {
@@ -210,19 +209,42 @@ function presupuestosDeNegocio(app: INestApplicationContext): readonly Presupues
       limiteMs: 800,
       correr: async (sesion) => consolidado.ejecutar(sesion, { anio: ANIO, mes: MES }),
     },
-    {
-      nombre: 'guardar una receta (con validacion de ciclos)',
-      limiteMs: 150,
-      correr: async (sesion) =>
-        guardar.ejecutar(sesion, {
-          destino: { clase: 'producto', productId: PRODUCTO },
-          locationId: UBICACION,
-          lineas: lineasDePrueba(),
-          validFrom: FECHA,
-          nota: null,
-        }),
-    },
+    presupuestoDeGuardarReceta(app),
   ];
+}
+
+/**
+ * Guardar una receta, treinta y tres veces sobre el mismo producto.
+ *
+ * EN SU PROPIA FUNCIÓN porque desde P16-B lleva estado: cada guardado exige la
+ * última versión creada (D-16.101) y se encadena la que devuelve el anterior.
+ * La única lectura extra cae en el calentamiento, así que lo medido sigue
+ * siendo solo el guardado. `undefined` es «todavía no leída»; `null` es una
+ * respuesta válida (sin versiones).
+ */
+function presupuestoDeGuardarReceta(app: INestApplicationContext): Presupuesto {
+  const guardar = app.get(GuardarReceta);
+  const leerReceta = app.get(LeerReceta);
+  const destino = { clase: 'producto', productId: PRODUCTO } as const;
+  let basadaEn: RecipeId | null | undefined;
+
+  return {
+    nombre: 'guardar una receta (con validacion de ciclos)',
+    limiteMs: 150,
+    correr: async (sesion) => {
+      if (basadaEn === undefined) {
+        basadaEn = (await leerReceta.ejecutar(sesion, { destino, locationId: UBICACION, fecha: FECHA })).ultimaVersionId;
+      }
+      basadaEn = await guardar.ejecutar(sesion, {
+        destino,
+        locationId: UBICACION,
+        lineas: lineasDePrueba(),
+        validFrom: FECHA,
+        nota: null,
+        basadaEn,
+      });
+    },
+  };
 }
 
 function presupuestosDe(app: INestApplicationContext, token: string): readonly Presupuesto[] {

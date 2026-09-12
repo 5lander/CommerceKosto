@@ -55,10 +55,15 @@ La prueba **falla si no hay pooler**, no se salta: una prueba de seguridad que s
 | **Unidades vendidas** *(P8)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ lectura |
 | **Costos fijos (T6)** *(P8)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ lectura |
 | **Las seis vistas analíticas** *(P8)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
+| **Desglose por línea del costeo (`costos.lineas`)** *(P16-B)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
+| **Ficha, ubicaciones y carta de un producto (con PVP)** *(P16-B)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
+| **Escribir componentes de combo** *(P16-B)* | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Propagar recetas | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Suscripción y eliminar company | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 **El filtrado se implementa como proyecciones distintas por rol en la API**, no como filtro sobre una respuesta completa.
+
+**`costos.lineas` va atado a `recipe.read`, no a `costing.read`** *(P16-B, D-16.106)*: son las cantidades de la receta, así que manda la primera fila de la matriz aunque viajen por la ruta del costeo. Hoy los cuatro roles con `costing.read` también leen recetas y no cambia lo que nadie ve; lo que evita es que un rol futuro con costos y sin recetas reciba la receta entera por la puerta de al lado. Sin `recipe.read` el campo sale `null` —ausente, no vacío—, y lo prueba `costing/infrastructure/http/presentacion.spec.ts` sobre la serialización cruda.
 
 ### Por qué `BODEGA` registra compras y no puede ver el saldo *(P6)*
 

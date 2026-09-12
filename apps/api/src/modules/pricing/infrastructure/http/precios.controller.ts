@@ -22,18 +22,26 @@ import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
+import type { PaginaDePendientes } from '../../application/casos-de-uso/pendientes';
 import {
-  HistorialDePrecios,
   SugerirPrecio,
   type CostoVigente,
+  type PrecioDelHistorial,
 } from '../../application/casos-de-uso/precios';
-import type { PrecioLeido } from '../../application/ports/repositorio-de-precios.port';
 import {
+  CONSULTA_DE_FECHA,
+  CONSULTA_DE_HISTORIAL,
+  CONSULTA_DE_PENDIENTES,
   CUERPO_DE_DECISION,
   CUERPO_DE_SUGERENCIA,
+  type ConsultaDeFecha,
+  type ConsultaDeHistorial,
+  type ConsultaDePendientes,
   type CuerpoDeDecision,
   type CuerpoDeSugerencia,
 } from './precios.dto';
+import { LecturasDePrecios } from './lecturas-de-precios';
+import { comoCostosAUnaFecha, type CostosAUnaFechaDto } from './presentacion';
 import { ResolucionYCosto } from './resolucion-y-costo';
 
 export interface PrecioCreado {
@@ -44,17 +52,46 @@ export interface PrecioCreado {
 export class PreciosController {
   public constructor(
     private readonly sugerirPrecio: SugerirPrecio,
-    private readonly historial: HistorialDePrecios,
+    private readonly lecturas: LecturasDePrecios,
     private readonly resolucion: ResolucionYCosto,
   ) {}
 
+  /** El historial de un ítem, con la marca del que manda hoy. */
   @Get()
   @Requiere('pricing.read')
   public listar(
     @SesionActual() sesion: SesionActiva,
-    @Query('itemId') item: string,
-  ): Promise<readonly PrecioLeido[]> {
-    return this.historial.ejecutar(sesion, itemId(item));
+    @Query(new EsquemaPipe(CONSULTA_DE_HISTORIAL)) consulta: ConsultaDeHistorial,
+  ): Promise<readonly PrecioDelHistorial[]> {
+    return this.lecturas.historial.ejecutar(sesion, itemId(consulta.itemId));
+  }
+
+  /** La bandeja de R5: lo sugerido que alguien tiene que confirmar o rechazar. */
+  @Get('pendientes')
+  @Requiere('pricing.read')
+  public pendientes(
+    @SesionActual() sesion: SesionActiva,
+    @Query(new EsquemaPipe(CONSULTA_DE_PENDIENTES)) consulta: ConsultaDePendientes,
+  ): Promise<PaginaDePendientes> {
+    return this.lecturas.pendientes.ejecutar(sesion, {
+      despuesDe: consulta.despuesDe === undefined ? null : referencePriceId(consulta.despuesDe),
+      limite: consulta.limite,
+    });
+  }
+
+  /**
+   * El costo por unidad de uso de TODOS los ítems a una fecha, en cuatro
+   * consultas fijas: el listado de insumos. Los que no tienen precio confirmado
+   * van aparte, en `sinPrecio`, y no con un cero que parecería un costo.
+   */
+  @Get('costos')
+  @Requiere('pricing.read')
+  public async costos(
+    @SesionActual() sesion: SesionActiva,
+    @Query(new EsquemaPipe(CONSULTA_DE_FECHA)) consulta: ConsultaDeFecha,
+  ): Promise<CostosAUnaFechaDto> {
+    const fecha = consulta.fecha === undefined ? new Date() : new Date(consulta.fecha);
+    return comoCostosAUnaFecha(fecha, await this.lecturas.costos.ejecutar(sesion, fecha));
   }
 
   @Post()
@@ -106,12 +143,12 @@ export class PreciosController {
   public costo(
     @SesionActual() sesion: SesionActiva,
     @Param('itemId') item: string,
-    @Query('fecha') fecha?: string,
+    @Query(new EsquemaPipe(CONSULTA_DE_FECHA)) consulta: ConsultaDeFecha,
   ): Promise<CostoVigente> {
     return this.resolucion.costo.ejecutar(
       sesion,
       itemId(item),
-      fecha === undefined ? new Date() : new Date(fecha),
+      consulta.fecha === undefined ? new Date() : new Date(consulta.fecha),
     );
   }
 }

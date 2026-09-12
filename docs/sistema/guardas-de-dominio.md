@@ -63,7 +63,7 @@ El trigger `audit_log_no_se_edita` (`RAISE EXCEPTION`) es ⚪ por construcción:
 | `item_group_name_no_vacio`, `item_name_no_vacio`, `purchase_article_name_no_vacio` | 🟡 | `z.string().min(1)` en sus esquemas |
 | `item_yield_es_fraccion` | 🔴 | **`problemaDeItem`** en `catalog/domain/item.ts`: el rendimiento va entre 0 y 1, con el mensaje que explica que dividir por él **encarece** |
 | `item_keeps_stock_solo_en_producido` | 🔴 | **`problemaDeItem`**: `llevaStock` solo tiene sentido en un `PRODUCIDO` |
-| `purchase_article_presentacion_positiva` | 🟡 | Esquema |
+| `purchase_article_presentacion_positiva` | 🔴 | **Dos capas, y el guardián de P16-B lo enseñó:** `problemaDeConversion` → `presentacion_no_positiva` desde P2, y `decimalPositivo` en el esquema desde P16-B. Estaba marcada 🟡 «esquema» y el esquema aceptaba `"0"`; no llegó a dar 500 porque el dominio la paraba. Solo con las dos quitadas sale el `23514`. **Prueba:** `test/integracion/catalogo.spec.ts` («una presentación de cero») y `catalog/domain/conversion.spec.ts` («presentación cero») |
 | `purchase_article_factor_positivo` | 🔴 | **`problemaDeConversion`** en `catalog/domain/conversion.ts`, que además distingue los tres casos: derivable, exigido y sobrante |
 | **clave foránea** `item_unit_of_use_fkey` · `purchase_article_presentation_unit_fkey` | 🔴 | **`exigirUnidad`** en `catalog/domain/catalogo-de-unidades.ts`. No es un `CHECK`, pero falla igual de opaco: `"l"` está bien formado —la regex de `unidadDeUso` lo acepta— y no existe, así que llegaba al `INSERT` y salía como **500**. El mensaje enumera las diez válidas. El lote la tenía desde P14b; **el alta suelta de ítem, desde P16-A2**. `GET /catalogo/unidades` es la otra mitad: que el usuario no llegue a escribirla. **Prueba:** `test/integracion/catalogo.spec.ts` («la unidad tiene que EXISTIR») y `catalog/domain/catalogo-de-unidades.spec.ts` |
 | **índices únicos** `item_company_id_name_key` · `purchase_article_company_id_name_key` | 🔴 | El repositorio traduce el `P2002` a la unión del puerto (`nombre_en_uso`, `articulos_en_uso`) y el caso de uso lo convierte en **409** con el nombre dentro. Tres escrituras lo hacían salir como 500 hasta P16-A2: `actualizarItem`, el lote de artículos al reimportarse, y la carrera de los dos lotes. **El lote compara los nombres sin distinguir mayúsculas ni espacios de sobra** (`clavePorNombre`), que es más estricto que el índice —byte a byte—, y el mensaje del 409 lo dice para no afirmar algo falso. **Prueba:** `test/integracion/catalogo.spec.ts` (renombrar a un nombre ocupado, y que el de otra company no choca), `test/integracion/importacion.spec.ts` («reimportar ARTÍCULOS es 409, no 500») y `shared/infrastructure/persistence/rescate-de-choque.spec.ts` (las tres ramas de la carrera, con la base apagada) |
@@ -77,7 +77,7 @@ El trigger `audit_log_no_se_edita` (`RAISE EXCEPTION`) es ⚪ por construcción:
 | `company_settings_ratios_son_fracciones` | 🔴 | **`problemaDeAjustes`**: «un IVA se escribe 0.15, no 15» |
 | `company_settings_umbrales_ordenados` | 🔴 | **`problemaDeAjustes`**: objetivo ≤ verde ≤ máximo, o el semáforo no puede pintar los tres colores |
 | `company_settings_dias_positivos` | 🔴 | **`problemaDeAjustes`** |
-| `reference_price_positivo` | 🟡 | Esquema del cuerpo |
+| `reference_price_positivo` | 🔴 | **Cuarta recurrencia de INC-012 (P16-B).** Marcada 🟡 «esquema del cuerpo», y el esquema era un `decimal` con signo: `precio: "0"` y `"-1"` salían como **500**. Ahora `decimalPositivo` en el esquema y **`SugerirPrecio`** → `PrecioNoPositivoError` en la aplicación; el lote de precios lo explica por fila (`problemasDelLoteDePrecios`). **Prueba:** `test/integracion/precios.spec.ts` («un precio de cero o negativo es 400») y `pricing/domain/lote.spec.ts` («un precio de cero se rechaza con su fila») |
 | `reference_price_iva_es_fraccion` | 🟡 | Esquema |
 | `reference_price_confirmacion_coherente` | ⚪ | Autor y fecha los pone `resolver`, no el cliente |
 | `reference_price_nota_acotada` | 🟡 | `z.string().max(...)` |
@@ -93,11 +93,11 @@ El trigger `audit_log_no_se_edita` (`RAISE EXCEPTION`) es ⚪ por construcción:
 | Restricción | | Guarda |
 |---|---|---|
 | `product_name_no_vacio`, `product_category_acotada`, `recipe_note_acotada` | 🟡 | Esquemas |
-| `product_location_pvp_positivo` | 🟡 | Esquema |
-| `product_location_rendimiento_positivo` | 🟡 | Esquema |
+| `product_location_pvp_positivo` | 🔴 | **Cuarta recurrencia de INC-012 (P16-B).** `pvp: "0"` pasaba el esquema y salía como **500**. Ahora `decimalPositivo` y **`exigirPositivos`** en `ConfigurarProductoEnUbicacion`. **Prueba:** `test/integracion/productos.spec.ts` («PVP "0" es 400») |
+| `product_location_rendimiento_positivo` | 🔴 | Ídem con `rendimientoPorciones: "0"`. **Prueba:** `test/integracion/productos.spec.ts` («rendimiento por lote "0" es 400») |
 | `product_location_activo_tiene_pvp` | 🔴 | **`ConfigurarProductoEnUbicacion`** — **añadida en P5, tras INC-012**. Antes daba 500: «un producto activo necesita PVP; sin él se podría vender sin saber a cuánto» |
-| `combo_component_cantidad_positiva` | 🟡 | Esquema |
-| `combo_component_no_se_contiene` | ⚪ | No hay endpoint de componentes de combo todavía (deuda anotada en P4) |
+| `combo_component_cantidad_positiva` | 🔴 | Desde P16-B hay ruta interactiva (`PUT /productos/:id/componentes`): `decimalPositivo` en el esquema y **`problemaDeComponentes`** en `recipes/domain/componentes-de-combo.ts`. **Prueba:** `test/integracion/productos.spec.ts` («cantidad "0" es 400») y `componentes-de-combo.spec.ts` |
+| `combo_component_no_se_contiene` | 🔴 | Era ⚪ porque no había endpoint (deuda de P4); P16-B lo abre. **`problemaDeComponentes`**: «un combo no puede ser componente de sí mismo». **Prueba:** `test/integracion/productos.spec.ts` («el propio combo es 400») |
 | `recipe_un_solo_destino` | ⚪ | El destino es una **unión** en el tipo (`DestinoDeReceta`): «ninguno» y «los dos» no compilan |
 | `recipe_line_cantidad_no_negativa` | 🟡 | Esquema |
 | `recipe_line_orden_no_negativo` | ⚪ | El orden lo asigna el repositorio |
@@ -109,7 +109,7 @@ El trigger `audit_log_no_se_edita` (`RAISE EXCEPTION`) es ⚪ por construcción:
 
 **No añade ninguna restricción ni trigger**, y por eso M11 la exime. Añade una columna anulable con su clave foránea compuesta, un índice y una fila de permiso.
 
-La columna `product.packaging_item_id` no necesita guarda: `AsignarEmpaque` ya comprueba que el ítem exista en la company —lo que da un 404 con mensaje en vez de un `23503` del driver— y la clave foránea compuesta contra `item(id, company_id)` es la garantía de que no cruza tenants.
+La columna `product.packaging_item_id` no necesita guarda: `AsignarEmpaque` ya comprueba que el ítem exista en la company y la clave foránea compuesta contra `item(id, company_id)` es la garantía de que no cruza tenants. **Desde P16-B (D-16.112) ese rechazo es 400 `ENTRADA_INVALIDA`** —`EmpaqueNoEncontradoError`, «ese ítem de empaque no existe en tu company»— y no el 404 de producto que daba: la ruta existía, lo que fallaba era una referencia del cuerpo. **Prueba:** `test/integracion/productos.spec.ts` («un ítem de empaque que no existe es 400»).
 
 ---
 
@@ -122,7 +122,7 @@ Es la migración con más restricciones del proyecto hasta ahora, y no por gusto
 | `inventory_movement_type_direccion_valida` | ⚪ | El catálogo lo siembra esta migración; la aplicación no tiene `INSERT` sobre él |
 | `inventory_movement_cantidad_no_nula` | 🔴 | **`conSignoDelTipo`** → `CantidadNulaError`. «El libro registra hechos, y *no pasó nada* no es uno» |
 | `inventory_movement_signo_segun_direccion` | 🔴 | **`conSignoDelTipo`** → `SignoIncoherenteError`. Es la que más se va a tocar: quien registra una merma escribe «2,5 kg», no «−2,5 kg» |
-| `inventory_movement_importe_no_negativo` | 🟡 | Esquema: el importe entra como decimal no negativo |
+| `inventory_movement_importe_no_negativo` | 🔴 | **Cuarta recurrencia de INC-012 (P16-B).** La fila decía «el importe entra como decimal no negativo» y el DTO lo declaraba **con signo**: una `MERMA` con `costoTotal: "-5"` salía como **500** (la `COMPRA` no: desde P16-A1 `desglosarCompra` lanza `CompraConImporteInvalidoError` ante un bruto negativo). Ahora `decimalNoNegativo`. **Prueba:** `test/integracion/inventario.spec.ts` («un importe negativo es 400») |
 | `inventory_movement_importe_obligatorio` | 🟡 | Esquema en `COMPRA` (el DTO lo exige); calculado por el dominio en `PRODUCCION` |
 | `inventory_movement_transferencia_agrupada` | ⚪ | Solo `RegistrarTransferencia` emite esos dos tipos, y siempre con su cabecera |
 | `inventory_movement_produccion_agrupada` | ⚪ | Solo `RegistrarProduccion` emite `PRODUCCION`, y siempre con su lote |
@@ -313,6 +313,25 @@ El token anti-CSRF de la sesión (U4, ADR-021). La columna `csrf_token` la escri
 | `backoffice_session_csrf_acotado` | ⚪ | Lo mismo en el otro proceso: `IniciarSesionDeOperador` genera el token y `abrirSesion` (`backoffice/infrastructure/prisma-backoffice.repositorio.ts`) lo escribe |
 
 **Lo que la base NO comprueba aquí, y quién sí.** Que la sesión *tenga* token no es un `CHECK` —`NULL` es legítimo para las sesiones abiertas antes de esta migración—, y por eso la regla vive en el dominio: `ValidarSesion` trata una sesión sin `csrf_token` como inválida y lanza `SesionInvalidaError('sin_csrf')` → **401**, que manda al usuario a entrar de nuevo. Y que la cabecera coincida lo comprueba `CsrfGuard` → `CsrfInvalidoError` → **403 `CSRF_INVALIDO`**, nunca un 500: las dos son guardas de aplicación con prueba de integración, en `autenticacion-y-autorizacion.spec.ts`.
+
+---
+
+## `20260912191330_p16b_versiones_y_ajustes`
+
+La concurrencia optimista del producto y del ítem (D-16.100, ADR-023), y la retirada de
+`company_settings.iva_compra` (D-16.109).
+
+| Restricción | | Guarda |
+|---|---|---|
+| `product_version_positiva` | ⚪ | La columna solo la escribe el repositorio de `recipes`, y siempre como `version + 1` en la misma sentencia que comprueba la esperada. Ninguna ruta recibe un valor para guardarlo: la `version` del cuerpo se **compara**, no se escribe. Un cero solo lo pondría SQL a mano |
+| `item_version_positiva` | ⚪ | Igual, en el repositorio de `catalog` (`actualizarItem`) |
+| `company_settings_ratios_son_fracciones` (recreada sin `iva_compra`) | 🔴 | **`problemaDeAjustes`**, igual que antes: «un IVA se escribe 0.15, no 15». La recreación no cambia la guarda; cambia que ya no nombra la columna retirada. Prueba: `precios.spec.ts` |
+
+**Lo que la version NO es: una restricción.** Que la versión del cuerpo coincida con la de la fila
+no lo comprueba ningún `CHECK` —no puede: son dos momentos distintos—, sino el `WHERE version = …`
+de la escritura. Cero filas es la respuesta de la base, y la traduce el repositorio releyendo:
+si la fila no existe, **404**; si existe con otra versión, `ConflictoDeVersionError` → **409
+`CONFLICTO_DE_VERSION`**. Nunca sube un error de base sin traducir.
 
 ---
 

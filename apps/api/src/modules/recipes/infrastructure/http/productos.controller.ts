@@ -36,6 +36,11 @@ export interface ProductoCreado {
   readonly id: string;
 }
 
+/** Lo que responde toda escritura del agregado producto (D-16.100). */
+export interface VersionDeProducto {
+  readonly version: number;
+}
+
 @Controller('productos')
 export class ProductosController {
   public constructor(
@@ -66,21 +71,26 @@ export class ProductosController {
    * `PUT` y no `PATCH`: los tres valores se leen juntos y su coherencia se
    * comprueba junta —un producto activo sin PVP es uno que se puede vender sin
    * saber a cuanto, y el margen saldria indefinido—.
+   *
+   * 200 con la version nueva del producto, no 204: el formulario sigue abierto.
    */
   @Put(':id/ubicaciones')
   @Requiere('product.write')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   public async enUbicacion(
     @SesionActual() sesion: SesionActiva,
     @Param('id') id: string,
     @Body(new EsquemaPipe(CUERPO_DE_UBICACION)) cuerpo: CuerpoDeUbicacion,
-  ): Promise<void> {
-    await this.configurar.ejecutar(sesion, {
+  ): Promise<VersionDeProducto> {
+    const version = await this.configurar.ejecutar(sesion, {
       productId: productId(id),
       locationId: locationId(cuerpo.locationId),
       activo: cuerpo.activo,
       pvp: cuerpo.pvp,
       rendimientoPorciones: cuerpo.rendimientoPorciones,
+      version: cuerpo.version,
     });
+
+    return { version };
   }
 }

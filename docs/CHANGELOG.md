@@ -4,6 +4,78 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-B — Dos personas ya no se pisan, los ceros dejan de ser 500, y el bench mide lo que dice medir · 2026-09-12
+
+> Tercer paquete de código de la pasada P16 → P20. Un commit, **una migración reversible**
+> (`20260912191330_p16b_versiones_y_ajustes`), **un ADR (023)**, ninguna incidencia nueva —dos
+> recurrencias, INC-012 a 4 e INC-007 a 12, las dos con su prevención automatizada en el paquete— y
+> **doce guardianes**, dos de los cuales encontraron pruebas que no medían lo que decían.
+
+**Concurrencia optimista (D-16.11, ADR-023).** `product.version` e `item.version`, y las cuatro
+escrituras de reemplazo total —`PUT /catalogo/items/:id`, `PUT /productos/:id/ubicaciones`,
+`/empaque` y `/componentes`— exigen la versión leída y responden **200 `{ version }`**; si otro guardó
+entre medias, **409 `CONFLICTO_DE_VERSION`** con `{ code, message }` y **sin el número dentro**, para
+que reenviar no sea la salida fácil. La condición va **en el `WHERE` del `UPDATE`** y cero filas se
+relee para distinguir 404 de 409, en ese orden. La versión es **del agregado**: un cambio de empaque
+deja obsoleto el formulario de PVP abierto antes, y esa es también la deuda aceptada de D-16.20 entre
+sucursales. **La receta no la hereda**: como cada guardado inserta una fila nueva y `recipes` no puede
+escribir `item`, su testigo es `basadaEn` —el id de la **última versión creada** de ese destino en esa
+ubicación, que `GET /recetas` publica ahora como `ultimaVersionId`— comprobado bajo
+`pg_advisory_xact_lock`. Propagar, revertir y las cargas en lote sobrescriben sin testigo, pero pasan
+por el candado o suben la versión, así que un formulario abierto se entera con un 409 en vez de pisarlas.
+
+**Las lecturas que las pantallas 4 a 16 necesitaban.** `GET /precios/pendientes` —la bandeja de R5,
+por cursor, con los nombres del ítem y del artículo y el **precio vigente al lado**—, `vigente` en el
+historial de precios, `GET /precios/costos?fecha` con los ítems sin precio **aparte y no a cero**, la
+ficha del producto con su versión, sus ubicaciones filtradas por alcance, la carta de una ubicación con
+nombres, los componentes de un combo con lectura y **escritura** (`combo_component` tenía tabla desde P4
+y ninguna ruta interactiva), las versiones de una receta y el historial de propagaciones para revertir.
+En costeo: **`semaforoFoodCost` lo decide la API** con los umbrales de la company —el semáforo por
+bandas se muda a `shared/domain` y la pantalla deja de comparar decimales en el navegador, que es lo que
+fue INC-020—, `costos.lineas` trae el desglose de SPEC §13 **solo con `recipe.read`**, y
+`GET /costeo/:id?pvp=` simula un precio con la misma `ladoDeVenta` del costeo real sin escribir nada.
+
+**La cuarta recurrencia de INC-012, confirmada antes de arreglarla.** Cuatro `CHECK` estaban marcados
+«lo filtra el esquema» y el esquema no los filtraba: `precio: "0"`, `pvp: "0"`,
+`rendimientoPorciones: "0"` y una merma con `costoTotal: "-5"` salían como **500**. Diez expresiones
+regulares repartidas en seis DTO, casi todas llamadas `decimal`, con signo en un archivo y sin él en
+otro. La prevención es de construcción: **un vocabulario único** (`decimalConSigno`,
+`decimalNoNegativo`, `decimalPositivo`, `fraccion`, `enteroNoNegativo`) donde cada esquema se llama
+como lo que acepta, las guardas de dominio que faltaban, y la regla
+**`regex-de-numero-solo-en-el-vocabulario`** de `audit:forbidden`, con su guardián. Siete filas de
+`guardas-de-dominio.md` pasan a 🔴 **con su prueba citada**. Y las cinco consultas que P16-A2 dejó sin
+esquema pasan a `.strict()`: `fecha=basura` deja de ser un 404 «sin precio» que mentía.
+
+**Lo que destaparon los guardianes, y lo que destapó el bench.** Cada 🔴 se vio fallar rompiendo su
+mecanismo con un script que muta, corre y restaura. **Dos siguieron en verde**: la presentación `"0"`
+de un artículo, titulada «cuarta recurrencia», la paraba el dominio desde P2 (se retituló); y «diez
+escrituras a la vez» con `Promise.all` pasaba igual con un leer-comparar-escribir, porque en local la
+transacción no se solapa. Las carreras se rehicieron **deterministas** —otra conexión bloquea la fila,
+se espera en `pg_locks` a que las N escrituras estén paradas y se suelta— y ahora el mismo sabotaje da
+cinco 200 en vez de uno, y cinco 201 sin el candado. **El bench reventó** con un `toFixed` de
+`undefined`, y la causa no estaba en el código medido: `bench.mjs` lanzaba `dist/bench.js` **sin
+compilarlo**, y el archivo era de dos días antes. Desde este paquete compila siempre; los números de
+P16-A1 y P16-A2 quedan dichos como no atribuibles con certeza a su commit (INC-007, caso 12). El
+`EXPLAIN` de la bandeja pidió un índice: `reference_price(company_id, status)` pasa a
+`(company_id, status, id)`, que convierte el recorrido de la clave primaria en un rango. Y se retira
+`company_settings.iva_compra` (D-16.109), con un `down` que tuvo que escribirse a mano porque el
+generado no se podía aplicar sobre una tabla con filas y el `up` habría soltado en silencio el `CHECK`
+de los otros seis ratios.
+
+**Números.** Unitarias: **889** (eran 870; +19, 65 archivos). Integración: **520 casos, 515 en verde y
+5 saltadas con motivo** (INC-016) en **33** archivos (eran 460 + 5 en 32; +1 suite: `productos`).
+`audit:forbidden` **46 reglas sobre 477 archivos** (eran 45 / 455); `audit:arch` **386 módulos, 1712
+dependencias**, 0 violaciones; **17** migraciones reversibles; **0 clones**. `migrate:verify` 4/4.
+Bundle de `apps/web`: **126,9 KiB gzip de piso** y 138,7 KiB la pantalla mayor. `npm run bench` sobre
+el código del paquete: costeo de la carta **87,2 ms** / 400, inventario **161,0** / 300, guardar una
+receta **83,7** / 150 con el candado dentro, y **el consolidado en 919,4 ms contra 800** — la misma deuda
+abierta, sin regresión, y el umbral no se sube. **Lo que queda dicho:** la deuda de D-16.20 en
+`product_location`; artículos y grupos sin versión; los **22 `@Param` sin `ParseUUIDPipe`**, que P16-A2
+mandó a «P16-B/C» y este paquete no pagó; `GET /recetas` cambió de forma sin versión de API; y el bench
+sigue fuera de CI.
+
+---
+
 ## P16-A2 — El token que el servidor comprueba, la frontera que dejó de mentir, y las fichas que faltaban · 2026-09-10
 
 > Segundo paquete de código de la pasada P16 → P20. Un commit, **una migración reversible**

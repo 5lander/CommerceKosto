@@ -8,8 +8,8 @@
 
 ## Estado actual
 
-**Fase en curso:** **Pasada P16 → P20**. Commit 0 (Tooling) cerrado; **P16-A1 cerrado** (IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy; `docs/pasos/P16-A1/`), con `npm run audit` en verde y `npm run bench` ejecutado. **P16-A2 cerrado** (sesión + token CSRF + frontera HTTP + lecturas de catálogo; `docs/pasos/P16-A2/`), con `npm run audit` en verde. **Siguiente: P16-B** (pricing + recipes/products + costing + concurrencia). Dos cosas esperan al usuario y no bloquean el código: ratificar **D-16.51** y decidir sobre el **presupuesto del consolidado** (abajo, en dudas abiertas). El plan P0–P15 está completo y el sistema se ha desplegado entero en local.
-**Último commit:** `P16-A2: el token que el servidor comprueba, la frontera que dejó de mentir, y las fichas que faltaban`
+**Fase en curso:** **Pasada P16 → P20**. Commit 0 (Tooling) cerrado; **P16-A1 cerrado** (IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy; `docs/pasos/P16-A1/`), con `npm run audit` en verde y `npm run bench` ejecutado. **P16-A2 cerrado** (sesión + token CSRF + frontera HTTP + lecturas de catálogo; `docs/pasos/P16-A2/`), con `npm run audit` en verde. **P16-B cerrado** (pricing + recipes/products + costing + concurrencia optimista; `docs/pasos/P16-B/`), con `npm run audit` en verde, `migrate:verify` 4/4 y `npm run bench` ejecutado **sobre su propio código** (hasta P16-B el bench medía el `dist` que hubiera en disco: INC-007, caso 12). **Siguiente: P16-C** (inventory + usuarios/roles/sucursales + `period.version`). Dos cosas esperan al usuario y no bloquean el código: ratificar **D-16.51** y decidir sobre el **presupuesto del consolidado** (abajo, en dudas abiertas). El plan P0–P15 está completo y el sistema se ha desplegado entero en local.
+**Último commit:** `P16-B: dos personas ya no se pisan, los ceros dejan de ser 500, y el bench mide lo que dice medir`
 **Fecha de última actualización:** 2026-09-12
 
 ## Pasada P16 → P20 — la aplicación completa · EN CURSO desde 2026-09-09
@@ -39,7 +39,7 @@ armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: p
 | 0 · Tooling | Fase 0 + tres reglas de `apps/web` + `medir-bundle` + `multer` forzado a 2.3.0 (INC-021) | ✅ 2026-09-09 | *(el de este commit)* | — | 127 KiB / 139 KiB | D-16.39 |
 | P16-A1 | IVA en dos niveles + correo transaccional + límite de tasa + IP tras el proxy · 2 migraciones · ADR-024/025/026 · INC-022 + recurrencia de INC-017 · 823 unitarias, 395 + 5 de integración | ✅ 2026-09-10 · `npm run audit` **exit 0** · bench ejecutado (3 de 4 presupuestos en verde) | *(el de este commit)* | — | | D-16.40…D-16.64 |
 | P16-A2 | `shared` + sesión + CSRF + lecturas de catálogo + arreglos · 1 migración · **ADR-021** (supersede en parte a ADR-006) · recurrencias de INC-007 (→11) e INC-012 (→3) · 1 regla nueva de `audit:forbidden` · 870 unitarias, 460 + 5 de integración | ✅ 2026-09-12 · `npm run audit` **exit 0** · `migrate:verify` 4/4 · bench ejecutado (3 de 4, el consolidado sigue fuera) | *(el de este commit)* | — | 126,9 / 138,7 KiB | D-16.65…D-16.99 |
-| P16-B | pricing + recipes/products + costing + `version` de product/item · `npm run bench` | ⬜ | | — | | |
+| P16-B | pricing + recipes/products + costing + concurrencia optimista · 1 migración · **ADR-023** · recurrencias de INC-012 (→4) e INC-007 (→12) · 1 regla nueva de `audit:forbidden` · 12 guardianes · 889 unitarias, 515 + 5 de integración | ✅ 2026-09-12 · `npm run audit` **exit 0** · `migrate:verify` 4/4 · bench ejecutado sobre su código (3 de 4, el consolidado sigue fuera: 919,4 ms) | *(el de este commit)* | — | 126,9 / 138,7 KiB | D-16.100…D-16.120 |
 | P16-C | inventory + usuarios/roles/sucursales + `version` de period | ⬜ | | — | | |
 | Armazón (pantalla 1) | route group `(app)`, navegación, kit, migración de las 4 pantallas | ⬜ | | | | |
 | Pantallas 1b–27 | una fila por pantalla al commitear | ⬜ | | | | |
@@ -163,6 +163,27 @@ armazón y las 33 pantallas; no se importa nada de ella. Si no está en disco: p
 | D-16.97 | (P16-A2) (revisión) **El choque de nombres de los lotes sigue ignorando mayúsculas y espacios de sobra, y el mensaje lo dice.** Comparar byte a byte como el índice rompería la coherencia con la deduplicación dentro del archivo; un índice único sobre `lower(btrim(name))` es una migración que puede chocar con datos ya escritos en los tenants existentes, y eso no cabe en la corrección de una revisión |
 | D-16.98 | (P16-A2) (revisión) **Una prueba de §4.3 fija las claves exactas y compara con el rol que lo ve todo.** Una lista de nombres prohibidos solo puede crecer por detrás de los campos; un `toEqual` de claves obliga a decidir sobre cualquier campo nuevo el día que aparece, y comparar con `ADMIN` cubre el fallo contrario: la proyección mutilada |
 | D-16.99 | (P16-A2) (revisión) **Cada fila 🔴 de `guardas-de-dominio.md` cita, desde ahora, el archivo de prueba de su 4xx.** M11 solo alcanza a los `CHECK` y a los `RAISE`; las claves foráneas y los índices únicos no tienen dónde llevar el `-- GUARDA:`, y por esa grieta entró la tercera recurrencia de INC-012. Las filas anteriores a P16-A2 se completan a medida que se tocan |
+| D-16.100 | (P16-B) `product.version` e `item.version` (entero ≥ 1). Toda escritura del agregado exige `version` en el cuerpo y la sube en la misma sentencia condicionada; cero filas → se relee para distinguir 404 de 409. Agregado producto = maestro + `product_location` + `combo_component`. Las escrituras protegidas responden 200 `{ version }`. ADR-023 |
+| D-16.101 | (P16-B) La receta se protege con `basadaEn` = id de la última versión creada de ese destino en esa ubicación (o `null`), bajo `pg_advisory_xact_lock`; `GET /recetas` y `/recetas/versiones` publican `ultimaVersionId`. `recipes` no puede escribir `item`, y así la receta no hereda la deuda de D-16.20 |
+| D-16.102 | (P16-B) Las cargas en lote no exigen versión pero la suben (combos del lote de recetas) |
+| D-16.103 | (P16-B) Artículos y grupos no llevan versión (D-16.13). Señal: el primer cambio perdido en uno de los dos |
+| D-16.104 | (P16-B) `CONFLICTO_DE_VERSION` (409) no trae la versión actual en el cuerpo: pide recargar |
+| D-16.105 | (P16-B) El semáforo por bandas se muda a `shared/domain/indicadores/semaforo.ts`; `GET /costeo` publica `semaforoFoodCost` con los umbrales de la company y la pantalla deja de decidir el color (D-16.3) |
+| D-16.106 | (P16-B) `costos.lineas` solo con `recipe.read` en la sesión; si no, `null` (defensa en profundidad) |
+| D-16.107 | (P16-B) `GET /costeo/:productId?pvp=` recalcula solo el lado de venta con `ladoDeVenta`, sin escribir; la respuesta lleva `pvpSimulado` |
+| D-16.108 | (P16-B) `GET /precios/pendientes`: nombres unidos en aplicación, `precioVigente` al lado, cursor por `id` (1..200, 50) |
+| D-16.109 | (P16-B) Se retira `company_settings.iva_compra` (D-16.43): columna, `CHECK` y semilla; `PUT /ajustes` deja de aceptarla. El `down` la devuelve con 0.15 |
+| D-16.110 | (P16-B) Precio, PVP y rendimiento por lote cero o negativos → 400 en esquema y dominio (posible cuarta recurrencia de INC-012; se confirma con prueba antes de arreglar) |
+| D-16.111 | (P16-B) Las cinco consultas con `@Query` crudo pasan a `EsquemaPipe` `.strict()` (deuda de P16-A2) |
+| D-16.112 | (P16-B) Ítem de empaque inexistente → 400 `ENTRADA_INVALIDA`, no 404 de producto |
+| D-16.113 | (P16-B) `GET /productos/:id/ubicaciones` filtra por alcance; `GET /productos/ubicaciones?locationId` exige la ubicación en alcance |
+| D-16.114 | (P16-B) `PUT /productos/:id/componentes` reemplaza la lista entera con la versión del combo: destino `COMBO`, componentes `SIMPLE`, sin repetir, sin sí mismo, cantidad > 0, máximo 50 |
+| D-16.115 | (P16-B) **`reference_price(company_id, status)` pasa a `(company_id, status, id)`**, dentro de la migración del paquete. La bandeja pagina por `id` y con el índice de P3 el planificador recorría la clave primaria filtrando: su coste dependía de dónde cayeran los sugeridos. Sustituye y no se suma: el prefijo sirve a las lecturas por estado de antes. Dos planes en `docs/pasos/P16-B/AUDITORIA-RESULTADO.md` |
+| D-16.116 | (P16-B) **Las 🔴 de carrera no usan `Promise.all`**: bloquean la fila desde otra conexión (`FOR UPDATE`), esperan en `pg_locks` a que las N escrituras estén paradas (`test/soporte/bloqueos.ts`) y sueltan. Con `Promise.all` un leer-comparar-escribir pasaba igual (guardián G10). P16-C lo usa para `period.version` |
+| D-16.117 | (P16-B) **`npm run bench` compila la API antes de medir** (`tsc --build`, antes de crear la base). Medía `dist/bench.js` tal como estuviera: INC-007, caso 12 |
+| D-16.118 | (P16-B) **`GET /recetas` cambia de forma** a `{ vigente, ultimaVersionId }` sin versión de API: ningún cliente la consumía. `ultimaVersionId` es la última CREADA, no la vigente |
+| D-16.119 | (P16-B) **La presentación `"0"` de un artículo no fue recurrencia de INC-012**: `problemaDeConversion` la paraba desde P2 (guardián G7). La fila de `guardas-de-dominio.md` pasa a 🔴 con las dos capas y la prueba se retituló |
+| D-16.120 | (P16-B) **`costos.lineas: null` sin `recipe.read` se prueba con una unitaria de la presentación**, no de integración: hoy ningún rol tiene `costing.read` sin `recipe.read`, así que ninguna petición llega a esa rama |
 
 ### P17 · P18 · P19 — diferidos por decisión de producto, no por bloqueo técnico
 
@@ -539,20 +560,20 @@ Lo implementado:
 |---|---|---|
 | `audit:types` | ✅ | Cuatro proyectos: API, interfaz del back office, tooling y `apps/web` |
 | `audit:lint` | ✅ | Con `--no-inline-config` |
-| `audit:forbidden` | ✅ | **44 reglas sobre 433 archivos** (P16-A1, sin commit aún). En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie); P14b añadió dos reglas (INC-018, INC-020); el commit 0 de P16 añadió las tres del frontend (`no-fecha-a-medianoche`, `no-number-en-frontend`, `no-tipti`) y `override-de-npm-reflejado-en-el-lock` (INC-021): 40 sobre 361; P16-A1 añade las cuatro de `correo.rules.mjs` (`conexion-del-despachador-solo-en-correo`, `cadena-del-despachador-solo-en-correo`, `correo-no-lo-monta-la-app`, `despachador-sin-ganchos-de-nest`) y 72 archivos |
-| `audit:arch` | ✅ | 351 módulos, 1529 dependencias (P16-A1; eran 291 / 1284). Dos reglas nuevas aíslan `modules/correo` en los dos sentidos |
+| `audit:forbidden` | ✅ | **46 reglas sobre 477 archivos** (P16-B: `regex-de-numero-solo-en-el-vocabulario`; P16-A2 añadió `403-de-integracion-sin-su-code`). Antes: **44 reglas sobre 433 archivos** (P16-A1). En P14 pasó de 346 a 359 (los `.tsx` no los miraba nadie); P14b añadió dos reglas (INC-018, INC-020); el commit 0 de P16 añadió las tres del frontend (`no-fecha-a-medianoche`, `no-number-en-frontend`, `no-tipti`) y `override-de-npm-reflejado-en-el-lock` (INC-021): 40 sobre 361; P16-A1 añade las cuatro de `correo.rules.mjs` (`conexion-del-despachador-solo-en-correo`, `cadena-del-despachador-solo-en-correo`, `correo-no-lo-monta-la-app`, `despachador-sin-ganchos-de-nest`) y 72 archivos |
+| `audit:arch` | ✅ | **386 módulos, 1712 dependencias** (P16-B; 368 / 1608 en P16-A2, 351 / 1529 en P16-A1, 291 / 1284 antes). Dos reglas nuevas aíslan `modules/correo` en los dos sentidos |
 | `audit:deadcode` | ✅ | Sin lista blanca |
 | `audit:complexity` | ✅ | |
 | `audit:duplication` | ✅ | **0 clones** |
-| `audit:migrations` | ✅ | M1–M11 · **15 migraciones** (P16-A1: `p16a1_iva_de_compra`, `p16a1_correo_y_limite_de_tasa`; eran 13) |
+| `audit:migrations` | ✅ | M1–M11 · **17 migraciones** (P16-B: `p16b_versiones_y_ajustes`; P16-A2: `p16a2_csrf`; P16-A1: dos) |
 | `audit:secrets` | ✅ | Sobre `**/*`, incluidos los `.woff2` |
 | `audit:deps` | ✅ | 4 vulnerabilidades aceptadas y documentadas. **`multer` va forzado a 2.3.0 por `overrides`** (P16 commit 0, INC-021): se retira cuando `@nestjs/platform-express` fije `multer ≥ 2.3.0` |
-| `audit:sec-headers` | ✅ | 18 pruebas |
-| `audit:tests` | ✅ | **823 unitarias** (sin base) + **400 de integración: 395 en verde y 5 saltadas con motivo** (INC-016). P16-A1, sin commit aún; eran 585 + 313 |
+| `audit:sec-headers` | ✅ | 19 pruebas |
+| `audit:tests` | ✅ | **889 unitarias** (sin base) + **520 de integración: 515 en verde y 5 saltadas con motivo** (INC-016), 33 archivos. P16-B; eran 870 + 460 en P16-A2 y 823 + 395 en P16-A1 |
 
 > **`npm run bench` sigue fuera de `npm run audit`, a propósito** (documentado en `docs/AUDITORIA.md`
-> I8): levanta la API en la red de compose y tarda minutos. Se corre a mano y el consolidado marcaba
-> 480,2 ms de 800 en la última medición.
+> I8): siembra una base de 220.000 movimientos y tarda minutos. Se corre a mano. **Desde P16-B compila
+> la API antes de medir** (INC-007, caso 12); en P16-B el consolidado marcó **919,4 ms de 800**.
 
 ## Progreso
 
@@ -654,7 +675,7 @@ Estados: ⬜ Pendiente · 🟡 En curso · ✅ Completado · ⏸️ Pospuesto co
 
 ---
 
-| 9 | **El consolidado de diez ubicaciones ya no cabe en su presupuesto de §5: 940,9 ms contra 800.** Medido con `npm run bench` al cerrar P16-A1, dos corridas con la máquina en reposo (940,9 y 962,6 ms). **No es regresión del paquete**: las consultas y sus recuentos de llamada son los mismos que en P15, y normalizado al «suelo del entorno» que el propio bench mide (validar sesión: 4,5 ms en P15, 6,5 ms hoy) el consolidado cuesta 143,7 suelos frente a los 149,6 de entonces — relativamente, igual. Lo que cambió es la máquina. **Pero el número absoluto es rojo y el umbral no se sube** (AUDITORIA.md I8) | P16-A1 | **Decisión tuya.** El arreglo está diseñado desde P9: vistas materializadas para períodos cerrados (ADR-012 §7), que es la deuda #2 de abajo y cuya condición de pago era exactamente esta. Las opciones: (a) pagarla ahora, en un paquete propio; (b) medirla primero en CI o en el VPS —donde no hay 5,7 GB de base de desarrollo compitiendo— y decidir con ese número; (c) aceptarla hasta el piloto, que tiene **dos** ubicaciones y no la toca. **Mi recomendación: (c) ahora y (b) en el ensayo de despliegue**, porque el piloto no lo necesita y medirlo en la máquina donde va a correr es más barato que optimizar a ciegas |
+| 9 | **El consolidado de diez ubicaciones ya no cabe en su presupuesto de §5: 940,9 ms contra 800.** Medido con `npm run bench` al cerrar P16-A1, dos corridas con la máquina en reposo (940,9 y 962,6 ms). **No es regresión del paquete**: las consultas y sus recuentos de llamada son los mismos que en P15, y normalizado al «suelo del entorno» que el propio bench mide (validar sesión: 4,5 ms en P15, 6,5 ms hoy) el consolidado cuesta 143,7 suelos frente a los 149,6 de entonces — relativamente, igual. Lo que cambió es la máquina. **Pero el número absoluto es rojo y el umbral no se sube** (AUDITORIA.md I8). **P16-B: 919,4 ms** (suelo 10,0 ms), la primera medición que se sabe hecha sobre el código de su commit —hasta entonces el bench no compilaba el `dist` que medía (INC-007, caso 12)— | P16-A1 | **Decisión tuya.** El arreglo está diseñado desde P9: vistas materializadas para períodos cerrados (ADR-012 §7), que es la deuda #2 de abajo y cuya condición de pago era exactamente esta. Las opciones: (a) pagarla ahora, en un paquete propio; (b) medirla primero en CI o en el VPS —donde no hay 5,7 GB de base de desarrollo compitiendo— y decidir con ese número; (c) aceptarla hasta el piloto, que tiene **dos** ubicaciones y no la toca. **Mi recomendación: (c) ahora y (b) en el ensayo de despliegue**, porque el piloto no lo necesita y medirlo en la máquina donde va a correr es más barato que optimizar a ciegas |
 | 10 | **`npm run bench` no lo ejecuta CI.** Corre `npm run audit` y `migrate:verify`, no el bench. El presupuesto del consolidado no lo vigila nada automático — es el riesgo que la propia fila I8 de `AUDITORIA.md` declaraba en voz alta, y que se cumplió: el bench llevaba **dos paquetes sin poder arrancar** (INC-017, recurrencia 1) | P16-A1 | Añadirlo a CI cuesta ~3 minutos por corrida (crea y destruye una base con 220.000 movimientos). ¿Se añade, o se queda como paso manual obligatorio de los paquetes que tocan lectura? |
 
 ---

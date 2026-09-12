@@ -23,14 +23,21 @@ import { LeerFichaDeItem, type FichaDeItem } from '../../application/casos-de-us
 import type { ItemLeido } from '../../application/ports/repositorio-de-catalogo.port';
 import { GestionDeItems } from './gestion-de-items';
 import {
+  CONSULTA_DE_ITEMS,
   CUERPO_DE_CAMBIO_DE_ITEM,
   CUERPO_DE_ITEM,
+  type ConsultaDeItems,
   type CuerpoDeCambioDeItem,
   type CuerpoDeItem,
 } from './catalogo.dto';
 
 export interface ItemCreado {
   readonly id: ItemId;
+}
+
+/** Lo que responde toda escritura protegida por versión (D-16.100). */
+export interface VersionNueva {
+  readonly version: number;
 }
 
 @Controller('catalogo/items')
@@ -44,9 +51,9 @@ export class ItemsController {
   @Requiere('catalog.read')
   public listar(
     @SesionActual() sesion: SesionActiva,
-    @Query('incluirInactivos') incluirInactivos?: string,
+    @Query(new EsquemaPipe(CONSULTA_DE_ITEMS)) consulta: ConsultaDeItems,
   ): Promise<readonly ItemLeido[]> {
-    return this.items.listar.ejecutar(sesion, incluirInactivos !== 'true');
+    return this.items.listar.ejecutar(sesion, consulta.incluirInactivos === 'false');
   }
 
   /**
@@ -86,16 +93,19 @@ export class ItemsController {
    * `PUT` y no `PATCH`: el cuerpo trae el estado completo del ítem editable.
    * Un `PATCH` con campos opcionales haría que «no mandé el grupo» y «quiero
    * quitarle el grupo» fueran la misma petición.
+   *
+   * **200 CON LA VERSIÓN NUEVA, NO 204** (D-16.100): el formulario sigue abierto
+   * y la próxima escritura necesita el número; sin él tendría que releer.
    */
   @Put(':id')
   @Requiere('catalog.update')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   public async actualizar(
     @SesionActual() sesion: SesionActiva,
     @Param('id') id: string,
     @Body(new EsquemaPipe(CUERPO_DE_CAMBIO_DE_ITEM)) cuerpo: CuerpoDeCambioDeItem,
-  ): Promise<void> {
-    await this.items.actualizar.ejecutar(sesion, {
+  ): Promise<VersionNueva> {
+    const version = await this.items.actualizar.ejecutar(sesion, {
       itemId: itemId(id),
       nombre: cuerpo.nombre,
       rendimiento: cuerpo.rendimiento,
@@ -103,6 +113,9 @@ export class ItemsController {
       confianzaDePrecio: cuerpo.confianzaDePrecio,
       estado: cuerpo.estado,
       llevaStock: cuerpo.llevaStock,
+      version: cuerpo.version,
     });
+
+    return { version };
   }
 }

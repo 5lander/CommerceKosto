@@ -15,27 +15,17 @@
 
 import { z } from 'zod';
 
+import { decimalNoNegativo, enteroNoNegativo } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 const PRIMER_MES = 1;
 const ULTIMO_MES = 12;
 const PRIMER_ANIO = 2000;
 const ULTIMO_ANIO = 2100;
-const LARGO_MAXIMO_DE_DECIMAL = 40;
 const LARGO_MAXIMO_DE_CONCEPTO = 200;
 /** Una carta grande, con margen (SPEC §10 habla de 48 productos por local). */
 const MAXIMO_DE_VENTAS = 1000;
 const MAXIMO_DE_COSTOS = 200;
 
-/** Magnitud: sin signo. Ni las ventas ni los costos fijos admiten negativos. */
-const magnitud = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^\d+(\.\d+)?$/u, 'debe ser una cantidad positiva, por ejemplo "12.50"');
-
-/** Entero sin signo: las unidades vendidas se cuentan (`Count`). */
-const entero = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^\d+$/u, 'las unidades vendidas son un número entero');
 
 /** El mes de una ubicacion: lo que TODO endpoint de analitica pide. */
 const MES_DE_UBICACION = {
@@ -76,7 +66,7 @@ export const CUERPO_DE_VENTAS = z
   .object({
     ...MES_DE_UBICACION,
     ventas: z
-      .array(z.object({ productId: z.uuid(), unidades: entero }).strict())
+      .array(z.object({ productId: z.uuid(), unidades: enteroNoNegativo }).strict())
       .max(MAXIMO_DE_VENTAS),
   })
   .strict();
@@ -92,7 +82,7 @@ export const CUERPO_DE_COSTOS = z
             // La clasificación es un enum y no texto libre: es exactamente lo
             // que SPEC §17 pide en lugar del frágil prefijo «Sueldos*».
             clasificacion: z.enum(['MANO_DE_OBRA', 'OTRO_FIJO', 'VARIABLE']),
-            importe: magnitud,
+            importe: decimalNoNegativo,
           })
           .strict(),
       )

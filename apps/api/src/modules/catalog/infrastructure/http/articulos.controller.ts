@@ -35,10 +35,12 @@ import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { LeerFichaDeArticulo, type FichaDeArticulo } from '../../application/casos-de-uso/fichas';
 import type { ArticuloLeido, GrupoLeido } from '../../application/ports/repositorio-de-catalogo.port';
 import {
+  CONSULTA_DE_ARTICULOS,
   CUERPO_DE_ARTICULO,
   CUERPO_DE_CAMBIO_DE_ARTICULO,
   CUERPO_DE_CAMBIO_DE_GRUPO,
   CUERPO_DE_GRUPO,
+  type ConsultaDeArticulos,
   type CuerpoDeArticulo,
   type CuerpoDeCambioDeArticulo,
   type CuerpoDeCambioDeGrupo,
@@ -67,9 +69,9 @@ export class ArticulosController {
   @Requiere('catalog.read')
   public listar(
     @SesionActual() sesion: SesionActiva,
-    @Query('itemId') item?: string,
+    @Query(new EsquemaPipe(CONSULTA_DE_ARTICULOS)) consulta: ConsultaDeArticulos,
   ): Promise<readonly ArticuloLeido[]> {
-    return this.articulos.listar.ejecutar(sesion, item === undefined ? null : itemId(item));
+    return this.articulos.listar.ejecutar(sesion, consulta.itemId === undefined ? null : itemId(consulta.itemId));
   }
 
   /**

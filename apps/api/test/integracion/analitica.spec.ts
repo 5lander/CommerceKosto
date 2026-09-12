@@ -183,8 +183,10 @@ describe('vistas analiticas', () => {
         activo: true,
         pvp: datos.pvp,
         rendimientoPorciones: datos.rendimiento,
+        // Recién creado: versión 1 (D-16.100).
+        version: 1,
       });
-    expect(ubicacion.status).toBe(SIN_CONTENIDO);
+    expect(ubicacion.status).toBe(OK);
 
     // `PUT` y no `POST`: guardar una receta CREA UNA VERSION nueva con su
     // vigencia, no edita la anterior (P4). El verbo lo dice.
@@ -192,6 +194,8 @@ describe('vistas analiticas', () => {
       .put('/recetas')
       .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
+        // Sin receta previa (D-16.101).
+        basadaEn: null,
         destino: { clase: 'producto', productId },
         locationId: ubicacionId,
         validFrom: VIGENCIA,

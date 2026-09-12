@@ -381,6 +381,28 @@ describe('inventario', () => {
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
     });
 
+    it('🔴 un importe negativo es 400, no el 500 de inventory_movement_importe_no_negativo (INC-012, D-16.110)', async () => {
+      const item = await itemConPrecio('2.00');
+      const compra = await registrar({
+        locationId: bodegaCentral,
+        itemId: item,
+        tipo: 'COMPRA',
+        cantidad: '5',
+        costoTotal: '-5',
+      });
+      const merma = await registrar({
+        locationId: bodegaCentral,
+        itemId: item,
+        tipo: 'MERMA',
+        cantidad: '1',
+        costoTotal: '-5',
+      });
+
+      expect([compra.status, merma.status]).toEqual([ENTRADA_INVALIDA, ENTRADA_INVALIDA]);
+      expect(compra.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+      expect(merma.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
     it('una compra sin importe se rechaza: de ahí sale `compras_del_mes`', async () => {
       const item = await itemConPrecio('2.00');
       const respuesta = await registrar({
@@ -815,13 +837,16 @@ describe('inventario', () => {
       const activacion = await request(servidor())
         .put(`/productos/${id}/ubicaciones`)
         .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
-        .send({ locationId: local, activo: true, pvp: '3.00', rendimientoPorciones: '1' });
-      expect(activacion.status).toBe(SIN_CONTENIDO);
+        // Recién creado: versión 1 (D-16.100).
+        .send({ locationId: local, activo: true, pvp: '3.00', rendimientoPorciones: '1', version: 1 });
+      expect(activacion.status).toBe(OK);
 
       const receta = await request(servidor())
         .put('/recetas')
         .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
+          // Sin receta previa: la primera versión se basa en ninguna (D-16.101).
+          basadaEn: null,
           destino: { clase: 'producto', productId: id },
           locationId: local,
           validFrom: ENERO,
@@ -837,6 +862,7 @@ describe('inventario', () => {
         .put('/recetas')
         .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
+          basadaEn: null,
           destino: { clase: 'item', itemId },
           locationId: local,
           validFrom: ENERO,
@@ -917,8 +943,10 @@ describe('inventario', () => {
           confianzaDePrecio: 'FACTURA',
           estado: 'ACTIVE',
           llevaStock: true,
+          // La receta no toca la versión del ítem: sigue en 1 (D-16.101).
+          version: 1,
         });
-      expect(cambio.status).toBe(SIN_CONTENIDO);
+      expect(cambio.status).toBe(OK);
 
       await vender(plato, '10');
 

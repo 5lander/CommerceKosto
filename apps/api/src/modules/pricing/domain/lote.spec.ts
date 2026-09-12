@@ -31,6 +31,14 @@ describe('lote de precios', () => {
     expect(problemas[0]?.motivo).toMatch(/no es un número/u);
   });
 
+  it('un precio de cero se rechaza con su fila: antes tumbaba la importación con un 500 (D-16.110)', () => {
+    const problemas = problemasDelLoteDePrecios([precio({ precio: '0.00' })]);
+
+    expect(problemas).toHaveLength(1);
+    expect(problemas[0]?.posicion).toBe(1);
+    expect(problemas[0]?.motivo).toMatch(/mayor que cero/u);
+  });
+
   it('un IVA que no es número se rechaza', () => {
     expect(problemasDelLoteDePrecios([precio({ ivaCompra: '15%' })])).toHaveLength(1);
   });

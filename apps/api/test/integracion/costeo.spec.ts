@@ -6,6 +6,8 @@
  *   §4.3    `BODEGA` no ve un costeo, comprobado sobre la RESPUESTA CRUDA
  *   E8      costear con fecha del mes pasado usa el precio de entonces
  *   §5      200 productos con 1.500 líneas por debajo de 400 ms
+ *   P16-B   el semáforo lo decide la API, el desglose por línea viaja, y el
+ *           PVP se simula sin escribir nada
  *
  * **LO QUE ESTA SUITE APORTA SOBRE LAS UNITARIAS.** El motor ya está probado
  * contra los casos conocidos con la base apagada. Lo que no puede probarse ahí
@@ -32,6 +34,7 @@ import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 const OK = 200;
 const CREADO = 201;
 const SIN_CONTENIDO = 204;
+const PETICION_INVALIDA = 400;
 const PROHIBIDO = 403;
 
 const CONTRASENA = 'tres cebollas moradas';
@@ -67,6 +70,13 @@ interface ProductoCosteado {
     readonly empaqueNeto: ImporteDto;
     readonly costoTotalUnidad: ImporteDto;
     readonly impactoMerma: string | null;
+    readonly lineas: readonly {
+      readonly itemId: string;
+      readonly nombre: string;
+      readonly base: string;
+      readonly costo: ImporteDto;
+      readonly participacion: string;
+    }[] | null;
   };
   readonly venta:
     | {
@@ -79,6 +89,8 @@ interface ProductoCosteado {
       }
     | { readonly vendible: false; readonly motivo: string };
   readonly itemsSinCosto: readonly string[];
+  readonly semaforoFoodCost: string;
+  readonly pvpSimulado: string | null;
 }
 
 /** Redondea a la precisión que muestra `V_COSTEO` y compara exacto. */
@@ -181,6 +193,13 @@ describe('costeo', () => {
     expect(decision.status).toBe(SIN_CONTENIDO);
   }
 
+  /** La versión del producto que un formulario leería (D-16.100). */
+  async function versionDe(productId: string): Promise<number> {
+    const ficha = await request(servidor()).get(`/productos/${productId}`).set('Cookie', cookie);
+    expect(ficha.status).toBe(OK);
+    return (ficha.body as { version: number }).version;
+  }
+
   async function crearProducto(empaqueItemId: string | null): Promise<string> {
     const producto = await request(servidor())
       .post('/productos')
@@ -192,8 +211,8 @@ describe('costeo', () => {
     const empaque = await request(servidor())
       .put(`/productos/${id}/empaque`)
       .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
-      .send({ empaqueItemId });
-    expect(empaque.status).toBe(SIN_CONTENIDO);
+      .send({ empaqueItemId, version: await versionDe(id) });
+    expect(empaque.status).toBe(OK);
 
     return id;
   }
@@ -212,8 +231,9 @@ describe('costeo', () => {
         activo: true,
         pvp: datos.pvp,
         rendimientoPorciones: datos.porciones,
+        version: await versionDe(datos.productId),
       });
-    expect(respuesta.status).toBe(SIN_CONTENIDO);
+    expect(respuesta.status).toBe(OK);
   }
 
   /** Un producto a medio configurar: sin PVP, y por tanto inactivo. */
@@ -221,8 +241,8 @@ describe('costeo', () => {
     const respuesta = await request(servidor())
       .put(`/productos/${productId}/ubicaciones`)
       .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
-      .send({ locationId: centro, activo: false, pvp: null, rendimientoPorciones: '1' });
-    expect(respuesta.status).toBe(SIN_CONTENIDO);
+      .send({ locationId: centro, activo: false, pvp: null, rendimientoPorciones: '1', version: await versionDe(productId) });
+    expect(respuesta.status).toBe(OK);
   }
 
   async function guardarReceta(
@@ -230,10 +250,13 @@ describe('costeo', () => {
     locationId: string,
     lineas: readonly Cuerpo[],
   ): Promise<void> {
+    const clave = destino['clase'] === 'producto' ? { productId: destino['productId'] } : { itemId: destino['itemId'] };
+    const actual = await request(servidor()).get('/recetas').query({ ...clave, locationId }).set('Cookie', cookie);
+    const basadaEn = (actual.body as { ultimaVersionId: string | null }).ultimaVersionId;
     const respuesta = await request(servidor())
       .put('/recetas')
       .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
-      .send({ destino, locationId, validFrom: ENERO, nota: null, lineas });
+      .send({ basadaEn, destino, locationId, validFrom: ENERO, nota: null, lineas });
     expect(respuesta.status).toBe(CREADO);
   }
 
@@ -378,6 +401,78 @@ describe('costeo', () => {
       const costeado = await costearUno(producto);
       expect(costeado.costos.empaqueNeto.mostrar).toBe('0.04');
       expect(costeado.costos.empaqueNeto.exacto).toContain('0.043478260');
+    });
+
+    it('el semáforo lo decide la API con los umbrales de la company: 36 % contra un máximo de 32 % es ROJO (D-16.105)', async () => {
+      const costeado = await costearUno(producto);
+      expect(costeado.semaforoFoodCost).toBe('ROJO');
+    });
+
+    it('el desglose por línea viaja, alineado con la receta y con el nombre del ítem (SPEC §13)', async () => {
+      const costeado = await costearUno(producto);
+
+      expect(costeado.costos.lineas).toHaveLength(1);
+      const linea = costeado.costos.lineas?.[0];
+      expect(linea?.nombre).not.toBe('');
+      expect(linea?.base).toBe('EP');
+      expect(alaPrecisionDelExcel(linea?.costo.exacto ?? '', '0.51')).toBe('0.51');
+      // La única línea es el lote entero.
+      expect(linea?.participacion).toBe('1');
+    });
+  });
+
+  describe('el simulador de PVP (P16-B, D-16.107)', () => {
+    let producto: string;
+
+    beforeAll(async () => {
+      const tamal = await itemConPrecio({ rendimiento: '1', precio: '0.51', iva: '0.00' });
+      producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '1.80', porciones: '1' });
+      await guardarReceta({ clase: 'producto', productId: producto }, centro, [
+        { itemId: tamal.itemId, cantidad: '1', base: 'EP', estado: 'ACTIVA' },
+      ]);
+    });
+
+    function simular(pvp: string) {
+      return request(servidor()).get(`/costeo/${producto}`).query({ locationId: centro, fecha: MARZO, pvp }).set('Cookie', cookie);
+    }
+
+    it('los tres colores salen de la API según el PVP simulado, con el costo intacto', async () => {
+      // Costo total por unidad 0.5202. Con IVA de venta 0.15:
+      //   3.00 → venta neta 2.6087 → food cost 19,9 %  → VERDE
+      //   2.10 → venta neta 1.8261 → food cost 28,5 %  → AMBAR (entre 0.28 y 0.32)
+      //   1.00 → venta neta 0.8696 → food cost 59,8 %  → ROJO
+      const verde = await simular('3.00');
+      const ambar = await simular('2.10');
+      const rojo = await simular('1.00');
+
+      expect([verde.status, ambar.status, rojo.status]).toEqual([OK, OK, OK]);
+      expect((verde.body as ProductoCosteado).semaforoFoodCost).toBe('VERDE');
+      expect((ambar.body as ProductoCosteado).semaforoFoodCost).toBe('AMBAR');
+      expect((rojo.body as ProductoCosteado).semaforoFoodCost).toBe('ROJO');
+      expect((verde.body as { pvpSimulado: string }).pvpSimulado).toBe('3.00');
+      expect((verde.body as ProductoCosteado).costos.costoTotalUnidad.exacto).toBe(
+        (rojo.body as ProductoCosteado).costos.costoTotalUnidad.exacto,
+      );
+    });
+
+    it('simular no escribe: el PVP de la ubicación sigue siendo el suyo', async () => {
+      await simular('9.99');
+
+      const { rows } = await duena.query<{ pvp: string }>(
+        'SELECT pvp::text AS pvp FROM product_location WHERE product_id = $1 AND location_id = $2',
+        [producto, centro],
+      );
+      expect(rows[0]?.pvp).toMatch(/^1\.80/u);
+      const sinSimular = await costearUno(producto);
+      expect(sinSimular.pvpSimulado).toBeNull();
+    });
+
+    it('un PVP simulado de cero es 400: no es un escenario, es una división por cero', async () => {
+      const respuesta = await simular('0');
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
     });
   });
 

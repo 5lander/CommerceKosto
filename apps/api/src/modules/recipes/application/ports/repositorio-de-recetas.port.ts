@@ -22,6 +22,7 @@ import type {
   RecipePropagationId,
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
+import type { DesenlaceVersionado } from '../../../../shared/application/concurrencia';
 import type { GrafoDeItems } from '../../domain/ciclos';
 import type { ResultadoDeLoteConLimite } from '../../../../shared/application/lote';
 import type { BaseDeLinea, EstadoDeLinea, TipoDeProducto } from '../../domain/linea-de-receta';
@@ -56,6 +57,12 @@ export interface ProductoLeido {
    * con vigencia. `empaque_neto` es su `costo_neto_uso`, sin fórmula nueva.
    */
   readonly empaqueItemId: ItemId | null;
+  /**
+   * La versión del agregado producto (D-16.100, ADR-023): sube con el
+   * empaque, con la configuración de cualquier ubicación y con los
+   * componentes de combo. Toda escritura de esas tres exige la leída.
+   */
+  readonly version: number;
 }
 
 /**
@@ -124,6 +131,33 @@ export interface DatosDeVersion {
   readonly nota: string | null;
   /** `VOID` deja constancia de «aquí no hay receta» sin borrar nada. */
   readonly estado: 'ACTIVE' | 'VOID';
+  readonly testigo: TestigoDeReceta;
+}
+
+/**
+ * Sobre qué versión se editó la receta (D-16.101).
+ *
+ * `comprobar` es lo del formulario: `basadaEn` es la última versión creada de
+ * ese destino en esa ubicación cuando se abrió, o `null` si no había ninguna.
+ * Si al guardar la última ya es otra, no se escribe.
+ *
+ * `sobrescribir` es lo de la propagación y su reversión: R11 ya exigió ver
+ * antes qué se pierde, y sobrescribir es exactamente lo que se pidió. Pasa
+ * igual por el mismo candado, para que un formulario abierto en ese local se
+ * entere con un 409.
+ */
+export type TestigoDeReceta =
+  | { readonly clase: 'comprobar'; readonly basadaEn: RecipeId | null }
+  | { readonly clase: 'sobrescribir' };
+
+export type ResultadoDeGuardadoDeReceta =
+  | { readonly clase: 'guardada'; readonly id: RecipeId }
+  | { readonly clase: 'conflicto_de_version' };
+
+/** Un componente dentro del reemplazo de la lista de un combo. */
+export interface ComponenteParaGuardar {
+  readonly componentProductId: ProductId;
+  readonly cantidad: string;
 }
 
 /** Qué le pasaría a cada ubicación si se propagara. R11 exige mostrarlo antes. */
@@ -227,7 +261,11 @@ export interface RepositorioDeRecetas {
     readonly productId: ProductId;
   }): Promise<ProductoLeido | null>;
 
-  /** Activación, PVP y rendimiento por lote de un producto en una ubicación. */
+  /**
+   * Activación, PVP y rendimiento por lote de un producto en una ubicación.
+   * Sube la versión del producto en la misma transacción, solo si sigue
+   * siendo la esperada (D-16.100).
+   */
   configurarEnUbicacion(entrada: {
     readonly companyId: CompanyId;
     readonly productId: ProductId;
@@ -235,7 +273,8 @@ export interface RepositorioDeRecetas {
     readonly activo: boolean;
     readonly pvp: string | null;
     readonly rendimientoPorciones: string | null;
-  }): Promise<void>;
+    readonly versionEsperada: number;
+  }): Promise<DesenlaceVersionado>;
 
   ubicacionesDe(entrada: {
     readonly companyId: CompanyId;
@@ -251,7 +290,18 @@ export interface RepositorioDeRecetas {
     readonly locationId: LocationId;
   }): Promise<GrafoDeItems>;
 
-  guardarVersion(datos: DatosDeVersion): Promise<RecipeId>;
+  /**
+   * Crea la versión bajo un candado por (destino, ubicación). Con testigo
+   * `comprobar`, solo si la última versión creada sigue siendo `basadaEn`.
+   */
+  guardarVersion(datos: DatosDeVersion): Promise<ResultadoDeGuardadoDeReceta>;
+
+  /** La última versión CREADA —no la vigente— de ese destino en esa ubicación. */
+  ultimaVersionDe(entrada: {
+    readonly companyId: CompanyId;
+    readonly destino: DestinoDeReceta;
+    readonly locationId: LocationId;
+  }): Promise<RecipeId | null>;
 
   /**
    * Recetas y componentes de combo, TODO o nada, en **una sola transaccion**.
@@ -294,6 +344,13 @@ export interface RepositorioDeRecetas {
 
   registrarPropagacion(entrada: DatosDePropagacionRegistrada): Promise<RecipePropagationId>;
 
+  /** Las propagaciones de un producto, la más reciente primero. */
+  propagacionesDe(entrada: {
+    readonly companyId: CompanyId;
+    readonly productId: ProductId;
+    readonly limite: number;
+  }): Promise<readonly PropagacionLeida[]>;
+
   buscarPropagacion(entrada: {
     readonly companyId: CompanyId;
     readonly propagacionId: RecipePropagationId;
@@ -312,12 +369,31 @@ export interface RepositorioDeRecetas {
     readonly recipeId: RecipeId;
   }): Promise<readonly LineaLeida[]>;
 
-  /** Fija o quita el ítem que hace de empaque. `false` si el producto no existe. */
+  /** Fija o quita el ítem que hace de empaque, con la versión del producto. */
   asignarEmpaque(entrada: {
     readonly companyId: CompanyId;
     readonly productId: ProductId;
     readonly empaqueItemId: ItemId | null;
-  }): Promise<boolean>;
+    readonly versionEsperada: number;
+  }): Promise<DesenlaceVersionado>;
+
+  /** Los componentes de UN combo. */
+  componentesDe(entrada: {
+    readonly companyId: CompanyId;
+    readonly comboProductId: ProductId;
+  }): Promise<readonly ComponenteDeCombo[]>;
+
+  /**
+   * Reemplaza la lista ENTERA de componentes de un combo —borra y escribe— y
+   * sube la versión del combo, todo en una transacción y solo si la versión
+   * sigue siendo la esperada (D-16.114).
+   */
+  reemplazarComponentes(entrada: {
+    readonly companyId: CompanyId;
+    readonly comboProductId: ProductId;
+    readonly componentes: readonly ComponenteParaGuardar[];
+    readonly versionEsperada: number;
+  }): Promise<DesenlaceVersionado>;
 
   // --- Carga en lote, para costear una carta entera -------------------------
   //

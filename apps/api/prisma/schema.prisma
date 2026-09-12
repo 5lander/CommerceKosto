@@ -208,11 +208,11 @@ model CompanySettings {
   companyId String @id @map("company_id") @db.Uuid
 
   ivaVenta             Decimal @map("iva_venta") @db.Decimal(24, 12)
+  /// R13. La TARIFA no vive aqui desde P16-B (D-16.109): es del articulo o del
+  /// grupo del item (D-16.9). La columna `iva_compra` que habia era un valor
+  /// por defecto que P16-A1 dejo de leer, y se retiro para que nadie volviera a
+  /// hacerlo.
   ivaCompraRecuperable Boolean @map("iva_compra_recuperable")
-  /// Tasa de IVA de compra por DEFECTO, la que se propone al capturar un
-  /// precio. La que manda es la de cada `reference_price`: la factura dice cual
-  /// aplico, y en Ecuador el alimento sin procesar es 0 % y el detergente 15 %.
-  ivaCompra            Decimal @map("iva_compra") @db.Decimal(24, 12)
   provisionMerma       Decimal @map("provision_merma") @db.Decimal(24, 12)
   foodCostObjetivo     Decimal @map("food_cost_objetivo") @db.Decimal(24, 12)
   foodCostMaximo       Decimal @map("food_cost_maximo") @db.Decimal(24, 12)
@@ -579,6 +579,10 @@ model Item {
   /// COMPRADO, y un CHECK lo hace cumplir.
   keepsStock Boolean? @map("keeps_stock")
 
+  /// CONCURRENCIA OPTIMISTA DEL ITEM (P16-B, D-16.100, ADR-023). Sube en cada
+  /// `PUT /catalogo/items/:id`, que exige la version leida.
+  version Int @default(1)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   company        Company               @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -756,7 +760,11 @@ model ReferencePrice {
   /// Igualdad antes que rango, y el rango descendente porque «vigente» es
   /// «el mas reciente que ya empezo».
   @@index([companyId, itemId, validFrom(sort: Desc)])
-  @@index([companyId, status])
+  /// P16-B: con `id` al final. La bandeja de pendientes pagina por cursor
+  /// (`status = SUGGESTED AND id > $cursor ORDER BY id`) y sin él recorría la
+  /// clave primaria entera filtrando por company. El prefijo sigue sirviendo a
+  /// las lecturas por estado de antes.
+  @@index([companyId, status, id])
   @@map("reference_price")
 }
 
@@ -849,6 +857,14 @@ model Product {
   /// Con esto, `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso`
   /// del item: la misma formula, sin una linea nueva.
   packagingItemId String? @map("packaging_item_id") @db.Uuid
+
+  /// CONCURRENCIA OPTIMISTA DEL AGREGADO PRODUCTO (P16-B, D-16.100, ADR-023).
+  ///
+  /// Sube en cada escritura del maestro, de su configuracion por ubicacion y de
+  /// sus componentes de combo, y cada una exige la version que el formulario
+  /// leyo. Dos personas que editan el mismo producto a la vez no se pisan: la
+  /// segunda recibe 409 en vez de sobrescribir en silencio lo de la primera.
+  version Int @default(1)
 
   company       Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   tipo          ProductType         @relation(fields: [type], references: [code])

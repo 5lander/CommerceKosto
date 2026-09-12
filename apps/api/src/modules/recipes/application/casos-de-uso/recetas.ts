@@ -18,7 +18,11 @@
  * subpreparación —un ítem `PRODUCIDO`— que puede formar parte de un ciclo.
  */
 
+import type { DesenlaceVersionado } from '../../../../shared/application/concurrencia';
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
+import { ConflictoDeVersionError } from '../../../../shared/domain/errors/conflicto-de-version';
+import { Money, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import type {
   ItemId,
@@ -101,12 +105,15 @@ export interface DatosDeUbicacion {
   readonly activo: boolean;
   readonly pvp: string | null;
   readonly rendimientoPorciones: string | null;
+  /** La del producto, leída por el formulario (D-16.100). */
+  readonly version: number;
 }
 
 export class ConfigurarProductoEnUbicacion {
   public constructor(private readonly deps: DependenciasDeRecetas) {}
 
-  public async ejecutar(sesion: SesionActiva, datos: DatosDeUbicacion): Promise<void> {
+  /** @returns la versión NUEVA del producto. */
+  public async ejecutar(sesion: SesionActiva, datos: DatosDeUbicacion): Promise<number> {
     exigirUbicacionEnAlcance(sesion, datos.locationId);
 
     const producto = await this.deps.repositorio.buscarProducto({
@@ -126,27 +133,76 @@ export class ConfigurarProductoEnUbicacion {
         'Un producto activo necesita PVP: sin él se podría vender sin saber a cuánto, y su margen saldría indefinido.',
       );
     }
+    exigirPositivos(datos);
 
-    await this.deps.repositorio.configurarEnUbicacion({
+    const desenlace = await this.deps.repositorio.configurarEnUbicacion({
       companyId: sesion.companyId,
       productId: datos.productId,
       locationId: datos.locationId,
       activo: datos.activo,
       pvp: datos.pvp,
       rendimientoPorciones: datos.rendimientoPorciones,
+      versionEsperada: datos.version,
+    });
+    const version = versionEscrita(desenlace, 'producto');
+
+    await registrarCambioDeProducto(this.deps, sesion, {
+      productId: datos.productId,
+      locationId: datos.locationId,
+      activo: datos.activo,
+      version,
     });
 
-    await this.deps.auditoria.record({
-      eventType: 'product.updated',
-      outcome: 'success',
-      actorType: 'USER',
-      actorId: sesion.userId,
-      companyId: sesion.companyId,
-      ip: null,
-      userAgent: null,
-      detail: { productId: datos.productId, locationId: datos.locationId, activo: datos.activo },
-    });
+    return version;
   }
+}
+
+/**
+ * PVP y rendimiento por lote, estrictamente positivos (D-16.110).
+ *
+ * **LA BASE YA LO IMPIDE** con `product_location_pvp_positivo` y
+ * `product_location_rendimiento_positivo`, y el esquema del borde también desde
+ * P16-B. Esto lo EXPLICA para quien llegue sin pasar por HTTP, y deja constancia
+ * de por qué: hasta P16-B, `"0"` pasaba el esquema y salía como 500 (INC-012,
+ * cuarta recurrencia). Un PVP cero no es un regalo: es un food cost dividido por
+ * cero.
+ */
+function exigirPositivos(datos: DatosDeUbicacion): void {
+  if (datos.pvp !== null && !Money.fromDecimalString(datos.pvp).isPositive()) {
+    throw new RecetaInvalidaError('El PVP tiene que ser mayor que cero: un precio de cero no deja calcular el food cost.');
+  }
+  if (datos.rendimientoPorciones !== null && !Ratio.fromDecimalString(datos.rendimientoPorciones).isPositive()) {
+    throw new RecetaInvalidaError('El rendimiento por lote tiene que ser mayor que cero: es entre cuánto se divide el costo del lote.');
+  }
+}
+
+/**
+ * El evento `product.updated` de las escrituras del agregado producto. Lo emiten
+ * tres casos de uso —configuración por ubicación, empaque y componentes— y
+ * `audit:duplication` lo encontró copiado.
+ */
+export async function registrarCambioDeProducto(
+  deps: DependenciasDeRecetas,
+  sesion: SesionActiva,
+  detail: Readonly<Record<string, string | number | boolean>>,
+): Promise<void> {
+  await registrarEventoDeUsuario({
+    auditoria: deps.auditoria,
+    actorId: sesion.userId,
+    companyId: sesion.companyId,
+    eventType: 'product.updated',
+    detail,
+  });
+}
+
+/**
+ * Del desenlace de una escritura versionada, la versión nueva o el error que toca.
+ * Lo comparten las cuatro escrituras del agregado producto.
+ */
+export function versionEscrita(desenlace: DesenlaceVersionado, agregado: 'producto' | 'receta'): number {
+  if (desenlace.clase === 'no_encontrado') throw new ProductoNoEncontradoError();
+  if (desenlace.clase === 'conflicto_de_version') throw new ConflictoDeVersionError(agregado);
+  return desenlace.version;
 }
 
 export interface DatosDeReceta {
@@ -155,12 +211,17 @@ export interface DatosDeReceta {
   readonly lineas: readonly LineaParaGuardar[];
   readonly validFrom: Date;
   readonly nota: string | null;
+  /**
+   * La última versión que el formulario tenía delante, o `null` si no había
+   * ninguna (D-16.101). Si otra ya se guardó encima, 409.
+   */
+  readonly basadaEn: RecipeId | null;
 }
 
 export class GuardarReceta {
   public constructor(private readonly deps: DependenciasDeRecetas) {}
 
-  /** @throws {CicloEnRecetaError} · {@link RecetaInvalidaError} */
+  /** @throws {CicloEnRecetaError} · {@link RecetaInvalidaError} · {@link ConflictoDeVersionError} */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeReceta): Promise<RecipeId> {
     exigirUbicacionEnAlcance(sesion, datos.locationId);
 
@@ -168,7 +229,7 @@ export class GuardarReceta {
     await this.exigirLineasValidas(sesion, datos.lineas);
     await this.exigirSinCiclos(sesion, datos);
 
-    const id = await this.deps.repositorio.guardarVersion({
+    const resultado = await this.deps.repositorio.guardarVersion({
       companyId: sesion.companyId,
       destino: datos.destino,
       locationId: datos.locationId,
@@ -177,7 +238,12 @@ export class GuardarReceta {
       createdBy: sesion.userId,
       nota: datos.nota,
       estado: 'ACTIVE',
+      testigo: { clase: 'comprobar', basadaEn: datos.basadaEn },
     });
+    if (resultado.clase === 'conflicto_de_version') {
+      throw new ConflictoDeVersionError('receta');
+    }
+    const { id } = resultado;
 
     await this.deps.auditoria.record({
       eventType: 'recipe.saved',
@@ -268,23 +334,40 @@ export class GuardarReceta {
   }
 }
 
+export interface RecetaParaEditar {
+  readonly vigente: RecetaLeida | null;
+  readonly ultimaVersionId: RecipeId | null;
+}
+
 export class LeerReceta {
   public constructor(private readonly deps: DependenciasDeRecetas) {}
 
-  /** La versión vigente a una fecha. `fecha` es parámetro, no «ahora». */
+  /**
+   * La versión vigente a una fecha —`fecha` es parámetro, no «ahora»— y la
+   * última CREADA, que es la que el editor manda de vuelta como `basadaEn`.
+   * No son la misma: una versión con vigencia futura es la última creada y
+   * todavía no es la vigente.
+   */
   public async ejecutar(
     sesion: SesionActiva,
     entrada: { readonly destino: DestinoDeReceta; readonly locationId: LocationId; readonly fecha: Date },
-  ): Promise<RecetaLeida | null> {
+  ): Promise<RecetaParaEditar> {
     exigirUbicacionEnAlcance(sesion, entrada.locationId);
 
-    return this.deps.repositorio.recetaVigente({
-      companyId: sesion.companyId,
-      destino: entrada.destino,
-      locationId: entrada.locationId,
-      fecha: entrada.fecha,
-    });
+    const clave = { companyId: sesion.companyId, destino: entrada.destino, locationId: entrada.locationId };
+    const [vigente, ultimaVersionId] = await Promise.all([
+      this.deps.repositorio.recetaVigente({ ...clave, fecha: entrada.fecha }),
+      this.deps.repositorio.ultimaVersionDe(clave),
+    ]);
+
+    return { vigente, ultimaVersionId };
   }
+}
+
+export interface VersionesDeReceta {
+  /** Por vigencia, la más reciente primero: el orden en que se leen. */
+  readonly versiones: readonly RecetaLeida[];
+  readonly ultimaVersionId: RecipeId | null;
 }
 
 export class ListarVersionesDeReceta {
@@ -293,13 +376,15 @@ export class ListarVersionesDeReceta {
   public async ejecutar(
     sesion: SesionActiva,
     entrada: { readonly destino: DestinoDeReceta; readonly locationId: LocationId },
-  ): Promise<readonly RecetaLeida[]> {
+  ): Promise<VersionesDeReceta> {
     exigirUbicacionEnAlcance(sesion, entrada.locationId);
 
-    return this.deps.repositorio.versionesDe({
-      companyId: sesion.companyId,
-      destino: entrada.destino,
-      locationId: entrada.locationId,
-    });
+    const clave = { companyId: sesion.companyId, destino: entrada.destino, locationId: entrada.locationId };
+    const [versiones, ultimaVersionId] = await Promise.all([
+      this.deps.repositorio.versionesDe(clave),
+      this.deps.repositorio.ultimaVersionDe(clave),
+    ]);
+
+    return { versiones, ultimaVersionId };
   }
 }

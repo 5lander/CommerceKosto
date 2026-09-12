@@ -33,7 +33,8 @@
 
 import { z } from 'zod';
 
-const LARGO_MAXIMO_DE_DECIMAL = 40;
+import { decimalConSigno, decimalNoNegativo, fraccion } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 const LARGO_MAXIMO_DE_NOTA = 500;
 const MAXIMO_POR_PAGINA = 200;
 const POR_PAGINA_POR_DEFECTO = 50;
@@ -42,25 +43,9 @@ const MAXIMO_DE_VENTAS = 500;
 /** Los insumos de un lote: una receta larga, con margen. */
 const MAXIMO_DE_INSUMOS = 100;
 
-/** Decimal exacto en cadena, sin exponentes. */
-const decimal = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^-?\d+(\.\d+)?$/u, 'debe ser un decimal en notación normal, por ejemplo "2.30"');
-
-/** Magnitud: sin signo. El sentido lo pone el tipo de movimiento. */
-const magnitud = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^\d+(\.\d+)?$/u, 'debe ser una cantidad positiva, por ejemplo "2.5"');
 
 const nota = z.string().trim().max(LARGO_MAXIMO_DE_NOTA).nullable();
 
-/** Una tarifa de IVA: fracción entre 0 y 1, en cadena. `"0.15"`, nunca `"15"`. */
-const fraccion = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u, 'debe ser una fracción entre 0 y 1, por ejemplo "0.15"');
 
 /**
  * Un movimiento suelto.
@@ -74,9 +59,9 @@ export const CUERPO_DE_MOVIMIENTO = z
     locationId: z.uuid(),
     itemId: z.uuid(),
     tipo: z.enum(['COMPRA', 'MERMA', 'AJUSTE']),
-    cantidad: decimal,
+    cantidad: decimalConSigno,
     /** Obligatorio en `COMPRA`: es lo que se pagó, y de ahí sale SPEC §16. */
-    costoTotal: decimal.nullable(),
+    costoTotal: decimalNoNegativo.nullable(),
     /** Solo en `COMPRA`: en qué presentación se compró (SPEC §7). */
     purchaseArticleId: z.uuid().nullable(),
     /** Solo en `COMPRA`: la tarifa de la factura. Omitida, manda artículo > grupo. */
@@ -105,7 +90,7 @@ export const CUERPO_DE_TRANSFERENCIA = z
     origen: z.uuid(),
     destino: z.uuid(),
     itemId: z.uuid(),
-    cantidad: magnitud,
+    cantidad: decimalNoNegativo,
     occurredAt: z.iso.datetime(),
     note: nota,
   })
@@ -115,9 +100,9 @@ export const CUERPO_DE_PRODUCCION = z
   .object({
     locationId: z.uuid(),
     itemId: z.uuid(),
-    cantidad: magnitud,
+    cantidad: decimalNoNegativo,
     insumos: z
-      .array(z.object({ itemId: z.uuid(), cantidad: magnitud }).strict())
+      .array(z.object({ itemId: z.uuid(), cantidad: decimalNoNegativo }).strict())
       .min(1)
       .max(MAXIMO_DE_INSUMOS),
     occurredAt: z.iso.datetime(),
@@ -129,7 +114,7 @@ export const CUERPO_DE_CONSUMO = z
   .object({
     locationId: z.uuid(),
     ventas: z
-      .array(z.object({ productId: z.uuid(), unidades: magnitud }).strict())
+      .array(z.object({ productId: z.uuid(), unidades: decimalNoNegativo }).strict())
       .min(1)
       .max(MAXIMO_DE_VENTAS),
     occurredAt: z.iso.datetime(),

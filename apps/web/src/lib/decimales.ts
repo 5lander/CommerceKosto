@@ -1,5 +1,5 @@
 /**
- * Los decimales, mostrados y comparados COMO CADENA.
+ * Los decimales, mostrados COMO CADENA.
  *
  * ============================================================================
  * POR QUÉ EXISTE ESTE ARCHIVO
@@ -13,9 +13,17 @@
  *    decimales pinta; quien la calcula no puede decidirlo por él.»
  *
  * Este archivo es ese «quien la muestre». No calcula nada de negocio: redondea
- * para enseñar y compara contra un umbral, las dos cosas sobre el texto y sin
- * pasar por `Number` ni `parseFloat` en ningún punto — que es lo que la regla
- * `no-restricted-syntax` de `eslint.config.mjs` hace cumplir.
+ * para enseñar, sobre el texto y sin pasar por `Number` ni `parseFloat` en ningún
+ * punto — que es lo que la regla `no-restricted-syntax` de `eslint.config.mjs`
+ * hace cumplir.
+ *
+ * **YA NO COMPARA.** Hasta P16-B tenía `menorOIgual`, que la pantalla de costeo
+ * usaba para decidir el color del food cost contra los umbrales —y antes de eso
+ * un `localeCompare` que pintaba un 40 % de verde (INC-020)—. Desde P16-B el
+ * color lo decide la API (`semaforoFoodCost`, D-16.105), y comparar un número
+ * contra un umbral en el navegador es exactamente la regla de negocio que
+ * CLAUDE.md §8 saca del frontend. Si una pantalla vuelve a necesitar comparar,
+ * lo que falta es un campo en la API, no una función aquí.
  *
  * Está en `lib/` y no dentro de una pantalla porque lo usan dos, y `jscpd` falla
  * ante cualquier clon. Pero el motivo de fondo es mejor: **las reglas de cómo se
@@ -146,52 +154,4 @@ export function comoPorcentaje(fraccion: string): string {
   const redondeado = redondear(fraccion, POSICIONES_DEL_PORCENTAJE + DECIMALES_DE_PORCENTAJE);
 
   return `${moverComa(redondeado, POSICIONES_DEL_PORCENTAJE).replace('.', ',')} %`;
-}
-
-/**
- * Compara dos decimales EXACTOS sin convertirlos a punto flotante.
- *
- * ============================================================================
- * NO USA `localeCompare` CON `numeric: true`. LO USABA, Y MENTÍA.
- * ============================================================================
- *
- * `Intl.Collator` con `numeric: true` no compara decimales: compara **tramos de
- * dígitos**. `"0.1673"` se parte en `0`, `.`, `1673` y `"0.28"` en `0`, `.`,
- * `28`; empatan el `0` y el punto, y entonces compara **1673 contra 28**. Por
- * eso decía que `0,1673` es mayor que `0,32`.
- *
- * En pantalla eran las dos mentiras a la vez:
- *
- *   - un food cost del **16,7 % pintado de Oxblood**, el color de la pérdida, y
- *     con la señal de atención al costado;
- *   - y al revés, `0.4 <= 0.32` daba **true**: un food cost del **40 % en
- *     verde**. Esa es la peligrosa, porque no se va a mirar dos veces.
- *
- * Lo destapó levantar la pila de producción y mirar la pantalla con datos
- * reales. Ninguna revisión de código lo vio: la línea llevaba `numeric: true` y
- * un comentario diciendo que evitaba el punto flotante. Lo evitaba; lo que
- * hacía en su lugar estaba mal.
- *
- * ============================================================================
- * CÓMO SE COMPARA DE VERDAD
- * ============================================================================
- *
- * Parte entera alineada por la izquierda y parte decimal alineada por la
- * derecha, las dos rellenadas a la misma longitud y comparadas como texto. Con
- * la misma longitud, el orden alfabético de los dígitos ES el orden numérico.
- *
- * **Solo vale para decimales NO NEGATIVOS**, que es lo que hay aquí: un food
- * cost y un umbral. Con signo habría que tratarlo aparte, y no hay ningún caso.
- */
-export function menorOIgual(izquierda: string, derecha: string): boolean {
-  const [enteraI = '0', decimalI = ''] = izquierda.split('.');
-  const [enteraD = '0', decimalD = ''] = derecha.split('.');
-
-  const largoEntero = Math.max(enteraI.length, enteraD.length);
-  const largoDecimal = Math.max(decimalI.length, decimalD.length);
-
-  const i = enteraI.padStart(largoEntero, '0') + decimalI.padEnd(largoDecimal, '0');
-  const d = enteraD.padStart(largoEntero, '0') + decimalD.padEnd(largoDecimal, '0');
-
-  return i <= d;
 }

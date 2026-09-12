@@ -12,8 +12,10 @@
 
 import { z } from 'zod';
 
+import { decimalNoNegativo, decimalPositivo } from '../../../../shared/infrastructure/http/decimales-del-borde';
+import { COMPONENTES_MAXIMOS } from '../../domain/componentes-de-combo';
+
 const LARGO_MAXIMO_DE_NOMBRE = 200;
-const LARGO_MAXIMO_DE_DECIMAL = 40;
 const LARGO_MAXIMO_DE_NOTA = 500;
 const LARGO_MAXIMO_DE_CATEGORIA = 100;
 /** Una receta de mas de 500 lineas no es una receta: es una carga mal hecha. */
@@ -21,10 +23,6 @@ const LINEAS_MAXIMAS = 500;
 /** Mas ubicaciones que el limite de plan mas generoso que P11 vaya a vender. */
 const DESTINOS_MAXIMOS = 200;
 
-const decimal = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^\d+(\.\d+)?$/u, 'debe ser un decimal no negativo en notacion normal');
 
 export const DESTINO = z.discriminatedUnion('clase', [
   z.object({ clase: z.literal('producto'), productId: z.uuid() }).strict(),
@@ -41,16 +39,23 @@ export const CUERPO_DE_PRODUCTO = z
 
 export const CUERPO_DE_UBICACION = z
   .object({
+    /** La versión del producto que se leyó (D-16.100). Si otra escritura llegó antes, 409. */
+    version: z.int().min(1),
     locationId: z.uuid(),
     activo: z.boolean(),
     /** El PVP incluye IVA (R14). Obligatorio si el producto se activa. */
-    pvp: decimal.nullable(),
-    rendimientoPorciones: decimal.nullable(),
+    pvp: decimalPositivo.nullable(),
+    rendimientoPorciones: decimalPositivo.nullable(),
   })
   .strict();
 
 export const CUERPO_DE_RECETA = z
   .object({
+    /**
+     * La última versión que el editor tenía delante —`ultimaVersionId` de
+     * `GET /recetas`—, o `null` si no había ninguna (D-16.101).
+     */
+    basadaEn: z.uuid().nullable(),
     destino: DESTINO,
     locationId: z.uuid(),
     validFrom: z.iso.datetime(),
@@ -60,7 +65,7 @@ export const CUERPO_DE_RECETA = z
         z
           .object({
             itemId: z.uuid(),
-            cantidad: decimal,
+            cantidad: decimalNoNegativo,
             /** AP tal como se compra · EP ya limpio. R4, SPEC 13. */
             base: z.enum(['AP', 'EP']),
             estado: z.enum(['ACTIVA', 'INACTIVA']),
@@ -127,9 +132,43 @@ export type ConsultaDeReceta = z.infer<typeof CONSULTA_DE_RECETA>;
  */
 export const CUERPO_DE_EMPAQUE = z
   .object({
+    /** La versión del producto que se leyó (D-16.100). Si otra escritura llegó antes, 409. */
+    version: z.int().min(1),
     empaqueItemId: z.uuid().nullable(),
   })
   .strict();
+
+/**
+ * La lista ENTERA de componentes de un combo (D-16.114). La cantidad es
+ * estrictamente positiva: `combo_component_cantidad_positiva`.
+ */
+export const CUERPO_DE_COMPONENTES = z
+  .object({
+    /** La versión del producto que se leyó (D-16.100). Si otra escritura llegó antes, 409. */
+    version: z.int().min(1),
+    componentes: z
+      .array(z.object({ productId: z.uuid(), cantidad: decimalPositivo }).strict())
+      .max(COMPONENTES_MAXIMOS),
+  })
+  .strict();
+
+export type CuerpoDeComponentes = z.infer<typeof CUERPO_DE_COMPONENTES>;
+
+/** `GET /recetas/versiones`: lo mismo que la receta vigente, sin fecha. */
+export const CONSULTA_DE_VERSIONES = CONSULTA_DE_RECETA.omit({ fecha: true }).strict();
+export type ConsultaDeVersiones = z.infer<typeof CONSULTA_DE_VERSIONES>;
+
+/** `GET /recetas/propagacion/previsualizacion`. Hasta P16-B, dos `@Query` sueltos sin esquema (D-16.111). */
+export const CONSULTA_DE_PREVISUALIZACION = z.object({ productId: z.uuid(), origen: z.uuid() }).strict();
+export type ConsultaDePrevisualizacion = z.infer<typeof CONSULTA_DE_PREVISUALIZACION>;
+
+/** `GET /recetas/propagacion`. */
+export const CONSULTA_DE_PROPAGACIONES = z.object({ productId: z.uuid() }).strict();
+export type ConsultaDePropagaciones = z.infer<typeof CONSULTA_DE_PROPAGACIONES>;
+
+/** `GET /productos/ubicaciones`: la carta de una ubicación. */
+export const CONSULTA_DE_CARTA = z.object({ locationId: z.uuid() }).strict();
+export type ConsultaDeCarta = z.infer<typeof CONSULTA_DE_CARTA>;
 
 export type CuerpoDeEmpaque = z.infer<typeof CUERPO_DE_EMPAQUE>;
 

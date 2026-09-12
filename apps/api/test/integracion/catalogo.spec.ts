@@ -34,7 +34,6 @@ import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
-const SIN_CONTENIDO = 204;
 const PETICION_INVALIDA = 400;
 const NO_AUTORIZADO = 401;
 const PROHIBIDO = 403;
@@ -74,6 +73,11 @@ const CLAVES_DE_ITEM = [
   'rendimiento',
   'tipo',
   'unidadDeUso',
+  // P16-B (D-16.100). La prueba se rompió al aparecer, que es lo que tiene que
+  // hacer, y se decidió: es un contador de escrituras del ítem, no dice nada de
+  // ninguna receta, cantidad ni costo. BODEGA no lo necesita —no puede escribir
+  // ítems— y tampoco despeja nada con él.
+  'version',
 ];
 const CLAVES_DE_GRUPO = ['id', 'ivaTarifa', 'nombre'];
 const CLAVES_DE_ARTICULO = [
@@ -183,6 +187,13 @@ describe('catálogo', () => {
 
     expect(respuesta.status).toBe(OK);
     return cookieConCsrf(respuesta);
+  }
+
+  /** La versión del ítem que un formulario leería (D-16.100). */
+  async function versionDelItem(itemId: string): Promise<number> {
+    const leida = await request(servidor()).get(`/catalogo/items/${itemId}`).set('Cookie', cookieAdmin);
+    expect(leida.status).toBe(OK);
+    return (leida.body as { version: number }).version;
   }
 
   function crearItem(cookie: string, cambios: Cuerpo = {}) {
@@ -342,6 +353,26 @@ describe('catálogo', () => {
     });
   });
 
+  /**
+   * No fue una recurrencia, y el guardián lo dijo: con el esquema de antes seguía
+   * saliendo 400, porque `problemaDeConversion` ya la rechazaba desde P2. Solo con
+   * las dos capas quitadas sale el 500 del CHECK. La prueba fija las dos.
+   */
+  describe('🔴 una presentación de cero: esquema (P16-B) y dominio (P2) delante del CHECK', () => {
+    it('presentacion "0" es 400 ENTRADA_INVALIDA, no el 500 de purchase_article_presentacion_positiva', async () => {
+      const item = await crearItem(cookieAdmin);
+      const respuesta = await crearArticulo(cookieAdmin, {
+        itemId: (item.body as { id: string }).id,
+        nombre: `Saco vacío ${randomUUID().slice(0, 8)}`,
+        presentacion: '0',
+        unidadDePresentacion: 'kg',
+      });
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+  });
+
   describe('reglas del ítem, antes de tocar la base', () => {
     it('un rendimiento mayor que 1 se rechaza con una frase, no con un 23514', async () => {
       const respuesta = await crearItem(cookieAdmin, { rendimiento: '1.2' });
@@ -440,11 +471,77 @@ describe('catálogo', () => {
     });
   });
 
+  describe('concurrencia optimista del ítem (P16-B, D-16.100, ADR-023)', () => {
+    function cambiar(itemId: string, nombre: string, version: number) {
+      return request(servidor())
+        .put(`/catalogo/items/${itemId}`)
+        .set('Cookie', cookieAdmin).set('X-CSRF-Token', csrfDe(cookieAdmin))
+        .send({ nombre, rendimiento: '1', grupoId: null, confianzaDePrecio: 'FACTURA', estado: 'ACTIVE', llevaStock: null, version });
+    }
+
+    it('🔴 dos escrituras con la misma versión: la segunda recibe 409 y la base tiene lo de la primera', async () => {
+      const creado = await crearItem(cookieAdmin);
+      const itemId = (creado.body as { id: string }).id;
+      const version = await versionDelItem(itemId);
+      const primero = `Primero ${randomUUID().slice(0, 8)}`;
+      const segundo = `Segundo ${randomUUID().slice(0, 8)}`;
+
+      const a = await cambiar(itemId, primero, version);
+      const b = await cambiar(itemId, segundo, version);
+
+      expect(a.status).toBe(OK);
+      expect(b.status).toBe(CONFLICTO);
+      expect(b.body).toMatchObject({ code: 'CONFLICTO_DE_VERSION' });
+      // El cuerpo no trae la versión actual (D-16.104): reenviar con ella pisaría lo de otro.
+      expect(Object.keys(b.body as object).sort()).toEqual(['code', 'message']);
+
+      const { rows } = await duena.query<{ name: string; version: number }>(
+        'SELECT name, version FROM item WHERE id = $1',
+        [itemId],
+      );
+      expect(rows[0]).toEqual({ name: primero, version: version + 1 });
+    });
+
+    it('la versión es obligatoria: sin ella es 400, no una escritura sin comprobar', async () => {
+      const creado = await crearItem(cookieAdmin);
+      const respuesta = await request(servidor())
+        .put(`/catalogo/items/${(creado.body as { id: string }).id}`)
+        .set('Cookie', cookieAdmin).set('X-CSRF-Token', csrfDe(cookieAdmin))
+        .send({ nombre: 'Sin version', rendimiento: '1', grupoId: null, confianzaDePrecio: 'FACTURA', estado: 'ACTIVE', llevaStock: null });
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    it('un ítem que no existe sigue siendo 404, no un conflicto', async () => {
+      const respuesta = await cambiar(randomUUID(), 'Nadie', 1);
+
+      expect(respuesta.status).toBe(NO_ENCONTRADO);
+    });
+  });
+
+  describe('las consultas del catálogo pasan por esquema (P16-B, D-16.111)', () => {
+    it('incluirInactivos solo acepta true o false: «si» es 400, no un false silencioso', async () => {
+      const respuesta = await request(servidor()).get('/catalogo/items').query({ incluirInactivos: 'si' }).set('Cookie', cookieAdmin);
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    it('un parámetro de más en los artículos es 400, no se descarta en silencio', async () => {
+      const respuesta = await request(servidor()).get('/catalogo/articulos').query({ companyId: randomUUID() }).set('Cookie', cookieAdmin);
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+  });
+
   describe('archivar', () => {
     it('un ítem archivado desaparece del listado por defecto y vuelve con el filtro', async () => {
       const nombre = `Archivable ${randomUUID().slice(0, 8)}`;
       const creado = await crearItem(cookieAdmin, { nombre });
       const itemId = (creado.body as { id: string }).id;
+      const version = await versionDelItem(itemId);
 
       const cambio = await request(servidor())
         .put(`/catalogo/items/${itemId}`)
@@ -459,8 +556,10 @@ describe('catálogo', () => {
           // reemplaza el ítem entero, no lo parchea. `null` es el valor de un
           // COMPRADO, que es lo que este es.
           llevaStock: null,
+          version,
         });
-      expect(cambio.status).toBe(SIN_CONTENIDO);
+      expect(cambio.status).toBe(OK);
+      expect(cambio.body).toEqual({ version: version + 1 });
 
       const activos = await request(servidor()).get('/catalogo/items').set('Cookie', cookieAdmin).set('X-CSRF-Token', csrfDe(cookieAdmin));
       expect((activos.body as { nombre: string }[]).map((i) => i.nombre)).not.toContain(nombre);
@@ -773,9 +872,11 @@ describe('catálogo', () => {
       expect((await crearItem(cookieAdmin, { nombre: ocupado })).status).toBe(CREADO);
 
       const otro = await crearItem(cookieAdmin);
+      const otroId = (otro.body as { id: string }).id;
+      const version = await versionDelItem(otroId);
 
       const respuesta = await request(servidor())
-        .put(`/catalogo/items/${(otro.body as { id: string }).id}`)
+        .put(`/catalogo/items/${otroId}`)
         .set('Cookie', cookieAdmin)
         .set('X-CSRF-Token', csrfDe(cookieAdmin))
         .send({
@@ -785,6 +886,7 @@ describe('catálogo', () => {
           confianzaDePrecio: 'FACTURA',
           estado: 'ACTIVE',
           llevaStock: null,
+          version,
         });
 
       expect(respuesta.status).toBe(CONFLICTO);

@@ -9,7 +9,7 @@
 
 **Y desde P16-A2 también los ocho esquemas de consulta** (`/analitica/*`, `/consolidado`, `/costeo`, `/recetas`, `/inventario/saldos`, `/inventario/movimientos`, `/conteos`, `/periodos`). Hasta entonces eran laxos: un `?utm_source=…` o un `?companyId=…` **se descartaba en silencio y la respuesta era 200**. Ahora un parámetro de más devuelve `400 ENTRADA_INVALIDA` diciendo cuál sobra —con el nombre de la clave recortado, que el cuerpo de un error no es el eco de la petición—. Construye la URL con los parámetros documentados y ninguno más; si un enlace tuyo pega parámetros de rastreo, quítalos antes de llamar.
 
-> **Cinco lecturas todavía no lo hacen, y aquí están nombradas para que nadie lo dé por hecho:** `GET /precios?itemId=`, `GET /precios/costo/:itemId?fecha=`, `GET /catalogo/articulos?itemId=`, `GET /catalogo/items?incluirInactivos=` y `GET /recetas/propagacion/previsualizacion?productId=&origen=`. Toman el parámetro suelto, sin esquema, así que **una clave de más ahí se sigue ignorando y la respuesta es 200**. Es deuda anotada de P16-A2 y se cierra en P16-B; hasta entonces, no cuentes con el rechazo en estas cinco.
+> **Desde P16-B lo hacen todas** (D-16.111). Las cinco que P16-A2 dejó nombradas aquí —`GET /precios?itemId=`, `GET /precios/costo/:itemId?fecha=`, `GET /catalogo/articulos?itemId=`, `GET /catalogo/items?incluirInactivos=` y `GET /recetas/propagacion/previsualizacion?productId=&origen=`— pasaron a esquema `.strict()`: una clave de más es 400, y una `fecha` que no es ISO 8601 también (antes era un 404 «sin precio» que mentía).
 
 **CORS.** En producción no hay CORS: el frontend y la API se sirven desde el mismo origen y `CORS_ORIGENES` está vacío a propósito. Cuando sí se declaran orígenes (desarrollo, o un frontend en otro dominio), la lista es **exacta** —jamás `*`, que con credenciales el navegador rechaza— y la política permite `GET, POST, PUT, PATCH, DELETE`, las cabeceras `Content-Type` y `X-CSRF-Token`, y **expone** `x-correlation-id` y `Retry-After` para que el JavaScript de la página pueda leerlos. *(`DELETE` entra en P16-A2: existía la ruta y el preflight la rechazaba.)*
 
@@ -39,6 +39,7 @@
 | `PERIODO_SIN_DATOS` | 404 | Ese **mes no se ha abierto** en esa ubicación: ni ventas, ni movimientos, ni conteo. No es un enlace roto ni un mes en cero *(P16-A2, D-16.2)* |
 | `LIMITE_DEL_PLAN` | 409 | El permiso está bien; lo que no da es el plan |
 | `CONFLICTO` | 409 | La petición está bien formada; lo que choca es el estado que ya hay (un nombre repetido) |
+| `CONFLICTO_DE_VERSION` | 409 | Alguien guardó este mismo producto, ítem o receta **después de que tú lo leyeras**. Recarga y vuelve a decidir: reenviar lo tuyo pisaría lo suyo *(P16-B, ADR-023)* |
 | `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos. Escala: 1 → 5 → 15 → 60 min |
 | `TOO_MANY_REQUESTS` | 429 | El limitador de peticiones. **No es lo mismo** que el anterior |
 | `LIMITE_DE_SOLICITUDES` | 429 | Demasiadas veces la **misma solicitud**: olvido, restablecimiento, invitar o reenviar, por IP o por destinatario. Trae `Retry-After` en segundos y el minuto en el mensaje *(P16-A1)* |
@@ -47,6 +48,10 @@
 **Los dos 404 también se distinguen por el `code`, y esto importa en pantalla.** `RECURSO_NO_ENCONTRADO` es un error: el enlace está roto o el id no es tuyo. `PERIODO_SIN_DATOS` **no lo es**: es un estado normal del producto —el mes todavía no se ha trabajado— y lo que corresponde enseñar no es un aviso rojo sino «este mes está sin abrir» con el camino para abrirlo (cargar las ventas). Lo devuelven las **seis vistas** de analítica; `GET /analitica/ventas` y `GET /analitica/costos-fijos` **no**, porque para ellas un mes sin abrir es la lista vacía.
 
 **Un identificador mal formado es 400, no 500** *(P16-A2, INC-012)*. Un `:id` de ruta o un `?itemId=` que no sea un UUID, una `unidadDeUso` que no tenga la forma de un código corto en minúsculas (`kg`, `lt`, `unid`) y un decimal con más de 30 decimales devuelven `400 ENTRADA_INVALIDA` con un mensaje que dice qué corregir. Antes los tres salían como `INTERNAL_ERROR` y no decían nada.
+
+**Concurrencia optimista** *(P16-B, D-16.100, ADR-023)*. Cinco escrituras de reemplazo total piden de vuelta lo que se leyó: `PUT /catalogo/items/:id`, `PUT /productos/:id/ubicaciones`, `PUT /productos/:id/empaque` y `PUT /productos/:id/componentes` llevan `version` (la de la ficha); `PUT /recetas` lleva `basadaEn` (el `ultimaVersionId` de `GET /recetas`). Si alguien escribió entre medias, **409 `CONFLICTO_DE_VERSION`**, y el cuerpo es `{ code, message }` **sin la versión actual** (D-16.104): con el número dentro lo fácil sería reenviar con él, que es pisar al otro con un paso más. Las cuatro con `version` responden **200 `{ "version": n }`** en vez de 204, para que el formulario pueda seguir guardando sin releer. Sin `version` o sin `basadaEn` es 400, no una escritura sin comprobar. Un recurso que no existe sigue siendo 404, nunca 409.
+
+**Los números del cuerpo dicen qué aceptan** *(P16-B, INC-012)*. Un precio, un PVP, un rendimiento por lote, una presentación o una cantidad de combo de `"0"` o negativos son **400**; un importe de movimiento negativo, también. Hasta P16-B varios salían como 500 del `CHECK` de la base.
 
 Los tres 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dice «espera un momento», otro «tu cuenta está bloqueada» y el tercero «ya pediste esto demasiadas veces». **La IP que cuenta es la del cliente, no la del proxy**: detrás de Caddy se toma el último salto de `X-Forwarded-For` solo porque Caddy está en `PROXY_DE_CONFIANZA`; una cabecera falseada desde fuera no cambia nada (D-16.49).
 
@@ -205,7 +210,7 @@ No lleva tenant: un kilogramo pesa lo mismo en todas las companies, la tabla es 
 
 ### `GET /catalogo/items?incluirInactivos=true` — `catalog.read`
 
-Los ítems de la company. Por defecto solo los activos.
+Los ítems de la company. Por defecto solo los activos. `incluirInactivos` solo acepta `true` o `false`: `"si"` es **400**, no un `false` silencioso, y cualquier otro parámetro también *(P16-B, D-16.111)*.
 
 `GERENTE_LOCAL` y `BODEGA` también tienen este permiso: necesitan ver los ítems para contar inventario. Un ítem no revela ninguna receta.
 
@@ -241,7 +246,7 @@ Los ítems de la company. Por defecto solo los activos.
 {
   "id": "…", "nombre": "Leche", "tipo": "COMPRADO", "unidadDeUso": "ml",
   "rendimiento": "0.950000000000", "grupoId": "…", "estado": "ACTIVE",
-  "confianzaDePrecio": "FACTURA", "llevaStock": null,
+  "confianzaDePrecio": "FACTURA", "llevaStock": null, "version": 3,
   "grupo": { "id": "…", "nombre": "Lácteos", "ivaTarifa": "0.000000000000" },
   "articulos": [{ "id": "…", "itemId": "…", "nombre": "Leche entera 1lt", "marca": null,
                   "proveedor": null, "presentacion": "1.000000000000",
@@ -258,10 +263,10 @@ Es un **superconjunto de la fila de la lista**: `grupoId` sigue estando, para qu
 
 ```json
 { "nombre": "…", "rendimiento": "0.85", "grupoId": null,
-  "confianzaDePrecio": "FACTURA", "estado": "INACTIVE" }
+  "confianzaDePrecio": "FACTURA", "estado": "INACTIVE", "llevaStock": null, "version": 3 }
 ```
 
-**204.** `PUT` y no `PATCH`: el cuerpo trae el estado completo de lo editable, para que «no mandé el grupo» y «quiero quitarle el grupo» no sean la misma petición.
+**200 `{ "version": 4 }`** *(P16-B; antes 204)*. `version` es la de `GET /catalogo/items/:id`; si otro guardó después, **409 `CONFLICTO_DE_VERSION`** y la base conserva lo suyo. `PUT` y no `PATCH`: el cuerpo trae el estado completo de lo editable, para que «no mandé el grupo» y «quiero quitarle el grupo» no sean la misma petición.
 
 **El tipo y la unidad de uso no se pueden cambiar.** Cambiar la unidad de un ítem que ya tiene recetas y movimientos convertiría cada cantidad histórica en otra magnitud sin tocarla: 200 «g» pasarían a ser 200 «kg». Si hace falta, se crea un ítem nuevo y se archiva el viejo.
 
@@ -271,7 +276,7 @@ Es un **superconjunto de la fila de la lista**: `grupoId` sigue estando, para qu
 
 ### `GET /catalogo/articulos?itemId=…` — `catalog.read`
 
-Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem. Cada uno trae su `ivaTarifa` *(P16-A1)*.
+Los artículos de compra. `itemId` es opcional y es el único parámetro: otro cualquiera es **400** *(P16-B)*. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem. Cada uno trae su `ivaTarifa` *(P16-A1)*.
 
 ### `GET /catalogo/articulos/:id` — `catalog.read` *(P16-A2)*
 
@@ -354,7 +359,7 @@ Los diez números de SPEC §11 y `DECISIONES.md` D3. **Ninguno está en el códi
 
 ```json
 { "ivaVenta": "0.150000000000", "ivaCompraRecuperable": true,
-  "ivaCompra": "0.150000000000", "provisionMerma": "0.020000000000",
+  "provisionMerma": "0.020000000000",
   "foodCostObjetivo": "0.250000000000", "foodCostUmbralVerde": "0.280000000000",
   "foodCostMaximo": "0.320000000000", "primeCostMaximo": "0.650000000000",
   "reglaPopularidad": "0.700000000000", "diasOperativosMes": 22, "diasCobertura": 7 }
@@ -362,7 +367,7 @@ Los diez números de SPEC §11 y `DECISIONES.md` D3. **Ninguno está en el códi
 
 ### `PUT /ajustes` — `settings.update`
 
-**204.** El cuerpo completo, no un parche. **400** si un ratio no es una fracción —«un IVA se escribe 0.15, no 15»— o si los umbrales de food cost no van en orden: objetivo ≤ verde ≤ máximo, o el semáforo no puede pintar los tres colores.
+**204.** El cuerpo completo, no un parche. **Ya no lleva `ivaCompra`** *(P16-B, D-16.109)*: la tarifa de compra vive en el artículo y en el grupo desde P16-A1, y mandarla es **400** (el esquema es estricto) en vez de guardarse en una columna que nadie leía. **400** si un ratio no es una fracción —«un IVA se escribe 0.15, no 15»— o si los umbrales de food cost no van en orden: objetivo ≤ verde ≤ máximo, o el semáforo no puede pintar los tres colores.
 
 > **La provisión de merma es `0.02` y no `0.04`, y merece no tocarse a la ligera.** Antes un único 4 % cubría cáscara, hoja botada, derrame y error de pase. Hoy cada insumo declara su rendimiento y el costo neto absorbe ahí su propia merma: el 2 % es **solo lo que ningún rendimiento explica**. Subirlo cobraría la merma dos veces, que es lo que **R12** prohíbe.
 
@@ -374,7 +379,38 @@ Los diez números de SPEC §11 y `DECISIONES.md` D3. **Ninguno está en el códi
 
 ### `GET /precios?itemId=…` — `pricing.read`
 
-El historial completo de un ítem, del más reciente al más antiguo, con estado y autor.
+El historial completo de un ítem, del más reciente al más antiguo, con estado y autor. **Cada fila trae `vigente`** *(P16-B)*: `true` en una como mucho, la confirmada que manda **hoy** —la de vigencia más reciente que ya empezó—. Lo decide la API, no la pantalla: con dos confirmados de la misma vigencia, el desempate es una regla (D-16.3).
+
+### `GET /precios/pendientes?limite=50&despuesDe=…` — `pricing.read` *(P16-B)*
+
+La bandeja de R5: los precios `SUGGESTED`, cada uno con lo que hace falta para decidirlo sin abrir otra pantalla.
+
+```json
+{ "pendientes": [
+    { "id": "…", "itemId": "…", "purchaseArticleId": "…", "precio": "2.450000000000",
+      "ivaCompra": "0.150000000000", "origen": "MANUAL", "estado": "SUGGESTED",
+      "validFrom": "2026-02-01T00:00:00.000Z", "createdAt": "…", "nota": null,
+      "itemNombre": "Harina de trigo", "articuloNombre": "Saco 2kg",
+      "precioVigente": "2.100000000000" } ],
+  "siguiente": "…" }
+```
+
+**`precioVigente` es el confirmado que manda hoy para ese ítem**, o `null` si todavía no tiene: sin él al lado, «2.45» es un número suelto y no «subió de 2.10 a 2.45». `articuloNombre` es `null` en una preparación (R10).
+
+**Por cursor, nunca `OFFSET`** (CLAUDE.md §5): `limite` entre 1 y 200, 50 por defecto; `siguiente` es el `despuesDe` de la página siguiente, o `null` en la última.
+
+### `GET /precios/costos?fecha=…` — `pricing.read` *(P16-B)*
+
+El costo por unidad de uso de **todos** los ítems a una fecha —el listado de insumos—, en cuatro consultas fijas.
+
+```json
+{ "fecha": "2026-03-01T00:00:00.000Z",
+  "costos": [ { "itemId": "…", "precioNeto": "2.000000000000", "costoBrutoDeUso": "0.001000000000",
+                "costoNetoDeUso": "0.001176470588", "sobrecostoDeMerma": "0.000176470588" } ],
+  "sinPrecio": ["…"] }
+```
+
+**Los que no tienen precio confirmado van en `sinPrecio`, no con un cero**: un cero parecería un costo, y un insumo a cero abarata el plato sin avisar. Los importes salen con su escala de almacenamiento: son costos de uso, que se multiplican por la cantidad de cada línea. `fecha` ausente = ahora; una fecha que no es ISO 8601 es **400**.
 
 ### `POST /precios` — `pricing.suggest`
 
@@ -385,6 +421,8 @@ El historial completo de un ítem, del más reciente al más antiguo, con estado
 ```
 
 **201** con `{ id }`. Nace en estado `SUGGESTED`: **no cuenta para ningún costo** hasta que alguien lo confirme.
+
+**`precio` es mayor que cero** *(P16-B)*: `"0"` o `"-1"` son **400**. Hasta P16-B salían como 500 del `CHECK` (INC-012, cuarta recurrencia). Si todavía no se sabe el precio, no se registra.
 
 **`ivaCompra` es la tasa de ESE precio, no la de la company.** El SPEC nombra `iva_compra` en la fórmula de §12 y no dice dónde vive; vive aquí porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %: una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. **Con `null` se toma la del artículo o, sin artículo, la del grupo del ítem; sin ninguna, 400** *(P16-A1, D-16.43: ya no hay valor por defecto de company)*.
 
@@ -412,7 +450,7 @@ La cadena de costo de SPEC §12 entera, a una fecha:
   "costoNetoDeUso": "0.002352941176", "sobrecostoDeMerma": "0.000352941176" }
 ```
 
-**`fecha` es un parámetro, no «ahora».** Preguntar por el mes pasado devuelve el precio que estaba vigente entonces. **404** si el ítem no tiene ningún precio **confirmado** a esa fecha — que es distinto de que valga cero.
+**`fecha` es un parámetro, no «ahora».** Preguntar por el mes pasado devuelve el precio que estaba vigente entonces. **404** si el ítem no tiene ningún precio **confirmado** a esa fecha — que es distinto de que valga cero. **Una `fecha` que no es ISO 8601 es 400** *(P16-B, D-16.111)*: hasta entonces `fecha=basura` llegaba como fecha inválida y respondía ese mismo 404, que mentía.
 
 ---
 
@@ -421,6 +459,23 @@ La cadena de costo de SPEC §12 entera, a una fecha:
 **La unidad de costeo es la porción, no el plato.** «Arroz con carne (segundo)» y «(plato fuerte)» son productos **distintos**: distinta receta, categoría, PVP y margen. El maestro es de la company y la activación es por ubicación, lo que permite comparar entre locales con un `GROUP BY product_id` en vez de emparejar por nombre.
 
 ### `GET /productos` — `product.read`
+
+### `GET /productos/:id` — `product.read` *(P16-B)*
+
+```json
+{ "id": "…", "nombre": "Empanada de verde", "tipo": "SIMPLE", "categoria": "SNACK ATTACK",
+  "estado": "ACTIVE", "empaqueItemId": null, "version": 4 }
+```
+
+**La ficha, con la `version` que las tres escrituras del producto piden de vuelta** (ADR-023). La versión es del **agregado**: sube con el empaque, con la configuración de **cualquier** ubicación y con los componentes. **404** idéntico si el producto no existe o es de otra company. `BODEGA` no tiene `product.read`: **403**.
+
+### `GET /productos/:id/ubicaciones` — `product.read` *(P16-B)*
+
+`[{ "locationId": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "1" }]` — dónde está configurado el producto. **Filtrado por alcance** (D-16.113): `ADMIN` ve todas; un `GERENTE_LOCAL`, solo la suya.
+
+### `GET /productos/ubicaciones?locationId=…` — `product.read` *(P16-B)*
+
+`[{ "productId": "…", "nombre": "…", "tipo": "SIMPLE", "categoria": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "1" }]` — **la carta de una ubicación**, con nombre: lo que la rejilla de ventas necesita. La ubicación tiene que estar en tu alcance (**403** si no). `BODEGA` no la recibe: la respuesta lleva PVP.
 
 ### `POST /productos` — `product.write`
 
@@ -433,24 +488,34 @@ La cadena de costo de SPEC §12 entera, a una fecha:
 ### `PUT /productos/:id/ubicaciones` — `product.write`
 
 ```json
-{ "locationId": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "185" }
+{ "locationId": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "185", "version": 4 }
 ```
 
-**204.** `PUT` y no `PATCH`: los tres valores se leen juntos y su coherencia se comprueba junta.
+**200 `{ "version": 5 }`** *(P16-B; antes 204)*. `version` es la de `GET /productos/:id`; **409 `CONFLICTO_DE_VERSION`** si otra escritura del producto llegó antes — **aunque fuera en otra ubicación**, que es la deuda aceptada de D-16.20 (ADR-023). `PUT` y no `PATCH`: los tres valores se leen juntos y su coherencia se comprueba junta.
 
 **`pvp` incluye IVA** (R14): `venta_neta = pvp / (1 + iva_venta)`. **Un producto activo necesita PVP** — **400** si `activo: true` con `pvp: null`, porque sin él se podría vender sin saber a cuánto y su margen saldría indefinido. Un plato a medio configurar se deja `activo: false`.
 
-**`rendimientoPorciones` es cuántas porciones salen del lote.** Divide el costo de la receta. Con `0` o `null`, el costo por porción sale `0` en vez de dividir por cero (SPEC §14), y el lote sí se calcula: lo que falta es en cuántas partes repartirlo.
+**`rendimientoPorciones` es cuántas porciones salen del lote.** Divide el costo de la receta. Con `null`, el costo por porción sale `0` en vez de dividir por cero (SPEC §14), y el lote sí se calcula: lo que falta es en cuántas partes repartirlo. **`"0"` ya no es una forma de decir «sin capturar»: es 400**, igual que un `pvp` de `"0"` *(P16-B; hasta entonces los dos salían como 500 del `CHECK`, INC-012)*.
 
 ### `PUT /productos/:id/empaque` — `product.write` *(P5)*
 
 ```json
-{ "empaqueItemId": "…" }
+{ "empaqueItemId": "…", "version": 5 }
 ```
 
-**204.** `null` quita el empaque y su `empaque_neto` pasa a cero.
+**200 `{ "version": 6 }`** *(P16-B; antes 204)*, con la misma regla de `version` y **409** que la configuración por ubicación. `null` quita el empaque y su `empaque_neto` pasa a cero.
 
-**El empaque es un ÍTEM, no una tabla propia.** Se compra, tiene artículo, tiene precio con vigencia y un día se cuenta en el inventario; darle tabla propia habría duplicado la cadena de costo entera. `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso` de ese ítem. El razonamiento completo está en **ADR-008**. **404** si el ítem no existe en tu company.
+**El empaque es un ÍTEM, no una tabla propia.** Se compra, tiene artículo, tiene precio con vigencia y un día se cuenta en el inventario; darle tabla propia habría duplicado la cadena de costo entera. `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso` de ese ítem. El razonamiento completo está en **ADR-008**. **400 `ENTRADA_INVALIDA`** si el ítem de empaque no existe en tu company *(P16-B, D-16.112; antes un 404 «producto no encontrado» que señalaba lo que sí existía)*. **404** si el que no existe es el producto.
+
+### `GET /productos/:id/componentes` · `PUT /productos/:id/componentes` — `product.read` / `product.write` *(P16-B)*
+
+```json
+{ "version": 6, "componentes": [ { "productId": "…", "nombre": "Café americano", "cantidad": "1" } ] }
+```
+
+La lectura trae los componentes de un combo con su nombre y la `version` del combo. La escritura manda `{ "version": 6, "componentes": [{ "productId": "…", "cantidad": "1" }] }` y **reemplaza la lista entera**: lo que no venga deja de ser componente. **200 `{ "version": 7 }`**, **409** con versión vieja (y la lista no cambia).
+
+**400 con su motivo, antes de tocar la base** (D-16.114): el destino no es un `COMBO`; un componente no es `SIMPLE` —un combo dentro de otro—; el propio combo como componente; un producto repetido; un producto de otra company; `cantidad` de `"0"`; más de 50. `GERENTE_LOCAL` lee y no escribe: el combo es de la company entera.
 
 ---
 
@@ -460,17 +525,25 @@ La cadena de costo de SPEC §12 entera, a una fecha:
 
 ### `GET /recetas?locationId=…&productId=…&itemId=…&fecha=…` — `recipe.read`
 
-La versión **vigente a una fecha**. `productId` o `itemId`, exactamente uno: el destino de una receta es un producto de venta o una subpreparación. `fecha` ausente = hoy. Devuelve `null` si no hay ninguna activa.
+La versión **vigente a una fecha**, y sobre cuál se edita. `productId` o `itemId`, exactamente uno: el destino de una receta es un producto de venta o una subpreparación. `fecha` ausente = hoy.
+
+```json
+{ "vigente": { "id": "…", "locationId": "…", "estado": "ACTIVE", "validFrom": "…", "nota": null,
+               "lineas": [ { "itemId": "…", "cantidad": "18.14", "base": "EP", "estado": "ACTIVA", "orden": 0 } ] },
+  "ultimaVersionId": "…" }
+```
+
+**Cambió de forma en P16-B** (antes devolvía la receta suelta, o `null`). `vigente` es `null` si no hay ninguna activa a esa fecha. **`ultimaVersionId` es la última versión CREADA** —en cualquier estado y con cualquier vigencia— y es lo que `PUT /recetas` pide de vuelta como `basadaEn`: no tiene por qué ser la vigente, porque se puede haber guardado una con vigencia futura.
 
 ### `PUT /recetas` — `recipe.write`
 
 ```json
-{ "destino": { "clase": "producto", "productId": "…" },
+{ "basadaEn": "…", "destino": { "clase": "producto", "productId": "…" },
   "locationId": "…", "validFrom": "2026-03-01T00:00:00.000Z", "nota": null,
   "lineas": [ { "itemId": "…", "cantidad": "18.14", "base": "EP", "estado": "ACTIVA" } ] }
 ```
 
-**201** con `{ id }`. **No es «editar»: crea una versión nueva** con su vigencia, y la anterior queda consultable — los costeos históricos no se recalculan (SPEC §9). Un trigger impide el `UPDATE` que lo rompería.
+**201** con `{ id }`, que es el `basadaEn` del siguiente guardado. **`basadaEn` es obligatorio** *(P16-B, ADR-023)*: el `ultimaVersionId` que se leyó, o `null` si no había ninguna. Si otra versión se creó entre medias —otro editor, una propagación, una importación— es **409 `CONFLICTO_DE_VERSION`** y no se escribe nada. El testigo es por **destino y ubicación**: guardar la receta de un local no bloquea a quien edita la de otro. **No es «editar»: crea una versión nueva** con su vigencia, y la anterior queda consultable — los costeos históricos no se recalculan (SPEC §9). Un trigger impide el `UPDATE` que lo rompería.
 
 **`base` es `AP` o `EP`, y es la condicional más frágil del modelo (R4).** Si la cantidad está en `EP` —producto ya limpio— se aplica el rendimiento del ítem; si está en `AP` —tal como se compra— no. Implementarla al revés produce números plausibles y equivocados.
 
@@ -478,9 +551,22 @@ La versión **vigente a una fecha**. `productId` o `itemId`, exactamente uno: el
 
 **400 si la receta crea un ciclo** (**R9**), directo o a cualquier profundidad, **al guardar y no al calcular**. El mensaje trae el camino dentro: `mayonesa → salsa → mayonesa`.
 
-### `GET /recetas/propagacion/previsualizacion?productId=…&locationId=…` — `recipe.propagate`
+### `GET /recetas/versiones?locationId=…&productId=…&itemId=…` — `recipe.read` *(P16-B)*
 
-**R11 exige mostrarlo antes de tocar nada:** cuántas ubicaciones se verían afectadas y **cuáles ya tienen receta propia que se perdería**.
+`{ "versiones": [ …como vigente… ], "ultimaVersionId": "…" }` — todas las versiones de ese destino en esa ubicación, de la vigencia más reciente a la más antigua, `VOID` incluidas. La ubicación tiene que estar en tu alcance.
+
+### `GET /recetas/propagacion?productId=…` — `recipe.propagate` *(P16-B)*
+
+```json
+[ { "id": "…", "productId": "…", "propagadaEn": "…", "revertidaEn": null,
+    "destinos": [ { "locationId": "…", "anterior": "…", "creada": "…" } ] } ]
+```
+
+Las propagaciones de un producto, la más reciente primero, **50 como mucho**. Pide el permiso de propagar y no el de leer: la lista existe para revertir una, y quien no puede propagar no tiene nada que revertir. `anterior` es `null` donde no había receta.
+
+### `GET /recetas/propagacion/previsualizacion?productId=…&origen=…` — `recipe.propagate`
+
+**R11 exige mostrarlo antes de tocar nada:** cuántas ubicaciones se verían afectadas y **cuáles ya tienen receta propia que se perdería**. `origen` es la ubicación cuya receta se copiaría; los dos parámetros son UUID y **no admite otros** *(P16-B: antes eran dos `@Query` sueltos sin esquema; esta documentación decía `locationId`, y el parámetro siempre fue `origen`)*.
 
 ### `POST /recetas/propagacion` — `recipe.propagate`
 
@@ -488,7 +574,7 @@ La versión **vigente a una fecha**. `productId` o `itemId`, exactamente uno: el
 { "productId": "…", "origen": "…", "destinos": ["…", "…"] }
 ```
 
-**201** con `{ id }`. **`recipe.propagate` es un permiso separado y de nivel company**, y de ahí sale E18 sin un solo `if`: un `GERENTE_LOCAL` tiene `recipe.write` y no éste, así que gestiona su receta y recibe **403** al intentar sobrescribir la del local de al lado. Un gerente no decide cómo cocina otro local.
+**201** con `{ id }`. Propagar **sobrescribe por definición** —R11 ya obligó a ver qué se pisaba—, así que no lleva `basadaEn`; pero crea versiones nuevas, y un editor abierto en una ubicación destino recibe **409** al guardar en vez de pisar lo propagado. **`recipe.propagate` es un permiso separado y de nivel company**, y de ahí sale E18 sin un solo `if`: un `GERENTE_LOCAL` tiene `recipe.write` y no éste, así que gestiona su receta y recibe **403** al intentar sobrescribir la del local de al lado. Un gerente no decide cómo cocina otro local.
 
 ### `POST /recetas/propagacion/:id/reversion` — `recipe.propagate`
 
@@ -521,7 +607,12 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
         "costoConMerma":     { "mostrar": "0.52", "exacto": "0.5202" },
         "empaqueNeto":       { "mostrar": "0.04", "exacto": "0.043478260870" },
         "costoTotalUnidad":  { "mostrar": "0.56", "exacto": "0.563678260870" },
-        "impactoMerma": "0"
+        "impactoMerma": "0",
+        "lineas": [
+          { "itemId": "…", "nombre": "Masa de maíz", "cantidad": "0.120000000000", "base": "EP",
+            "estado": "ACTIVA", "costo": { "mostrar": "0.31", "exacto": "0.3120" },
+            "participacion": "0.611764705882" }
+        ]
       },
       "venta": {
         "vendible": true,
@@ -531,11 +622,16 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
         "mcPct": "0.639872222222", "foodCostPct": "0.360127777778",
         "sumaControl": "1", "multiplicador": "2.776792187906"
       },
-      "itemsSinCosto": []
+      "itemsSinCosto": [],
+      "semaforoFoodCost": "AMBAR"
     }
   ]
 }
 ```
+
+**`semaforoFoodCost` lo decide la API** *(P16-B, D-16.105)*: `VERDE` hasta el `foodCostUmbralVerde` de la company, `AMBAR` hasta el `foodCostMaximo`, `ROJO` por encima. **Los bordes son del lado bueno**: exactamente en el umbral es verde, exactamente en el máximo es ámbar. `SIN_DATO` cuando el producto no es vendible —sin PVP no está en verde, está sin medir—. La pantalla lo pinta y no compara nada (la copia en el navegador fue INC-020).
+
+**`costos.lineas` es el desglose de SPEC §13**, una entrada por línea de la receta y en su orden: el ítem, cuánto lleva, su costo y cuánto pesa en el costo neto del lote. **Sale solo si la sesión tiene `recipe.read`; si no, `null`** (D-16.106): hoy los cuatro roles con `costing.read` también leen recetas, y la regla es para el rol que algún día no lo haga — las cantidades son la receta misma (§4.3).
 
 **Todo decimal sale como cadena, en dos escalas.** Un `number` en JSON es un binario de doble precisión y `0.1 + 0.2` deja de ser `0.3` en cuanto alguien suma en el cliente. `mostrar` es la escala de presentación —el `ROUND(x, 2)` del SPEC—; `exacto` es la nativa, para sumar sin acumular error.
 
@@ -558,7 +654,9 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
 
 ### `GET /costeo/:productId?locationId=…&fecha=…` — `costing.read`
 
-Un solo producto, con la misma forma que un elemento de `productos`. **404** si el producto no existe en tu company.
+Un solo producto, con la misma forma que un elemento de `productos`, más `pvpSimulado`. **404** si el producto no existe en tu company.
+
+**`?pvp=3.00` simula un precio de venta sin guardarlo** *(P16-B, D-16.107)*: recalcula solo el lado de venta —venta neta, margen, food cost, multiplicador y semáforo— con la **misma** función que el costeo real, y deja los costos intactos. `pvpSimulado` repite el valor usado, o `null` sin simulación. Nada se escribe. Un `pvp` de `"0"` es **400**.
 
 > **Pide un solo producto y por dentro se costea la carta entera.** Es deliberado y no un descuido: dos rutas distintas para el mismo número son dos oportunidades de que den respuestas distintas, y en este sistema eso no se ve en pantalla. La carga completa está medida y cabe en el presupuesto.
 

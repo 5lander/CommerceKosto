@@ -252,13 +252,29 @@ export const coreRules = [
       'es MAYOR que 0,32. Estuvo en la pantalla de costeo desde la Fase C pintando un food cost del ' +
       '16,7 % con el color de la perdida y —lo peligroso— uno del 40 % de verde. Parecia correcto: ' +
       'llevaba `numeric: true` y un comentario diciendo que evitaba el punto flotante. Lo evitaba, y lo ' +
-      'que hacia en su lugar estaba mal. Para comparar decimales estan `menorOIgual` de ' +
-      '`apps/web/src/lib/decimales.ts` en el frontend y los tipos `Money`/`Ratio` en el backend. ' +
+      'que hacia en su lugar estaba mal. Desde P16-B el frontend no compara decimales: el semaforo lo manda ' +
+      'la API (`semaforoFoodCost`, D-16.105), y en el backend estan los tipos `Money`/`Ratio`. ' +
       '`localeCompare` SIN `numeric` sigue valiendo: ordenar nombres alfabeticamente esta bien.',
     patron: /localeCompare\s*\([^)]*numeric\s*:\s*true/g,
     incluye: CODIGO,
     excluye: META,
     desde: 'P14b',
     referencia: 'INC-020 · CLAUDE.md §3',
+  },
+  {
+    id: 'regex-de-numero-solo-en-el-vocabulario',
+    descripcion: 'Una expresion regular dentro de un `*.dto.ts`',
+    porQue:
+      'CUARTA RECURRENCIA DE INC-012. Cada DTO definia su propio `decimal` con su propia regex y su propio ' +
+      'mensaje, y guardas-de-dominio.md daba por filtradas restricciones que el esquema no filtraba: ' +
+      '`precio: "0"`, `pvp: "0"`, `rendimientoPorciones: "0"` y `costoTotal: "-5"` pasaban el esquema y ' +
+      'salian como 500 contra un CHECK. Un esquema llamado `decimal` no dice si admite cero ni signo. Los ' +
+      'numeros del borde se toman de `shared/infrastructure/http/decimales-del-borde.ts` —decimalConSigno, ' +
+      'decimalNoNegativo, decimalPositivo, fraccion, enteroNoNegativo—, eligiendo por el CHECK de la columna.',
+    patron: /\.regex\s*\(/g,
+    incluye: ['apps/*/src/**/*.dto.ts'],
+    excluye: META,
+    desde: 'P16-B',
+    referencia: 'docs/incidencias/INC-012 · docs/sistema/guardas-de-dominio.md',
   },
 ];

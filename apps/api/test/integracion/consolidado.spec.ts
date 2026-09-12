@@ -166,6 +166,11 @@ describe('consolidado de company', () => {
     readonly donde: string;
     readonly pvp: string;
   }): Promise<void> {
+    // La versión se LEE: el mismo producto se activa en dos ubicaciones, y la
+    // segunda escritura va sobre la versión que dejó la primera (D-16.100).
+    const ficha = await request(servidor()).get(`/productos/${datos.productId}`).set('Cookie', admin);
+    const version = (ficha.body as { version: number }).version;
+
     const ubicacion = await request(servidor())
       .put(`/productos/${datos.productId}/ubicaciones`)
       .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
@@ -174,13 +179,16 @@ describe('consolidado de company', () => {
         activo: true,
         pvp: datos.pvp,
         rendimientoPorciones: '1',
+        version,
       });
-    expect(ubicacion.status).toBe(SIN_CONTENIDO);
+    expect(ubicacion.status).toBe(OK);
 
     const receta = await request(servidor())
       .put('/recetas')
       .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
+        // La receta es por ubicación: en cada una es la primera (D-16.101).
+        basadaEn: null,
         destino: { clase: 'producto', productId: datos.productId },
         locationId: datos.donde,
         validFrom: VIGENCIA,

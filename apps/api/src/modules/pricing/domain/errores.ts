@@ -34,6 +34,22 @@ export class ItemSinPrecioError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
 }
 
+/**
+ * Un precio de cero o negativo (D-16.110).
+ *
+ * LA BASE YA LO IMPIDE con `reference_price_positivo`, y hasta P16-B el esquema
+ * del borde dejaba pasar `"0"` y `"-1"`: salían como 500 (INC-012, cuarta
+ * recurrencia). Un precio de cero no es un regalo, es un dato sin capturar, y un
+ * plato con un insumo a cero sale plausible y barato.
+ */
+export class PrecioNoPositivoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('El precio tiene que ser mayor que cero. Si todavía no lo sabes, no lo registres: un insumo a cero abarata el plato sin avisar.');
+  }
+}
+
 export class AjustesInvalidosError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
 }

@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
-| **Recurrencias** | **11** |
+| **Recurrencias** | **12** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -299,6 +299,49 @@ verifico borrando una asercion a mano para comprobar que **falla**.
 > **Un titulo de prueba es una afirmacion sobre el sistema, y nadie lo verifica.** El cuerpo se
 > revisa; el titulo se cree. Cuando el titulo dice mas de lo que el cuerpo mide, la diferencia acaba
 > copiada en la documentacion y en un ADR, donde ya nadie puede distinguirla de un hecho.
+
+## Caso 12 (P16-B) — el bench medía el `dist` que hubiera en disco
+
+**El sujeto vuelve a ser un check, y esta vez no le faltaba alcance: le sobraba antigüedad.**
+
+### Qué pasó
+
+`npm run bench` siembra `costeo_bench`, aplica las migraciones del árbol de trabajo y lanza el
+medidor `apps/api/dist/bench.js`. **Nadie compilaba ese `dist`**: ni el script, ni `npm run audit`,
+ni ningún paso del protocolo. Al medir P16-B el archivo era del 2026-09-10 16:45 —anterior a todo el
+paquete— y no contenía ni una línea de lo que P16-B cambió en el propio `bench.ts`
+(`grep -c ultimaVersionId dist/bench.js` → `0`). La base tenía el esquema nuevo y el código medido
+era el viejo.
+
+Esta vez **reventó** (`Cannot read properties of undefined (reading 'toFixed')`), y por eso se vio.
+Lo normal habría sido lo contrario: un paquete que no toca el `bench.ts` mide el código del paquete
+anterior, imprime cuatro presupuestos con su ✓ y el número va a `AUDITORIA-RESULTADO.md` como
+evidencia del paquete que no midió. **Los números de bench de P16-A1 y P16-A2 no se pueden atribuir
+con certeza al código que se commiteó**: dependían de cuándo se hubiera compilado por última vez.
+
+### La prevención, que es de construcción y no de disciplina
+
+`scripts/bench.mjs` gana `compilar()`: `tsc --build tsconfig.build.json` sobre `apps/api` **antes de
+crear la base**, siempre. Es incremental —si nada cambió, solo comprueba— y un error de compilación
+aborta antes de sembrar. Verificado: tras la corrida, `dist/bench.js` contiene `ultimaVersionId`.
+
+### Y dos más del mismo paquete que NO suben el contador, porque los cazó el guardián
+
+Los dos son el modo de fallo del caso 11 —una prueba que afirma más de lo que mide— y los dos
+murieron antes del commit, que es exactamente para lo que existe el guardián:
+
+1. **«Diez escrituras a la vez» no era una carrera.** Con `Promise.all`, la transacción del producto
+   es tan corta que en local no se solapa: devolviendo la escritura a un leer-comparar-escribir, la
+   🔴 seguía en verde. Se rehízo determinista —otra conexión bloquea la fila con `FOR UPDATE`, se
+   espera en `pg_locks` a que las cinco escrituras estén paradas y se suelta— y ahora el mismo
+   guardián da cinco 200 en vez de uno. `test/soporte/bloqueos.ts`, ADR-023.
+2. **«Cuarta recurrencia: una presentación de cero» no lo era.** Devolviendo el esquema a la regex
+   vieja, la prueba seguía en 400 porque el dominio la paraba desde P2. Se retituló; la ficha de
+   INC-012 lo cuenta.
+
+> **La lección, que amplía la del caso 11:** preguntar «¿qué pasaría si el sistema no cumpliera el
+> título?» no basta si la respuesta se imagina. **Hay que escribir el sistema que no lo cumple** —el
+> `if` previo, el esquema viejo, el `dist` sin compilar— y verlo fallar.
 
 ## Referencias
 

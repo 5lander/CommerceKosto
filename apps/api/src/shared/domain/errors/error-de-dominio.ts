@@ -23,6 +23,7 @@ export type CodigoDeDominio =
   | 'PERIODO_SIN_DATOS'
   | 'LIMITE_DEL_PLAN'
   | 'CONFLICTO'
+  | 'CONFLICTO_DE_VERSION'
   | 'ENTRADA_INVALIDA'
   | 'LIMITE_DE_SOLICITUDES';
 

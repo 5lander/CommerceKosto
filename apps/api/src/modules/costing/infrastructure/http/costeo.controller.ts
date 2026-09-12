@@ -20,6 +20,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 
 import { locationId, productId } from '../../../../shared/domain/identity/identificadores';
+import { Money } from '../../../../shared/domain/money/tipos-monetarios';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
@@ -27,14 +28,21 @@ import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { CostearCarta, CostearUnProducto } from '../../application/casos-de-uso/costear';
 import {
   CONSULTA_DE_COSTEO,
+  CONSULTA_DE_COSTEO_DE_PRODUCTO,
   type ConsultaDeCosteo,
+  type ConsultaDeCosteoDeProducto,
   type CosteoDeCartaDto,
-  type ProductoCosteadoDto,
+  type ProductoSimuladoDto,
 } from './costeo.dto';
 import { comoCarta, comoProducto } from './presentacion';
 
 function fechaDe(consulta: ConsultaDeCosteo): Date {
   return consulta.fecha === undefined ? new Date() : new Date(consulta.fecha);
+}
+
+/** D-16.106: el desglose con cantidades es la receta, y solo lo ve quien puede leerla. */
+function puedeVerLaReceta(sesion: SesionActiva): boolean {
+  return sesion.permisos.includes('recipe.read');
 }
 
 @Controller('costeo')
@@ -56,7 +64,7 @@ export class CosteoController {
       fecha: fechaDe(consulta),
     });
 
-    return comoCarta(resultado);
+    return comoCarta(resultado, puedeVerLaReceta(sesion));
   }
 
   @Get(':productId')
@@ -64,14 +72,16 @@ export class CosteoController {
   public async deUnProducto(
     @SesionActual() sesion: SesionActiva,
     @Param('productId') id: string,
-    @Query(new EsquemaPipe(CONSULTA_DE_COSTEO)) consulta: ConsultaDeCosteo,
-  ): Promise<ProductoCosteadoDto> {
+    @Query(new EsquemaPipe(CONSULTA_DE_COSTEO_DE_PRODUCTO)) consulta: ConsultaDeCosteoDeProducto,
+  ): Promise<ProductoSimuladoDto> {
+    const pvpSimulado = consulta.pvp === undefined ? null : Money.fromDecimalString(consulta.pvp);
     const resultado = await this.unProducto.ejecutar(sesion, {
       productId: productId(id),
       locationId: locationId(consulta.locationId),
       fecha: fechaDe(consulta),
+      pvpSimulado,
     });
 
-    return comoProducto(resultado);
+    return { ...comoProducto(resultado, puedeVerLaReceta(sesion)), pvpSimulado: consulta.pvp ?? null };
   }
 }

@@ -38,6 +38,7 @@ import {
   ConflictoDePrecioError,
   ItemSinPrecioError,
   PrecioNoEncontradoError,
+  PrecioNoPositivoError,
 } from '../../domain/errores';
 import { tarifaDePreparacion } from '../../domain/preparacion';
 import { precioVigenteA } from '../../domain/vigencia';
@@ -95,7 +96,9 @@ export class SugerirPrecio {
     // Los decimales se parsean AQUÍ. Si la cadena no es un decimal exacto,
     // `Money` y `Ratio` lanzan en el borde y no seis capas más abajo con un
     // valor ya redondeado.
-    Money.fromDecimalString(datos.precio);
+    if (!Money.fromDecimalString(datos.precio).isPositive()) {
+      throw new PrecioNoPositivoError();
+    }
 
     const tipo = await this.exigirArticuloCoherente(sesion, datos);
     const ivaCompra =
@@ -224,11 +227,25 @@ export class ResolverPrecio {
   }
 }
 
+/** Un precio del historial, con la marca de si es el que manda hoy. */
+export interface PrecioDelHistorial extends PrecioLeido {
+  /**
+   * `true` en UNO como mucho: el que `precioVigenteA` elige a esta hora. Lo
+   * decide el dominio y no la pantalla (D-16.3): con dos confirmados de la
+   * misma vigencia, el desempate por `created_at` es una regla, y una regla
+   * copiada en el navegador es INC-020 esperando a pasar.
+   */
+  readonly vigente: boolean;
+}
+
 export class HistorialDePrecios {
   public constructor(private readonly deps: DependenciasDePrecios) {}
 
-  public async ejecutar(sesion: SesionActiva, itemId: ItemId): Promise<readonly PrecioLeido[]> {
-    return this.deps.repositorio.historial({ companyId: sesion.companyId, itemId });
+  public async ejecutar(sesion: SesionActiva, itemId: ItemId): Promise<readonly PrecioDelHistorial[]> {
+    const precios = await this.deps.repositorio.historial({ companyId: sesion.companyId, itemId });
+    const vigente = precioVigenteA(precios, this.deps.reloj.ahora());
+
+    return precios.map((p) => ({ ...p, vigente: p.id === vigente?.id }));
   }
 }
 

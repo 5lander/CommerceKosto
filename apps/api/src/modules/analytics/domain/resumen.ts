@@ -17,14 +17,12 @@
  * que pasa es que nadie ha cargado las ventas.
  */
 
-import { Money, Ratio } from '../../../shared/domain/money/tipos-monetarios';
+import { semaforoPorBandas, type Semaforo } from '../../../shared/domain/indicadores/semaforo';
+import type { Money, Ratio } from '../../../shared/domain/money/tipos-monetarios';
 
-/**
- * `SIN_DATO` no es un cuarto nivel de gravedad: es la ausencia de medición.
- * Va aparte para que ninguna interfaz pueda pintarlo como si fuera un estado
- * del negocio.
- */
-export type Semaforo = 'VERDE' | 'AMBAR' | 'ROJO' | 'SIN_DATO';
+// El tipo y las bandas viven en `shared/domain/indicadores/semaforo.ts` desde
+// P16-B: el costeo del plato los necesita igual que el resumen (D-16.105).
+export type { Semaforo };
 
 export interface UmbralesDelResumen {
   /** Por debajo de esto, verde. D3: `0.28`. */
@@ -74,7 +72,7 @@ export function resumir(entrada: {
 
   return {
     ...datos,
-    semaforoFoodCost: porBandas({
+    semaforoFoodCost: semaforoPorBandas({
       valor: datos.foodCostRealPct,
       verde: umbrales.umbralVerde,
       rojo: umbrales.foodCostMaximo,
@@ -87,16 +85,6 @@ export function resumir(entrada: {
     semaforoPrimeCost: sobreUmbral(datos.primeCostPct, umbrales.primeCostMaximo),
     semaforoUtilidad: porSigno(datos.utilidadOperativa),
   };
-}
-
-function porBandas(entrada: {
-  readonly valor: Ratio | null;
-  readonly verde: Ratio;
-  readonly rojo: Ratio;
-}): Semaforo {
-  if (entrada.valor === null) return 'SIN_DATO';
-  if (entrada.valor.lessThanOrEqual(entrada.verde)) return 'VERDE';
-  return entrada.valor.lessThanOrEqual(entrada.rojo) ? 'AMBAR' : 'ROJO';
 }
 
 /** Dos bandas: dentro del umbral o fuera. No hay ámbar donde no hay margen. */

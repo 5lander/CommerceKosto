@@ -125,6 +125,17 @@ export interface RepositorioDePrecios {
   }): Promise<readonly PrecioLeido[]>;
 
   /**
+   * Los precios SUGERIDOS de la company, por `id` —uuidv7, o sea por orden de
+   * captura—, a partir del cursor. Es la bandeja de R5: lo que alguien tiene
+   * que confirmar o rechazar.
+   */
+  sugeridos(entrada: {
+    readonly companyId: CompanyId;
+    readonly despuesDe: ReferencePriceId | null;
+    readonly limite: number;
+  }): Promise<readonly PrecioLeido[]>;
+
+  /**
    * Todos los precios CONFIRMADOS de la company con vigencia hasta una fecha.
    *
    * EXISTE PARA QUE COSTEAR UNA CARTA NO SEA UN N+1. Con `historial` por item,

@@ -5,7 +5,7 @@
 | **Síntoma** | Una petición con datos incoherentes devuelve **500 `INTERNAL_ERROR`** en vez de 400. En el log hay un `23514` (check_violation) o un `P0001` (raise de trigger) del driver de PostgreSQL |
 | **Área** | arquitectura · base de datos |
 | **Paquete** | P5 (las dos reglas eran de P3 y P4) |
-| **Recurrencias** | **3** — dos en el paquete de origen y la tercera en **P16-A2**: la clave foránea de unidad y los índices únicos de nombre del catálogo |
+| **Recurrencias** | **4** — dos en el paquete de origen, la tercera en **P16-A2** (la clave foránea de unidad y los índices únicos de nombre del catálogo) y la cuarta en **P16-B** (cuatro `CHECK` marcados «lo filtra el esquema» que el esquema no filtraba) |
 | **Estado** | ✅ resuelto |
 
 ---
@@ -80,6 +80,51 @@ El mismo fallo con **otras dos restricciones**, que no son ni un `CHECK` ni un t
 Traducidas en P16-A2: **400** con las diez unidades válidas enumeradas, y **409** con el nombre que sobra dentro. La base sigue siendo la garantía; el dominio explica.
 
 **Y con la tercera recurrencia, CLAUDE.md §8.3 obliga a hacer la prevención que no se hizo.** La revisión de la etapa la señaló con precisión: el 409 de reimportar `ARTICULOS` y el rescate de la carrera **no tenían ni una prueba**, ni unitaria ni de integración, pese a que `guardas-de-dominio.md` marca esos índices como 🔴 y su propia sección «Cómo se mantiene» exige, por cada 🔴, «la guarda de dominio **Y** la prueba de que devuelve 4xx». Una guarda sin prueba es media guarda: funciona hoy y vuelve al 500 en el próximo refactor sin que ningún check se entere — que es exactamente cómo empezó esta incidencia.
+
+## Cuarta recurrencia — P16-B: la fila decía «esquema» y el esquema no filtraba
+
+**Esta vez no faltaba la guarda: faltaba que la guarda declarada existiera.** Cuatro restricciones
+estaban en `guardas-de-dominio.md` como 🟡 «filtrada por esquema», que según ese mismo documento
+significa «nada más que hacer». Se probó por HTTP **antes** de tocar nada, y las cuatro salían 500:
+
+| Petición | Restricción | Qué decía el esquema |
+|---|---|---|
+| `POST /precios` con `precio: "0"` o `"-1"` | `reference_price_positivo` | un `decimal` con signo |
+| `PUT /productos/:id/ubicaciones` con `pvp: "0"` | `product_location_pvp_positivo` | un `decimal` sin signo, **cero incluido** |
+| ídem con `rendimientoPorciones: "0"` | `product_location_rendimiento_positivo` | ídem |
+| `POST /inventario/movimientos` MERMA con `costoTotal: "-5"` | `inventory_movement_importe_no_negativo` | un `decimal` **con signo**, mientras la fila afirmaba «no negativo» |
+
+**Por qué costó verlo.** Seis DTO definían diez expresiones regulares propias, casi todas bajo el
+nombre `decimal`, y el nombre no dice si admite cero ni signo: en `precios.dto.ts` llevaba signo, en
+`recetas.dto.ts` no, y las dos se llamaban igual. Dos de ellas —`magnitud` en inventario y el importe
+de analítica— decían «debe ser una cantidad positiva» encima de una regex que aceptaba `"0"`. Quien etiquetaba la fila miraba
+que el campo *tuviera* esquema, no qué aceptaba.
+
+**Una quinta candidata no lo era, y el guardián lo dijo.** `purchase_article_presentacion_positiva`
+tenía el mismo defecto de esquema, pero `problemaDeConversion` la paraba desde P2: devolviendo el
+esquema a la regex vieja la prueba seguía en 400. Solo con las dos capas quitadas sale el 500. La
+prueba se había titulado «cuarta recurrencia» y se corrigió antes del commit: es la prevención de
+**INC-007** funcionando, no una recurrencia de INC-007.
+
+**Solución.** Guarda de dominio donde faltaba (`SugerirPrecio` → `PrecioNoPositivoError`,
+`exigirPositivos` en `ConfigurarProductoEnUbicacion`, la fila del lote de precios) y el esquema
+correcto en el borde. Las cuatro filas, más la presentación y los dos `CHECK` de componentes de
+combo, pasan a 🔴 **con su prueba citada**, y cada prueba se verificó en rojo quitando su guarda.
+
+### Lo que la cuarta recurrencia obliga a automatizar, y se automatizó
+
+**Un vocabulario único de números en el borde:** `apps/api/src/shared/infrastructure/http/decimales-del-borde.ts`
+con `decimalConSigno`, `decimalNoNegativo`, `decimalPositivo`, `fraccion` y `enteroNoNegativo`. Cada
+esquema se llama como lo que acepta, así que etiquetar una fila 🟡 obliga a leer un nombre que ya lo
+dice: `precio: decimalConSigno` junto a un `CHECK (precio > 0)` no se pasa por alto.
+
+**Y una regla de `audit:forbidden` que impide volver atrás:** `regex-de-numero-solo-en-el-vocabulario`
+falla ante cualquier `.regex(` dentro de un `*.dto.ts`. Su guardián se capturó en rojo con una regex
+de prueba en `recetas.dto.ts` (ver `docs/pasos/P16-B/AUDITORIA-RESULTADO.md`).
+
+**Lo que sigue sin automatizar.** Que la fila 🔴 cite un archivo de prueba que exista (propuesto en
+la tercera recurrencia) sigue manual: la cuarta no entró por ahí, sino por una fila 🟡, y ningún
+check puede decidir si un esquema filtra lo que un `CHECK` exige sin leer los dos.
 
 ## Prevención
 

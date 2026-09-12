@@ -806,3 +806,62 @@ Lo que el diagrama no enseña y decide el diseño:
 - **`Origin`/`Referer` no se comprueba** (D-16.69): duplicaría la lista blanca de CORS, que en
   desarrollo y en las pruebas está vacía, y la comprobación necesitaría un «si está vacía, pasa» que
   falla abierto. La señal para reabrirlo está en ADR-021.
+
+---
+
+## La concurrencia optimista (desde P16-B)
+
+Las pantallas editan con **reemplazos totales**, y dos personas con la misma ficha abierta se pisaban
+sin enterarse: ganaba la última en guardar. Desde P16-B cada escritura de reemplazo lleva **lo que se
+leyó**, y si otro escribió entre medias recibe **409 `CONFLICTO_DE_VERSION`** (D-16.11, **ADR-023**).
+Hay dos testigos, porque hay dos formas de escribir: sobre una fila (producto, ítem) o creando una
+fila nueva (receta).
+
+```mermaid
+sequenceDiagram
+    participant A as Dueña
+    participant B as Gerente
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL
+
+    Note over A,DB: 1. Fila que se actualiza - la version va en el WHERE
+    A->>API: GET /productos/p            -> version 4
+    B->>API: GET /productos/p            -> version 4
+    A->>API: PUT /productos/p/ubicaciones {pvp 2.50, version 4}
+    API->>DB: UPDATE product SET version = version + 1 WHERE id = p AND version = 4   (1 fila)
+    API->>DB: upsert product_location (misma transaccion)
+    API-->>A: 200 {version 5}
+    B->>API: PUT /productos/p/ubicaciones {pvp 2.90, version 4}
+    API->>DB: UPDATE ... WHERE version = 4   (0 filas)
+    API->>DB: SELECT count(*) FROM product WHERE id = p   (existe: no es 404)
+    API-->>B: 409 CONFLICTO_DE_VERSION {code, message}   (sin la version actual)
+
+    Note over A,DB: 2. Fila que se crea - el testigo es la ultima version creada
+    A->>API: GET /recetas?productId=p&locationId=l   -> ultimaVersionId R1
+    A->>API: PUT /recetas {basadaEn R1, lineas}
+    API->>DB: pg_advisory_xact_lock(hashtext('receta'), hashtext('producto:p@l'))
+    API->>DB: ultima creada de (p, l) = R1 ?   (si: sigue)
+    API->>DB: INSERT recipe R2 + lineas
+    API-->>A: 201 {id R2}   (el basadaEn del siguiente guardado)
+```
+
+Lo que el diagrama no enseña y decide el diseño:
+
+- **Por qué la condición va dentro del `UPDATE` y no en un `if` antes.** Leer «4», comparar en
+  JavaScript y escribir deja una ventana en la que dos peticiones leen «4» y escriben las dos. Dentro
+  del `UPDATE`, la segunda espera el bloqueo de la fila y, en `READ COMMITTED`, **vuelve a evaluar su
+  `WHERE`** contra la fila ya escrita: cero filas. La 🔴 que lo prueba no usa `Promise.all` —en local no
+  se solapan— sino una fila bloqueada desde otra conexión; con un `if` previo da cinco 200 en vez de uno.
+- **Por qué la receta necesita un candado y el producto no.** La carrera de la receta no escribe sobre
+  una fila existente: **inserta** otra, así que no hay fila que bloquear. El candado consultivo
+  serializa a los dos guardados sin depender de qué filas existan, y muere con la transacción.
+- **La versión del producto es del agregado.** Sube con el empaque, con los componentes y con la
+  configuración de **cualquier** ubicación: fijar el PVP del local A deja obsoleto el formulario del
+  local B. Es la deuda aceptada de D-16.20, con su señal en ADR-023. La receta no la tiene: su testigo
+  es por destino **y ubicación**.
+- **Lo que sobrescribe por definición no lleva testigo, pero pasa por el candado.** Propagar y revertir
+  (R11 ya obligó a previsualizar) y las cargas en lote (no hay formulario que haya leído nada) escriben
+  sin comprobar; como crean versiones nuevas o suben la del combo, un formulario abierto se entera con
+  un 409 en vez de pisarlas.
+- **El 409 no trae el número.** Con él dentro, lo fácil sería reenviar con él —pisar al otro con un paso
+  más—. Lo que el cliente necesita es releer el estado entero.

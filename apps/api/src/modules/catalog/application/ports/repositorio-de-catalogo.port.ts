@@ -12,6 +12,7 @@
  * tratarlo; un `throw` se olvida.
  */
 
+import type { DesenlaceVersionado } from '../../../../shared/application/concurrencia';
 import type {
   CompanyId,
   ItemGroupId,
@@ -41,6 +42,12 @@ export interface ItemLeido {
   readonly estado: string;
   readonly confianzaDePrecio: string;
   readonly llevaStock: boolean | null;
+  /**
+   * La versión del ítem (D-16.100, ADR-023). La devuelve toda lectura porque
+   * es lo que el formulario manda de vuelta al guardar: si otra persona
+   * escribió entre medias, la escritura sale con 409 en vez de pisarla.
+   */
+  readonly version: number;
 }
 
 export interface ArticuloLeido {
@@ -143,6 +150,8 @@ export interface DatosParaActualizarItem {
   readonly estado: EstadoDeCatalogo;
   /** El interruptor de stock de una preparación (P6). `null` en un COMPRADO. */
   readonly llevaStock: boolean | null;
+  /** La versión que el formulario leyó. Solo se escribe si sigue siendo esa. */
+  readonly versionEsperada: number;
 }
 
 export interface DatosParaCrearArticulo {
@@ -243,9 +252,12 @@ export interface RepositorioDeCatalogo {
   /**
    * `no_encontrado` si el ítem no existe en esa company; `nombre_en_uso` si el
    * nombre nuevo ya lo tiene otro ítem. Devolvía un `boolean` y el choque de
-   * nombres salía como **500** del índice único (P16-A2).
+   * nombres salía como **500** del índice único (P16-A2). Y desde P16-B,
+   * `conflicto_de_version` si otra escritura llegó antes (D-16.100).
    */
-  actualizarItem(datos: DatosParaActualizarItem): Promise<ResultadoDeCambio>;
+  actualizarItem(
+    datos: DatosParaActualizarItem,
+  ): Promise<DesenlaceVersionado | { readonly clase: 'nombre_en_uso' }>;
 
   listarItems(entrada: {
     readonly companyId: CompanyId;

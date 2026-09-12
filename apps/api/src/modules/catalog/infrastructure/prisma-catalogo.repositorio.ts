@@ -42,7 +42,9 @@ import {
   aPruebaDeChoques,
   esViolacionDeUnico,
 } from '../../../shared/infrastructure/persistence/rescate-de-choque';
+import { escribirConVersion } from '../../../shared/infrastructure/persistence/escritura-versionada';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
+import type { DesenlaceVersionado } from '../../../shared/application/concurrencia';
 import type {
   ArticuloLeido,
   DatosDeArticuloEnLote,
@@ -269,25 +271,37 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
    * `P2002` subía sin capturar hasta el filtro, que lo convertía en **500**.
    * Era la única de las tres `actualizar*` que no pasaba por aquí.
    */
-  public async actualizarItem(datos: DatosParaActualizarItem): Promise<ResultadoDeCambio> {
-    return this.transaccion.run(datos.companyId, async (tx) =>
-      // `updateMany` y no `update`: sin `RETURNING`, y con `company_id` repetido
-      // en el WHERE. RLS ya lo filtra, pero una defensa que solo está en un
-      // sitio se cae entera si ese sitio falla.
-      intentarCambio(() =>
-        tx.item.updateMany({
-          where: { id: datos.itemId, companyId: datos.companyId },
-          data: {
-            name: datos.nombre,
-            yield: datos.rendimiento,
-            groupId: datos.grupoId,
-            priceConfidence: datos.confianzaDePrecio,
-            status: datos.estado,
-            keepsStock: datos.llevaStock,
-          },
-        }),
-      ),
-    );
+  public async actualizarItem(
+    datos: DatosParaActualizarItem,
+  ): Promise<DesenlaceVersionado | { readonly clase: 'nombre_en_uso' }> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      const donde = { id: datos.itemId, companyId: datos.companyId };
+      try {
+        // `updateMany` y no `update`: sin `RETURNING`, y con `company_id`
+        // repetido en el WHERE. Y la VERSIÓN también en el WHERE: es lo que
+        // cierra la carrera sin leer antes (ver `escritura-versionada.ts`).
+        return await escribirConVersion({
+          esperada: datos.versionEsperada,
+          escribir: () =>
+            tx.item.updateMany({
+              where: { ...donde, version: datos.versionEsperada },
+              data: {
+                name: datos.nombre,
+                yield: datos.rendimiento,
+                groupId: datos.grupoId,
+                priceConfidence: datos.confianzaDePrecio,
+                status: datos.estado,
+                keepsStock: datos.llevaStock,
+                version: { increment: 1 },
+              },
+            }),
+          existe: async () => (await tx.item.count({ where: donde })) > 0,
+        });
+      } catch (error) {
+        if (esViolacionDeUnico(error)) return { clase: 'nombre_en_uso' };
+        throw error;
+      }
+    });
   }
 
   public async listarItems(entrada: {
@@ -600,6 +614,7 @@ const CAMPOS_DE_ITEM = {
   status: true,
   priceConfidence: true,
   keepsStock: true,
+  version: true,
 } as const;
 
 function comoItemLeido(fila: {
@@ -612,6 +627,7 @@ function comoItemLeido(fila: {
   status: string;
   priceConfidence: string;
   keepsStock: boolean | null;
+  version: number;
 }): ItemLeido {
   return {
     id: aItemId(fila.id),
@@ -623,6 +639,7 @@ function comoItemLeido(fila: {
     estado: fila.status,
     confianzaDePrecio: fila.priceConfidence,
     llevaStock: fila.keepsStock,
+    version: fila.version,
   };
 }
 

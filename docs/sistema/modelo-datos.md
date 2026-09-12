@@ -1,7 +1,7 @@
 # Modelo de datos
 
 > Se completa en cada paquete que cree tablas, **en el mismo commit**, con el diagrama de entidades actualizado.
-> Estado: **P16-A2**. El documento cubre de P0 a P16-A2; la cabecera decía «P2» desde entonces y era falsa — corregido al cerrar P16-A2 (AUDITORIA.md H13).
+> Estado: **P16-B**. El documento cubre de P0 a P16-B; la cabecera decía «P2» desde entonces y era falsa — corregido al cerrar P16-A2 (AUDITORIA.md H13).
 
 ## Reglas transversales
 
@@ -243,7 +243,7 @@ erDiagram
         uuid    company_id PK "1 a 1 con company"
         numeric iva_venta "CHECK fraccion"
         boolean iva_compra_recuperable "R13"
-        numeric iva_compra "solo el DEFECTO al capturar"
+        numeric iva_compra "RETIRADA en P16-B (D-16.109)"
         numeric provision_merma "R12: solo lo que ningun rendimiento explica"
         numeric food_cost_objetivo "CHECK objetivo <= verde <= maximo"
         numeric food_cost_umbral_verde
@@ -277,7 +277,8 @@ El SPEC nombra `iva_compra` en la fórmula de §12 y **no dice dónde vive**; §
 
 > **P16-A1 la cierra en dos niveles** (D-16.9, ADR-024): la tarifa que se copia al precio sale del
 > **artículo de compra** o, sin artículo, del **grupo del ítem**; `company_settings.iva_compra` dejó de
-> leerse y se retira en P16-B. Ver «Lo que cambia P16-A1».
+> leerse y **P16-B la retira** (columna, `CHECK` y semilla, D-16.109). Ver «Lo que cambia P16-A1» y
+> «Lo que cambia P16-B».
 
 ### Un precio no se actualiza: se añade
 
@@ -906,6 +907,46 @@ añadidas al camino crítico.
 
 ---
 
+## Lo que cambia P16-B — la versión del agregado, y la retirada de `iva_compra`
+
+**Ninguna tabla nueva.** Dos columnas `version` para la concurrencia optimista (ADR-023), una columna
+que se va y un índice que sustituye a otro. Migración `20260912191330_p16b_versiones_y_ajustes`.
+
+```mermaid
+erDiagram
+    product {
+        integer version "P16-B. NOT NULL DEFAULT 1, CHECK >= 1. La del AGREGADO: maestro + product_location + combo_component"
+    }
+    item {
+        integer version "P16-B. Lo mismo, para PUT /catalogo/items/:id"
+    }
+    company_settings {
+        numeric iva_compra "RETIRADA: la tarifa vive en purchase_article e item_group desde P16-A1"
+    }
+```
+
+| Decisión | Por qué |
+|---|---|
+| **Un entero, no `updated_at`** | Ninguna tabla tenía `updated_at`, y un instante empata consigo mismo: dos escrituras del mismo milisegundo tendrían el mismo testigo (D-16.13) |
+| **La versión es del agregado, en la fila del maestro** | `product_location` y `combo_component` no llevan la suya: el formulario de la ficha los decide juntos, y la lista de componentes se reemplaza entera, así que sus filas no sobreviven para llevar versión. La consecuencia es la deuda de D-16.20 —fijar el PVP de un local deja obsoleto el formulario del otro—, con su señal en ADR-023 |
+| **La columna la escribe solo el repositorio, como `version + 1`** | En la misma sentencia que comprueba la esperada (`UPDATE … WHERE version = $n`). La `version` del cuerpo se **compara**, no se guarda: por eso los dos `CHECK` son ⚪ en `guardas-de-dominio.md` |
+| **`DEFAULT 1` rellena las filas existentes** | Al contrario que `session.csrf_token` en P16-A2, aquí no hay nada que entregar al cliente: la versión se lee con la ficha, y cualquier número de partida sirve mientras sea el mismo para todos |
+| **La receta NO tiene columna de versión** | Cada guardado es una fila nueva de `recipe`. El testigo es el id de la última creada (`basadaEn`), comprobado bajo `pg_advisory_xact_lock` — sin columna, sin trigger y sin escribir en `item` desde `recipes` (D-16.101) |
+| **`iva_compra` se suelta con `DROP COLUMN`, y el `down` la devuelve con `0.15`** | El `CHECK company_settings_ratios_son_fracciones` y la función `sembrar_ajustes_de_company()` se recrean sin ella en la misma migración. El `down` añade la columna con `DEFAULT 0.15` —la semilla de D3—, rellena y **suelta el `DEFAULT`**, para que la columna vuelva como estaba en P16-A2 y no con un valor por defecto que nunca tuvo. Probado sobre la base sembrada (INC-011) |
+
+**Un índice sustituye a otro, y los otros dos caben en lo que había.** La bandeja de precios
+sugeridos pagina por cursor —`company_id = $1 AND status = 'SUGGESTED' AND id > $cursor ORDER BY id`—
+y con `reference_price(company_id, status)` de P3 el planificador recorría la **clave primaria**
+filtrando company y estado: barato o caro según dónde cayeran los sugeridos en el orden de `id`. Pasa a
+**`(company_id, status, id)`**, con las tres condiciones en el `Index Cond`; su prefijo sigue sirviendo a
+las lecturas por estado de antes, así que sustituye y no se suma. La última versión de una receta usa
+`recipe(company_id, product_id|item_id, location_id, valid_from DESC)` y ordena por `created_at` las
+pocas versiones de un destino en una ubicación (34 en el volumen del bench), y las propagaciones de un
+producto, `recipe_propagation(company_id, product_id, propagated_at DESC)`. Los planes, en
+`docs/pasos/P16-B/CONSTRUCCION.md`.
+
+---
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -922,6 +963,7 @@ añadidas al camino crítico.
 | P10 | `import_job`, `import_job_status` | ✅ |
 | **P16-A1** | `email_outbox`, `password_reset_token`, `rate_limit_hit` (ADR-025, ADR-026) + las dos funciones definer que escriben. Y sin tabla nueva en la otra mitad: `purchase_article.iva_tarifa`, `item_group.iva_tarifa` y los cuatro campos del desglose en `inventory_movement`, con sus cuatro `CHECK` (ADR-024) | ✅ |
 | **P16-A2** | **Ninguna tabla nueva.** `session.csrf_token` y `backoffice_session.csrf_token` (nullable, con `CHECK` de longitud) y `session_lookup` rehecha para devolver la columna (ADR-021) | ✅ |
+| **P16-B** | **Ninguna tabla nueva.** `product.version` e `item.version` con su `CHECK` (ADR-023); **se retira** `company_settings.iva_compra` con su `CHECK` y su semilla (D-16.109); `reference_price(company_id, status)` pasa a `(company_id, status, id)` | ✅ |
 
 **`import_row` no existe, y es una decisión.** El plan la listaba; el análisis vive en un `jsonb`
 dentro de `import_job` porque es una **cache de algo reproducible** —si se pierde, se vuelve a subir
@@ -968,7 +1010,7 @@ Los de P1, todos con su consulta delante:
 | `item_group(company_id, name)` único | Nombre de grupo único por company |
 | `item_name_similitud` (GIN, trigrama) | **Sin consulta hoy.** Deduplicación de P10 |
 | `reference_price(company_id, item_id, valid_from DESC)` | El índice de §5: precio vigente de un ítem. Igualdad antes que rango |
-| `reference_price(company_id, status)` | Los precios pendientes de confirmar, y la carga en lote del costeo |
+| `reference_price(company_id, status, id)` | Los precios pendientes de confirmar **por cursor** (P16-B: antes `(company_id, status)`, y el orden por `id` caía en la clave primaria), y la carga en lote del costeo por el prefijo |
 | `product(company_id, name)` único · `(company_id, status)` | Nombre único y listado de productos activos |
 | `product_location(company_id, location_id)` | La carta de una ubicación |
 | `recipe(company_id, product_id, location_id, valid_from DESC)` | El índice de §5: receta vigente de un producto en una ubicación |

@@ -22,6 +22,7 @@ import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { AsignarEmpaque } from '../../application/casos-de-uso/carta';
+import type { VersionDeProducto } from './productos.controller';
 import { CUERPO_DE_EMPAQUE, type CuerpoDeEmpaque } from './recetas.dto';
 
 @Controller('productos')
@@ -30,15 +31,18 @@ export class EmpaqueController {
 
   @Put(':id/empaque')
   @Requiere('product.write')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   public async fijar(
     @SesionActual() sesion: SesionActiva,
     @Param('id') id: string,
     @Body(new EsquemaPipe(CUERPO_DE_EMPAQUE)) cuerpo: CuerpoDeEmpaque,
-  ): Promise<void> {
-    await this.asignar.ejecutar(sesion, {
+  ): Promise<VersionDeProducto> {
+    const version = await this.asignar.ejecutar(sesion, {
       productId: productId(id),
       empaqueItemId: cuerpo.empaqueItemId === null ? null : itemId(cuerpo.empaqueItemId),
+      version: cuerpo.version,
     });
+
+    return { version };
   }
 }

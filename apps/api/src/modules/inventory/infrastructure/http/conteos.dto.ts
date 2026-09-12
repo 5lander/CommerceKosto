@@ -19,19 +19,16 @@
 
 import { z } from 'zod';
 
+import { decimalConSigno } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 const PRIMER_MES = 1;
 const ULTIMO_MES = 12;
 const PRIMER_ANIO = 2000;
 const ULTIMO_ANIO = 2100;
-const LARGO_MAXIMO_DE_DECIMAL = 40;
 const LARGO_MAXIMO_DE_NOTA = 500;
 /** Un catálogo grande de una ubicación, con margen. */
 const MAXIMO_DE_LINEAS = 2000;
 
-const decimal = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^-?\d+(\.\d+)?$/u, 'debe ser un decimal en notación normal, por ejemplo "2.30"');
 
 export const CUERPO_DE_CONTEO = z
   .object({
@@ -45,7 +42,7 @@ export const CUERPO_DE_CONTEO = z
 export const CUERPO_DE_LINEAS = z
   .object({
     lineas: z
-      .array(z.object({ itemId: z.uuid(), cantidad: decimal }).strict())
+      .array(z.object({ itemId: z.uuid(), cantidad: decimalConSigno }).strict())
       .max(MAXIMO_DE_LINEAS),
   })
   .strict();

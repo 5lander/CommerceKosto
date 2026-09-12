@@ -16,6 +16,7 @@
  */
 
 import { motivoDeTarifaInvalida } from '../../../shared/domain/iva/tarifa';
+import { Money } from '../../../shared/domain/money/tipos-monetarios';
 import {
   PRIMERA_POSICION,
   clavePorNombre,
@@ -81,6 +82,9 @@ function mensajeDePrecioRepetido(precio: PrecioDelLote, posicion: number): strin
 function motivoDelPrecio(precio: PrecioDelLote): string | null {
   if (precio.item.trim().length === 0) return 'La fila no dice de qué ítem es este precio.';
   if (!DECIMAL.test(precio.precio)) return `El precio «${precio.precio}» no es un número.`;
+  // `DECIMAL` admite el cero, y `reference_price_positivo` no: sin esto, una fila
+  // con precio 0 tumbaba la importación entera con un 500 (D-16.110).
+  if (!Money.fromDecimalString(precio.precio).isPositive()) return `El precio «${precio.precio}» tiene que ser mayor que cero.`;
   // Con su fila, como cualquier problema del archivo (D-16.44): un 15 donde va
   // 0.15 no puede salir como un 400 suelto sin número.
   return precio.ivaCompra === null ? null : motivoDeTarifaInvalida(precio.ivaCompra);

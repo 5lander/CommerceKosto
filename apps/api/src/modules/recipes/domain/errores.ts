@@ -16,6 +16,22 @@ export class ProductoNoEncontradoError extends ErrorDeDominio {
   }
 }
 
+/**
+ * El ítem que se quiere poner de empaque no existe en la company (D-16.112).
+ *
+ * ES 400 Y NO 404. La ruta —`PUT /productos/:id/empaque`— existe y el producto
+ * también; lo que falla es una referencia DENTRO del cuerpo. Hasta P16-B salía
+ * como «ese producto no existe», que mandaba a buscar el error en el sitio
+ * equivocado.
+ */
+export class EmpaqueNoEncontradoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('Ese ítem de empaque no existe en tu company.');
+  }
+}
+
 export class PropagacionNoEncontradaError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
 

@@ -153,6 +153,33 @@ function crearLaBase({ administrativa, supervisora }) {
   });
 }
 
+/**
+ * Compila la API antes de medir, y siempre.
+ *
+ * EL MEDIDOR ES `apps/api/dist/bench.js`, y hasta P16-B este script lo lanzaba
+ * tal como estuviera en disco. Nadie lo compilaba: ni `npm run bench` ni
+ * `npm run audit`. En P16-B el `dist` era de dos días antes —anterior a todo el
+ * paquete— y el bench midió código que ya no existía; esta vez reventó con un
+ * `toFixed` de `undefined`, pero lo normal habría sido un número verde sobre el
+ * código de otro paquete. Es INC-007, caso 12: un check que pasa sin medir lo
+ * que dice medir.
+ *
+ * `tsc --build` es incremental: si nada cambió, tarda lo que tarda comprobarlo.
+ * Va ANTES de crear la base, para que un error de compilación no deje
+ * `costeo_bench` a medio sembrar.
+ */
+function compilar() {
+  anunciar('Compilando la API (el medidor es dist/bench.js)');
+
+  const compilada = correrCli('typescript', ['--build', 'tsconfig.build.json'], {
+    cwd: resolve(RAIZ, 'apps', 'api'),
+    ejecutable: 'tsc',
+    stdio: 'inherit',
+  });
+
+  if (compilada.status !== 0) throw new Error('La API no compila: no hay nada que medir.');
+}
+
 /** @param {string} migrador */
 function migrar(migrador) {
   anunciar('Aplicando las migraciones');
@@ -298,6 +325,7 @@ function main() {
   const aplicacion = apuntandoA(exigir('DATABASE_URL'), BASE_BENCH);
 
   let contrasena = '';
+  compilar();
   crearLaBase({ administrativa, supervisora });
 
   try {

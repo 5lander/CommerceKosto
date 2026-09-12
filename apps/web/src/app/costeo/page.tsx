@@ -26,7 +26,7 @@ import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
 import { Marco } from '../../componentes/Marco';
 import { Tabla } from '../../componentes/ui/Tabla';
 import { llamar } from '../../lib/api';
-import { comoImporte, comoPorcentaje, menorOIgual } from '../../lib/decimales';
+import { comoImporte, comoPorcentaje } from '../../lib/decimales';
 import { useSucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
 
@@ -49,8 +49,12 @@ interface SinVentaDto {
   readonly motivo: string;
 }
 
+/** El color lo decide la API con los umbrales de la company (D-16.105). */
+type Semaforo = 'VERDE' | 'AMBAR' | 'ROJO' | 'SIN_DATO';
+
 interface ProductoCosteado {
   readonly productId: string;
+  readonly semaforoFoodCost: Semaforo;
   readonly nombre: string;
   readonly categoria: string | null;
   readonly costos: {
@@ -70,34 +74,25 @@ interface CosteoDeCarta {
 const COLUMNAS_DE_VENTA = 4;
 
 /**
- * Los umbrales del semáforo son configuración POR COMPANY (D3) y hoy no viajan
- * en esta respuesta. Se usan los valores semilla como referencia visual, y
- * **solo para el color**: el número que decide es siempre el que manda la API.
+ * El semáforo devuelve una CLASE, no un color, y ya no decide nada.
  *
- * Es deuda anotada, no un descuido: el día que la API publique los umbrales de
- * la company, esto se sustituye por ellos y el color deja de ser aproximado.
- */
-const UMBRAL_VERDE = '0.28';
-const UMBRAL_MAXIMO = '0.32';
-
-/**
- * El semáforo devuelve una CLASE, no un color.
+ * **HASTA P16-B ESTA PANTALLA COMPARABA EL FOOD COST CONTRA DOS UMBRALES**
+ * escritos aquí —las semillas `0.28` y `0.32`— y es INC-020: con `localeCompare`
+ * pintó un 40 % de verde. Después del arreglo seguía siendo una regla de negocio
+ * en el navegador, con los umbrales de la semilla en vez de los de la company.
+ * Desde P16-B la API manda `semaforoFoodCost` (D-16.105) y esto solo traduce la
+ * etiqueta a la clase de `global.css`.
  *
  * Los tres colores viven en `tokens.css` y salen del manual de marca: Jade para
  * lo que va bien, Persimmon Profundo para lo que pide atención y Oxblood para
- * la pérdida. Devolver aquí un `var(--color-…)` volvería a meter la capa visual
- * en el archivo que trae los datos, que es justo lo que P14 sacó de aquí.
+ * la pérdida.
  */
-function claseDelFoodCost(pct: string): string {
-  if (menorOIgual(pct, UMBRAL_VERDE)) return 'numero bien';
-  if (menorOIgual(pct, UMBRAL_MAXIMO)) return 'numero atencion';
-  return 'numero mal';
-}
-
-/** Una fila con food cost por encima del máximo lleva la señal al costado. */
-function pideAtencion(pct: string): boolean {
-  return !menorOIgual(pct, UMBRAL_MAXIMO);
-}
+const CLASE_DEL_SEMAFORO: Readonly<Record<Semaforo, string>> = {
+  VERDE: 'numero bien',
+  AMBAR: 'numero atencion',
+  ROJO: 'numero mal',
+  SIN_DATO: 'numero',
+};
 
 export default function Costeo(): ReactNode {
   const { sucursal } = useSucursal();
@@ -172,7 +167,8 @@ function TablaDeCosteo({ productos }: { readonly productos: readonly ProductoCos
 
 function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode {
   const { venta, costos } = producto;
-  const senal = venta.vendible && pideAtencion(venta.foodCostPct);
+  // Una fila por encima del máximo lleva la señal al costado.
+  const senal = producto.semaforoFoodCost === 'ROJO';
 
   return (
     <tr data-senal={senal ? 'true' : undefined}>
@@ -194,7 +190,7 @@ function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode 
         <>
           <td className="numero">{venta.ventaNeta.mostrar}</td>
           <td className="numero">{venta.margenContribucion.mostrar}</td>
-          <td className={claseDelFoodCost(venta.foodCostPct)}>
+          <td className={CLASE_DEL_SEMAFORO[producto.semaforoFoodCost]}>
             {comoPorcentaje(venta.foodCostPct)}
           </td>
           <td className="numero">

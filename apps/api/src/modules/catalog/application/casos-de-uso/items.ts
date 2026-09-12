@@ -15,6 +15,7 @@
 
 import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
+import { ConflictoDeVersionError } from '../../../../shared/domain/errors/conflicto-de-version';
 import type { ItemGroupId, ItemId } from '../../../../shared/domain/identity/identificadores';
 import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Ratio } from '../../../../shared/domain/money/tipos-monetarios';
@@ -115,6 +116,8 @@ export interface DatosDeCambioDeItem {
   readonly confianzaDePrecio: ConfianzaDePrecio;
   readonly estado: EstadoDeCatalogo;
   readonly llevaStock: boolean | null;
+  /** La que el formulario leyó (D-16.100). */
+  readonly version: number;
 }
 
 export class ActualizarItem {
@@ -127,7 +130,11 @@ export class ActualizarItem {
    * pasarían a ser 200 «kg» y el costo se multiplicaría por mil en silencio.
    * Si hace falta, se crea un ítem nuevo y se archiva el viejo.
    */
-  public async ejecutar(sesion: SesionActiva, datos: DatosDeCambioDeItem): Promise<void> {
+  /**
+   * @returns la versión NUEVA del ítem.
+   * @throws {ItemNoEncontradoError} · {@link ItemRepetidoError} · {@link ConflictoDeVersionError}
+   */
+  public async ejecutar(sesion: SesionActiva, datos: DatosDeCambioDeItem): Promise<number> {
     const actual = await this.deps.repositorio.buscarItem({
       companyId: sesion.companyId,
       itemId: datos.itemId,
@@ -156,13 +163,15 @@ export class ActualizarItem {
       confianzaDePrecio: datos.confianzaDePrecio,
       estado: datos.estado,
       llevaStock: datos.llevaStock,
+      versionEsperada: datos.version,
     });
 
     // El `buscarItem` de arriba ya descartó el caso normal; esto es la carrera
-    // —alguien lo archivó entre medias— y el choque de nombres, que hasta
-    // P16-A2 subía sin traducir y salía como 500 (INC-012).
-    if (resultado === 'no_encontrado') throw new ItemNoEncontradoError();
-    if (resultado === 'nombre_en_uso') throw new ItemRepetidoError();
+    // —alguien lo archivó o lo cambió entre medias— y el choque de nombres,
+    // que hasta P16-A2 subía sin traducir y salía como 500 (INC-012).
+    if (resultado.clase === 'no_encontrado') throw new ItemNoEncontradoError();
+    if (resultado.clase === 'nombre_en_uso') throw new ItemRepetidoError();
+    if (resultado.clase === 'conflicto_de_version') throw new ConflictoDeVersionError('ítem');
 
     await this.deps.auditoria.record({
       eventType: datos.estado === 'INACTIVE' ? 'catalog.item.archived' : 'catalog.item.updated',
@@ -172,8 +181,10 @@ export class ActualizarItem {
       companyId: sesion.companyId,
       ip: null,
       userAgent: null,
-      detail: { itemId: datos.itemId, estado: datos.estado },
+      detail: { itemId: datos.itemId, estado: datos.estado, version: resultado.version },
     });
+
+    return resultado.version;
   }
 }
 

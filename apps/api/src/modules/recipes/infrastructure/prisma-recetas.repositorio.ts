@@ -34,7 +34,9 @@ import {
   excedeElLimite,
   limitesBloqueados,
 } from '../../../shared/infrastructure/persistence/limites-del-plan';
+import { escribirConVersion } from '../../../shared/infrastructure/persistence/escritura-versionada';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
+import type { DesenlaceVersionado } from '../../../shared/application/concurrencia';
 import type { GrafoDeItems } from '../domain/ciclos';
 import type { BaseDeLinea, EstadoDeLinea } from '../domain/linea-de-receta';
 import type { ResultadoDeLoteConLimite } from '../../../shared/application/lote';
@@ -42,6 +44,7 @@ import { clavePorNombre, nombresQueChocan } from '../../../shared/domain/lote/pr
 import type {
   ComponenteDeCombo,
   ComponenteEnLote,
+  ComponenteParaGuardar,
   ConfiguracionEnUbicacion,
   DatosDeProductoEnLote,
   DatosDePropagacionRegistrada,
@@ -58,6 +61,7 @@ import type {
   RecetaVigenteLeida,
   RepositorioDeRecetas,
   ResultadoDeAltaDeProducto,
+  ResultadoDeGuardadoDeReceta,
   TipoDeProducto,
 } from '../application/ports/repositorio-de-recetas.port';
 
@@ -70,6 +74,71 @@ interface Decimal {
 
 function esDuplicado(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === CODIGO_DE_DUPLICADO;
+}
+
+/**
+ * Sube la versión del producto y aplica `cambios` en la misma sentencia, solo si
+ * sigue siendo la esperada (D-16.100). Ver `escritura-versionada.ts`.
+ */
+function subirVersionDeProducto(
+  tx: ClienteDeTransaccion,
+  entrada: {
+    readonly companyId: CompanyId;
+    readonly productId: ProductId;
+    readonly versionEsperada: number;
+    readonly cambios?: { readonly packagingItemId: string | null };
+  },
+): Promise<DesenlaceVersionado> {
+  const donde = { id: entrada.productId, companyId: entrada.companyId };
+  return escribirConVersion({
+    esperada: entrada.versionEsperada,
+    escribir: () =>
+      tx.product.updateMany({
+        where: { ...donde, version: entrada.versionEsperada },
+        data: { ...entrada.cambios, version: { increment: 1 } },
+      }),
+    existe: async () => (await tx.product.count({ where: donde })) > 0,
+  });
+}
+
+/**
+ * EL CANDADO DE UNA RECETA: por (destino, ubicación), y solo mientras dura la
+ * transacción (D-16.101).
+ *
+ * Comprobar «la última versión sigue siendo `basadaEn`» y crear la nueva son dos
+ * sentencias, y entre las dos cabe otra petición que lea lo mismo. Un
+ * `SELECT … FOR UPDATE` sobre la última versión NO sirve: bloquea esa fila, pero
+ * lo que la carrera hace es INSERTAR otra, y la segunda petición vuelve a leer
+ * la fila que bloqueó sin ver la nueva. El candado consultivo serializa a las dos
+ * sin depender de qué filas existan, igual que `rate_limit_hit` (D-16.62). Una
+ * colisión de `hashtext` entre dos destinos solo las serializa de más.
+ *
+ * `::text` porque `pg_advisory_xact_lock` devuelve `void` y el motor de Prisma no
+ * sabe leerlo.
+ */
+async function bloquearDestino(
+  tx: ClienteDeTransaccion,
+  entrada: { readonly destino: DestinoDeReceta; readonly locationId: LocationId },
+): Promise<void> {
+  const clave = `${claveDeDestino(entrada.destino)}@${entrada.locationId}`;
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('receta'), hashtext(${clave}))::text AS bloqueo`;
+}
+
+function claveDeDestino(destino: DestinoDeReceta): string {
+  return destino.clase === 'producto' ? `producto:${destino.productId}` : `item:${destino.itemId}`;
+}
+
+/** La última versión CREADA. El desempate por `id` —uuidv7, ordenado en el tiempo— es para dos del mismo instante. */
+async function ultimaVersion(
+  tx: ClienteDeTransaccion,
+  entrada: { readonly companyId: CompanyId; readonly destino: DestinoDeReceta; readonly locationId: LocationId },
+): Promise<RecipeId | null> {
+  const fila = await tx.recipe.findFirst({
+    where: { companyId: entrada.companyId, locationId: entrada.locationId, ...porDestino(entrada.destino) },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: { id: true },
+  });
+  return fila === null ? null : aRecipeId(fila.id);
 }
 
 /** El filtro que distingue una receta de producto de una de subpreparación. */
@@ -90,6 +159,7 @@ const CAMPOS_DE_PRODUCTO = {
   category: true,
   status: true,
   packagingItemId: true,
+  version: true,
 } as const;
 
 /** Lo que devuelve un `select: CAMPOS_DE_RECETA`. */
@@ -232,6 +302,12 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     readonly createdBy: UserId;
   }): Promise<number> {
     return this.transaccion.run(datos.companyId, async (tx) => {
+      // EL MISMO CANDADO QUE `guardarVersion`, en orden de clave para que dos
+      // lotes simultáneos no se esperen en cruz (D-16.101).
+      const claves = [...datos.recetas].sort((a, b) => claveDeDestino(a.destino).localeCompare(claveDeDestino(b.destino)));
+      for (const receta of claves) {
+        await bloquearDestino(tx, { destino: receta.destino, locationId: datos.locationId });
+      }
       for (const receta of datos.recetas) {
         await escribirVersion(tx, datos, receta);
       }
@@ -244,6 +320,12 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
             componentProductId: componente.componentProductId,
             cantidad: componente.cantidad,
           })),
+        });
+        // Un formulario abierto antes de la importación tiene que enterarse
+        // (D-16.102): la lista de componentes cambió debajo de él.
+        await tx.product.updateMany({
+          where: { companyId: datos.companyId, id: { in: [...new Set(datos.combos.map((c) => c.comboProductId))] } },
+          data: { version: { increment: 1 } },
         });
       }
 
@@ -289,8 +371,15 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     readonly activo: boolean;
     readonly pvp: string | null;
     readonly rendimientoPorciones: string | null;
-  }): Promise<void> {
-    await this.transaccion.run(entrada.companyId, async (tx) => {
+    readonly versionEsperada: number;
+  }): Promise<DesenlaceVersionado> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      // LA VERSIÓN PRIMERO: si no es la esperada no se escribe nada más. Y si el
+      // `upsert` de abajo choca con un CHECK, la transacción deshace también la
+      // subida, así que la versión nunca cuenta una escritura que no ocurrió.
+      const desenlace = await subirVersionDeProducto(tx, entrada);
+      if (desenlace.clase !== 'escrito') return desenlace;
+
       await tx.productLocation.upsert({
         where: {
           productId_locationId: { productId: entrada.productId, locationId: entrada.locationId },
@@ -309,6 +398,8 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
           rendimientoPorciones: entrada.rendimientoPorciones,
         },
       });
+
+      return desenlace;
     });
   }
 
@@ -363,8 +454,13 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     });
   }
 
-  public async guardarVersion(datos: DatosDeVersion): Promise<RecipeId> {
+  public async guardarVersion(datos: DatosDeVersion): Promise<ResultadoDeGuardadoDeReceta> {
     return this.transaccion.run(datos.companyId, async (tx) => {
+      await bloquearDestino(tx, datos);
+      if (datos.testigo.clase === 'comprobar' && (await ultimaVersion(tx, datos)) !== datos.testigo.basadaEn) {
+        return { clase: 'conflicto_de_version' };
+      }
+
       const receta = await tx.recipe.create({
         data: {
           companyId: datos.companyId,
@@ -392,8 +488,16 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
         });
       }
 
-      return aRecipeId(receta.id);
+      return { clase: 'guardada', id: aRecipeId(receta.id) };
     });
+  }
+
+  public async ultimaVersionDe(entrada: {
+    readonly companyId: CompanyId;
+    readonly destino: DestinoDeReceta;
+    readonly locationId: LocationId;
+  }): Promise<RecipeId | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => ultimaVersion(tx, entrada));
   }
 
   public async recetaVigente(entrada: {
@@ -545,32 +649,29 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       const fila = await tx.recipePropagation.findFirst({
         where: { id: entrada.propagacionId, companyId: entrada.companyId },
-        select: {
-          id: true,
-          productId: true,
-          propagatedAt: true,
-          revertedAt: true,
-          destinos: {
-            select: { locationId: true, previousRecipeId: true, createdRecipeId: true },
-          },
-        },
+        select: CAMPOS_DE_PROPAGACION,
       });
 
-      if (fila === null) {
-        return null;
-      }
+      return fila === null ? null : comoPropagacion(fila);
+    });
+  }
 
-      return {
-        id: aPropagationId(fila.id),
-        productId: aProductId(fila.productId),
-        propagadaEn: fila.propagatedAt,
-        revertidaEn: fila.revertedAt,
-        destinos: fila.destinos.map((d) => ({
-          locationId: aLocationId(d.locationId),
-          anterior: d.previousRecipeId === null ? null : aRecipeId(d.previousRecipeId),
-          creada: aRecipeId(d.createdRecipeId),
-        })),
-      };
+  public async propagacionesDe(entrada: {
+    readonly companyId: CompanyId;
+    readonly productId: ProductId;
+    readonly limite: number;
+  }): Promise<readonly PropagacionLeida[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      // Usa `recipe_propagation_company_id_product_id_propagated_at_idx`,
+      // que P4 creó exactamente con este orden.
+      const filas = await tx.recipePropagation.findMany({
+        where: { companyId: entrada.companyId, productId: entrada.productId },
+        orderBy: { propagatedAt: 'desc' },
+        take: entrada.limite,
+        select: CAMPOS_DE_PROPAGACION,
+      });
+
+      return filas.map(comoPropagacion);
     });
   }
 
@@ -611,17 +712,63 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
     readonly companyId: CompanyId;
     readonly productId: ProductId;
     readonly empaqueItemId: ItemId | null;
-  }): Promise<boolean> {
+    readonly versionEsperada: number;
+  }): Promise<DesenlaceVersionado> {
+    // `updateMany` y no `update`: bajo RLS, `update` con `RETURNING` exige la
+    // politica de SELECT y ademas lanza si no encuentra la fila. Aqui «no
+    // existe» es una respuesta, no una excepcion (INC-010).
+    return this.transaccion.run(entrada.companyId, async (tx) =>
+      subirVersionDeProducto(tx, { ...entrada, cambios: { packagingItemId: entrada.empaqueItemId } }),
+    );
+  }
+
+  public async componentesDe(entrada: {
+    readonly companyId: CompanyId;
+    readonly comboProductId: ProductId;
+  }): Promise<readonly ComponenteDeCombo[]> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
-      // `updateMany` y no `update`: bajo RLS, `update` con `RETURNING` exige la
-      // politica de SELECT y ademas lanza si no encuentra la fila. Aqui «no
-      // existe» es una respuesta, no una excepcion (INC-010).
-      const resultado = await tx.product.updateMany({
-        where: { id: entrada.productId, companyId: entrada.companyId },
-        data: { packagingItemId: entrada.empaqueItemId },
+      const filas = await tx.comboComponent.findMany({
+        where: { companyId: entrada.companyId, comboProductId: entrada.comboProductId },
+        select: { comboProductId: true, componentProductId: true, cantidad: true },
+        orderBy: { componentProductId: 'asc' },
       });
 
-      return resultado.count > 0;
+      return filas.map(comoComponente);
+    });
+  }
+
+  /**
+   * BORRAR Y ESCRIBIR, NO COMPARAR Y PARCHEAR. La lista que llega es la lista
+   * entera (D-16.114): calcular qué filas añadir, cuáles quitar y cuáles cambiar
+   * son tres sentencias con sus tres formas de equivocarse, para un combo que
+   * tiene tres o cuatro componentes. Todo va en la transacción que sube la
+   * versión: o cambia la lista entera, o no cambia nada.
+   */
+  public async reemplazarComponentes(entrada: {
+    readonly companyId: CompanyId;
+    readonly comboProductId: ProductId;
+    readonly componentes: readonly ComponenteParaGuardar[];
+    readonly versionEsperada: number;
+  }): Promise<DesenlaceVersionado> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const desenlace = await subirVersionDeProducto(tx, { ...entrada, productId: entrada.comboProductId });
+      if (desenlace.clase !== 'escrito') return desenlace;
+
+      await tx.comboComponent.deleteMany({
+        where: { companyId: entrada.companyId, comboProductId: entrada.comboProductId },
+      });
+      if (entrada.componentes.length > 0) {
+        await tx.comboComponent.createMany({
+          data: entrada.componentes.map((c) => ({
+            companyId: entrada.companyId,
+            comboProductId: entrada.comboProductId,
+            componentProductId: c.componentProductId,
+            cantidad: c.cantidad,
+          })),
+        });
+      }
+
+      return desenlace;
     });
   }
 
@@ -670,11 +817,7 @@ export class PrismaRecetasRepositorio implements RepositorioDeRecetas {
         select: { comboProductId: true, componentProductId: true, cantidad: true },
       });
 
-      return filas.map((f) => ({
-        comboProductId: aProductId(f.comboProductId),
-        componentProductId: aProductId(f.componentProductId),
-        cantidad: f.cantidad.toFixed(),
-      }));
+      return filas.map(comoComponente);
     });
   }
 }
@@ -758,6 +901,7 @@ function comoProducto(fila: {
   category: string | null;
   status: string;
   packagingItemId: string | null;
+  version: number;
 }): ProductoLeido {
   return {
     id: aProductId(fila.id),
@@ -766,6 +910,43 @@ function comoProducto(fila: {
     categoria: fila.category,
     estado: fila.status,
     empaqueItemId: fila.packagingItemId === null ? null : aItemId(fila.packagingItemId),
+    version: fila.version,
+  };
+}
+
+function comoComponente(fila: { comboProductId: string; componentProductId: string; cantidad: Decimal }): ComponenteDeCombo {
+  return {
+    comboProductId: aProductId(fila.comboProductId),
+    componentProductId: aProductId(fila.componentProductId),
+    cantidad: fila.cantidad.toFixed(),
+  };
+}
+
+const CAMPOS_DE_PROPAGACION = {
+  id: true,
+  productId: true,
+  propagatedAt: true,
+  revertedAt: true,
+  destinos: { select: { locationId: true, previousRecipeId: true, createdRecipeId: true } },
+} as const;
+
+function comoPropagacion(fila: {
+  id: string;
+  productId: string;
+  propagatedAt: Date;
+  revertedAt: Date | null;
+  destinos: readonly { locationId: string; previousRecipeId: string | null; createdRecipeId: string }[];
+}): PropagacionLeida {
+  return {
+    id: aPropagationId(fila.id),
+    productId: aProductId(fila.productId),
+    propagadaEn: fila.propagatedAt,
+    revertidaEn: fila.revertedAt,
+    destinos: fila.destinos.map((d) => ({
+      locationId: aLocationId(d.locationId),
+      anterior: d.previousRecipeId === null ? null : aRecipeId(d.previousRecipeId),
+      creada: aRecipeId(d.createdRecipeId),
+    })),
   };
 }
 

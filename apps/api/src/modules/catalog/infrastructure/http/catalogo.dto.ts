@@ -21,20 +21,11 @@
 
 import { z } from 'zod';
 
+import { decimalConSigno, decimalPositivo, fraccion } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 const LARGO_MAXIMO_DE_NOMBRE = 200;
 const LARGO_MAXIMO_DE_DECIMAL = 40;
 
-/** Decimal exacto en cadena: `"0.85"`, `"2"`, `"-1.5"`. Sin exponentes. */
-const decimal = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^-?\d+(\.\d+)?$/u, 'debe ser un decimal en notación normal, por ejemplo "0.85"');
-
-/** Una tarifa de IVA: fracción entre 0 y 1, en cadena. `"0.15"`, nunca `"15"`. */
-const fraccion = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u, 'debe ser una fracción entre 0 y 1, por ejemplo "0.15"');
 
 const nombre = z.string().trim().min(1).max(LARGO_MAXIMO_DE_NOMBRE);
 const texto = z.string().trim().max(LARGO_MAXIMO_DE_NOMBRE);
@@ -57,7 +48,7 @@ export const CUERPO_DE_ITEM = z
     nombre,
     tipo: z.enum(['COMPRADO', 'PRODUCIDO']),
     unidadDeUso: z.string().min(1).max(LARGO_MAXIMO_DE_DECIMAL),
-    rendimiento: decimal,
+    rendimiento: decimalConSigno,
     grupoId: z.uuid().nullable(),
     confianzaDePrecio: z.enum(['FACTURA', 'ESTIMADO']),
     /** `null` para un ítem comprado; obligatorio decidirlo en una preparación. */
@@ -67,8 +58,10 @@ export const CUERPO_DE_ITEM = z
 
 export const CUERPO_DE_CAMBIO_DE_ITEM = z
   .object({
+    /** La versión que se leyó (D-16.100). Si otra escritura llegó antes, 409. */
+    version: z.int().min(1),
     nombre,
-    rendimiento: decimal,
+    rendimiento: decimalConSigno,
     grupoId: z.uuid().nullable(),
     confianzaDePrecio: z.enum(['FACTURA', 'ESTIMADO']),
     estado: z.enum(['ACTIVE', 'INACTIVE']),
@@ -93,9 +86,9 @@ export const CUERPO_DE_ARTICULO = z
     nombre,
     marca: texto.nullable(),
     proveedor: texto.nullable(),
-    presentacion: decimal,
+    presentacion: decimalPositivo,
     unidadDePresentacion: z.string().min(1).max(LARGO_MAXIMO_DE_DECIMAL),
-    factorExplicito: decimal.nullable(),
+    factorExplicito: decimalConSigno.nullable(),
     /** Obligatoria: la tarifa de IVA de ESTE artículo (D-16.9). */
     ivaTarifa: fraccion,
   })
@@ -120,5 +113,19 @@ export type CuerpoDeGrupo = z.infer<typeof CUERPO_DE_GRUPO>;
 export type CuerpoDeCambioDeGrupo = z.infer<typeof CUERPO_DE_CAMBIO_DE_GRUPO>;
 export type CuerpoDeCambioDeArticulo = z.infer<typeof CUERPO_DE_CAMBIO_DE_ARTICULO>;
 export type CuerpoDeItem = z.infer<typeof CUERPO_DE_ITEM>;
+/**
+ * `GET /catalogo/items?incluirInactivos=true`. Hasta P16-B era un `@Query` suelto
+ * que trataba cualquier cosa distinta de `"true"` como `false` —`"si"`, `"1"`,
+ * `"TRUE"`— sin avisar (D-16.111). Ahora son las dos palabras o 400.
+ */
+export const CONSULTA_DE_ITEMS = z
+  .object({ incluirInactivos: z.enum(['true', 'false']).default('false') })
+  .strict();
+
+/** `GET /catalogo/articulos?itemId=`. Sin `itemId`, todos los de la company. */
+export const CONSULTA_DE_ARTICULOS = z.object({ itemId: z.uuid().optional() }).strict();
+
+export type ConsultaDeItems = z.infer<typeof CONSULTA_DE_ITEMS>;
+export type ConsultaDeArticulos = z.infer<typeof CONSULTA_DE_ARTICULOS>;
 export type CuerpoDeCambioDeItem = z.infer<typeof CUERPO_DE_CAMBIO_DE_ITEM>;
 export type CuerpoDeArticulo = z.infer<typeof CUERPO_DE_ARTICULO>;

@@ -14,7 +14,8 @@ import { Ratio } from '../../../shared/domain/money/tipos-monetarios';
 
 export interface AjustesCapturados {
   readonly ivaVenta: string;
-  readonly ivaCompra: string;
+  // Sin `ivaCompra` desde P16-B (D-16.109): la tarifa es del artículo o del
+  // grupo (D-16.9), nunca de la company.
   readonly ivaCompraRecuperable: boolean;
   readonly provisionMerma: string;
   readonly foodCostObjetivo: string;
@@ -28,10 +29,9 @@ export interface AjustesCapturados {
 
 const DIAS_MAXIMOS_DEL_MES = 31;
 
-/** Los ocho valores que son fracciones entre 0 y 1. */
+/** Los siete valores que son fracciones entre 0 y 1. */
 const FRACCIONES = [
   'ivaVenta',
-  'ivaCompra',
   'provisionMerma',
   'foodCostObjetivo',
   'foodCostMaximo',
