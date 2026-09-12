@@ -72,6 +72,7 @@ export class PrismaBackofficeRepositorio implements RepositorioDeBackoffice {
   public async abrirSesion(entrada: {
     readonly operatorId: OperatorId;
     readonly tokenHash: string;
+    readonly csrfToken: string;
     readonly expiraEn: Date;
     readonly ip: string | null;
     readonly userAgent: string | null;
@@ -81,6 +82,7 @@ export class PrismaBackofficeRepositorio implements RepositorioDeBackoffice {
         data: {
           userId: entrada.operatorId,
           tokenHash: entrada.tokenHash,
+          csrfToken: entrada.csrfToken,
           expiresAt: entrada.expiraEn,
           ip: entrada.ip,
           userAgent: entrada.userAgent,
@@ -97,6 +99,7 @@ export class PrismaBackofficeRepositorio implements RepositorioDeBackoffice {
           userId: true,
           expiresAt: true,
           revokedAt: true,
+          csrfToken: true,
           usuario: { select: { email: true, status: true } },
         },
       });
@@ -109,6 +112,7 @@ export class PrismaBackofficeRepositorio implements RepositorioDeBackoffice {
             expiraEn: fila.expiresAt,
             revocadaEn: fila.revokedAt,
             estado: fila.usuario.status,
+            csrfToken: fila.csrfToken,
           };
     });
   }

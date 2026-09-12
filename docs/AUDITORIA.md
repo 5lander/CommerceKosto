@@ -50,7 +50,7 @@
 | C11 | Secretos fuera del repositorio |
 | C12 | Cifrado a nivel de campo (AES-256-GCM, con `key_version` por registro) en **las líneas de receta con sus cantidades y en los precios de referencia** (SEGURIDAD.md §8) |
 | C13 | Errores al exterior genéricos; detalle solo en logs internos |
-| C14 | Logs sin datos personales ni datos de negocio del cliente en claro: los IDs sí, las cantidades de receta y los precios no |
+| C14 | Logs sin datos personales ni datos de negocio del cliente en claro: los IDs sí, las cantidades de receta y los precios no. **Y sin una sola credencial**: `authorization`, la `cookie` de la petición, el `set-cookie` de la respuesta y `X-CSRF-Token` se borran en `redact` (`logger.options.ts`). La lista completa la clava `logger.options.spec.ts` — **toda cabecera que lleve un secreto nuevo entra ahí en el mismo paquete que la introduce** *(P16-A2: el token anti-CSRF se quedó fuera y salió en claro en el log de cada mutación)* |
 | C15 | Sin concatenación en SQL, incluido `ORDER BY` dinámico (lista blanca de columnas) |
 | C16 | Límites anti fuerza bruta activos por cuenta **y** por IP en login, códigos y tokens (SEGURIDAD.md §2.1) |
 | C17 | Respuestas de login/recuperación idénticas y en tiempo constante (`timingSafeEqual`, hash dummy) |

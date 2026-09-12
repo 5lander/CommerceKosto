@@ -27,6 +27,7 @@ import type {
   AsegurarPeriodo,
   ConsultarPeriodo,
 } from '../../../periods/application/casos-de-uso/periodos';
+import type { ListarProductos } from '../../../recipes/application/casos-de-uso/recetas';
 import type { PeriodoLeido } from '../../../periods/application/ports/repositorio-de-periodos.port';
 import { exigirAbierto } from '../../../periods/domain/cierre';
 import { Periodo } from '../../../periods/domain/periodo';
@@ -47,8 +48,21 @@ export interface DependenciasDeCarga {
   readonly repositorio: RepositorioDeAnalitica;
   readonly asegurarPeriodo: AsegurarPeriodo;
   readonly consultarPeriodo: ConsultarPeriodo;
+  /**
+   * **PARA EL NOMBRE DEL PRODUCTO, Y POR AQUI NO POR OTRO SITIO** (P16-A2).
+   *
+   * `RepositorioDeAnalitica` dice en su cabecera que solo toca SUS DOS TABLAS;
+   * un `JOIN` a `product` desde alli seria un segundo sitio que mantener en
+   * sincronia con `recipes`, que es quien manda en los productos (ADR-011).
+   * Asi que el nombre se pide al caso de uso de ese modulo y se une aqui, en
+   * aplicacion — exactamente lo que `vistas.ts` hace con el catalogo de items.
+   */
+  readonly listarProductos: ListarProductos;
   readonly auditoria: AuditLogPort;
 }
+
+/** Producto que ya no esta en la carta: ver `VentaConNombre.nombre`. */
+const SIN_NOMBRE = '';
 
 export interface MesDeUbicacion {
   readonly locationId: LocationId;
@@ -125,6 +139,26 @@ export class RegistrarCostosFijos {
   }
 }
 
+/**
+ * Las unidades vendidas de un mes, **con el nombre del producto al lado**.
+ *
+ * El nombre no lo guarda la tabla de ventas —guarda `product_id`, que es lo
+ * correcto: un producto renombrado no reescribe su historia—, asi que se une al
+ * leer. Hasta P16-A2 no se unia en ningun sitio del servidor y la pantalla de
+ * ventas pedia `/costeo` **entero** en paralelo solo para traducir ids a
+ * nombres: costear la carta completa para pintar una columna de texto.
+ */
+export interface VentaConNombre extends VentaLeida {
+  /**
+   * Vacio si el producto ya no esta en la carta de la company.
+   *
+   * Pasa: un producto borrado deja sus ventas historicas en pie. Se devuelve
+   * vacio y no se omite la fila, porque las unidades vendidas SI ocurrieron y
+   * quitarlas cambiaria el total del mes.
+   */
+  readonly nombre: string;
+}
+
 export class ConsultarVentas {
   public constructor(private readonly deps: DependenciasDeCarga) {}
 
@@ -132,14 +166,21 @@ export class ConsultarVentas {
   public async ejecutar(
     sesion: SesionActiva,
     pedido: MesDeUbicacion,
-  ): Promise<readonly VentaLeida[]> {
+  ): Promise<readonly VentaConNombre[]> {
     const periodo = await this.deps.consultarPeriodo.ejecutar(sesion, pedido);
     if (periodo === null) return [];
 
-    return this.deps.repositorio.ventasDe({
-      companyId: sesion.companyId,
-      periodId: periodo.id,
-    });
+    const [ventas, productos] = await Promise.all([
+      this.deps.repositorio.ventasDe({ companyId: sesion.companyId, periodId: periodo.id }),
+      this.deps.listarProductos.ejecutar(sesion),
+    ]);
+    const nombres = new Map(productos.map((producto) => [producto.id, producto.nombre]));
+
+    return ventas.map((venta) => ({
+      productId: venta.productId,
+      unidades: venta.unidades,
+      nombre: nombres.get(venta.productId) ?? SIN_NOMBRE,
+    }));
   }
 }
 

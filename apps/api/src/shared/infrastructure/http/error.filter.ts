@@ -12,6 +12,14 @@
  *        eso es reconocimiento gratis para quien esta sondeando. Sale un texto
  *        fijo, y el detalle completo va al log con su `correlation_id`.
  *
+ * Y EL 4xx TAMBIEN DEJA RASTRO, desde la revision de P16-A2: su `code` y su
+ * `detalle` salen al log en nivel `debug`. Antes no salia nada —el filtro solo
+ * escribia la traza de los 5xx—, asi que el dia que tres errores de borde
+ * pasaron de 500 a 400 su contexto interno (`Money.fromDecimalString`, el tipo
+ * del identificador) dejo de verse en ninguna parte: el cambio no reubicaba el
+ * diagnostico, lo borraba. `debug` y no `warn` porque un 4xx es lo normal en
+ * una API publica y no es un incidente; se enciende cuando se esta depurando.
+ *
  * El `correlation_id` no viaja en el cuerpo: ya va en la cabecera
  * `x-correlation-id` de toda respuesta. Un usuario que abre un ticket lo cita,
  * y con el se llega al log exacto sin haber filtrado nada por el camino.
@@ -28,6 +36,7 @@ import {
   ErrorDeDominio,
   type CodigoDeDominio,
 } from '../../domain/errors/error-de-dominio';
+import { valorParaMensaje } from '../../domain/errors/valor-en-mensaje';
 
 const MENSAJE_GENERICO = 'Error interno. Cita el identificador de la cabecera x-correlation-id si necesitas soporte.';
 const CODIGO_GENERICO = 'INTERNAL_ERROR';
@@ -72,20 +81,38 @@ function codigoDe(status: number): string {
  * atacante no anade nada que no supiera ya. `LIMITE_DE_SOLICITUDES` es el
  * tercer 429 (D-16.24) y se distingue por el `code`: el cliente tiene que
  * saber si es su cuenta, el limitador global o una peticion repetida de mas.
+ *
+ * `CSRF_INVALIDO` es el SEGUNDO 403 (P16-A2, ADR-021), y comparte estado con
+ * `PERMISO_DENEGADO` a proposito: los dos son "estas autenticado y aun asi no".
+ * Se distinguen por el `code`, porque la reaccion del cliente es opuesta —uno
+ * se arregla recargando la pagina, el otro pidiendole permisos a un
+ * administrador— y un 403 indistinguible manda al usuario al sitio equivocado.
+ *
+ * `PERIODO_SIN_DATOS` es el SEGUNDO 404 (P16-A2, D-16.2), y la misma logica:
+ * "ese mes no se ha abierto" no es "ese recurso no existe". El cliente reacciona
+ * distinto —lo primero se arregla cargando las ventas del mes, lo segundo es un
+ * enlace roto— y con un solo `code` la pantalla tendria que adivinar cual de las
+ * dos cosas le pasa. **El contrato es el `code`, no el estado**: los dos son 404.
  */
 const ESTADO_POR_CODIGO: Readonly<Record<CodigoDeDominio, number>> = {
   CREDENCIALES_INVALIDAS: HttpStatus.UNAUTHORIZED,
   ACCESO_BLOQUEADO: HttpStatus.TOO_MANY_REQUESTS,
   SESION_INVALIDA: HttpStatus.UNAUTHORIZED,
   PERMISO_DENEGADO: HttpStatus.FORBIDDEN,
+  CSRF_INVALIDO: HttpStatus.FORBIDDEN,
   RECURSO_NO_ENCONTRADO: HttpStatus.NOT_FOUND,
+  PERIODO_SIN_DATOS: HttpStatus.NOT_FOUND,
   LIMITE_DEL_PLAN: HttpStatus.CONFLICT,
   CONFLICTO: HttpStatus.CONFLICT,
   ENTRADA_INVALIDA: HttpStatus.BAD_REQUEST,
   LIMITE_DE_SOLICITUDES: HttpStatus.TOO_MANY_REQUESTS,
 };
 
-const CABECERA_DE_REINTENTO = 'Retry-After';
+/**
+ * Se exporta para que `bootstrap.ts` la ponga en `exposedHeaders` de CORS: una
+ * cabecera que el navegador no puede leer es una cabecera que no existe.
+ */
+export const CABECERA_DE_REINTENTO = 'Retry-After';
 
 /**
  * Un error de dominio que sabe cuando reintentar. El filtro no conoce la
@@ -168,6 +195,31 @@ export function errorResponseFor(exception: unknown): ErrorResponse {
   };
 }
 
+/**
+ * LA LINEA DE LOG DE UN ERROR DE DOMINIO, que es donde vive lo que el cliente
+ * NO puede ver.
+ *
+ * `mensaje` sale al cliente y por eso no puede llevar nada de dentro;
+ * `detalle` es lo contrario —el metodo que lanzo, el motivo exacto, el permiso
+ * que faltaba— y hasta esta revision no lo leia nadie: la cabecera de
+ * `error-de-dominio.ts` prometia un log que no existia.
+ *
+ * Los valores pasan por `valorParaMensaje` porque varios vienen de quien llamo
+ * (`plan`, `estado`, `concepto`): sin limpiarlos, un salto de linea dentro de
+ * uno parte la linea del log en dos y la segunda la escribe el atacante — la
+ * inyeccion de log de SEGURIDAD.md §9.
+ *
+ * Es una funcion pura y se prueba como tal: probarla a traves del filtro
+ * obligaria a fabricar un doble de `ArgumentsHost` con `as unknown as`, que
+ * `audit:forbidden` prohibe.
+ */
+export function diagnosticoDe(exception: ErrorDeDominio): string {
+  const detalle = Object.entries(exception.detalle)
+    .map(([clave, valor]) => `${clave}=${valorParaMensaje(String(valor))}`)
+    .join(' ');
+  return detalle === '' ? exception.codigo : `${exception.codigo} ${detalle}`;
+}
+
 @Catch()
 export class ErrorFilter implements ExceptionFilter {
   private readonly logger = new Logger(ErrorFilter.name);
@@ -178,6 +230,10 @@ export class ErrorFilter implements ExceptionFilter {
     if (status >= PRIMER_CODIGO_DE_SERVIDOR) {
       // El log lleva la excepcion entera; la respuesta, nada de ella.
       this.logger.error(exception instanceof Error ? exception.stack : String(exception));
+    } else if (exception instanceof ErrorDeDominio) {
+      // Un 4xx no es un incidente, pero su `detalle` es el unico sitio donde
+      // queda el porque interno: al log en `debug`, nunca a la respuesta.
+      this.logger.debug(diagnosticoDe(exception));
     }
 
     const response = host.switchToHttp().getResponse<ServerResponse>();

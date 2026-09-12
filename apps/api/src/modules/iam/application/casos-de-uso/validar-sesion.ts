@@ -62,6 +62,15 @@ export interface SesionActiva {
   readonly alcance: AlcanceDeUsuario;
   /** Las de la company, para comprobar pertenencia. Ver el puerto. */
   readonly ubicacionesDeCompany: readonly LocationId[];
+  /**
+   * El token anti-CSRF de esta sesion, en claro (ADR-021).
+   *
+   * ES `string` Y NO `string | null` porque la sesion sin token ya se rechazo
+   * mas arriba: quien lee esto no tiene que acordarse de un caso que no puede
+   * llegar. Lo usan `CsrfGuard` para comparar y `GET /auth/sesion` para
+   * devolverselo al cliente que recargo la pagina.
+   */
+  readonly csrfToken: string;
 }
 
 /**
@@ -120,6 +129,15 @@ export class ValidarSesion {
       throw new SesionInvalidaError('revocada');
     }
 
+    // Sesion anterior a P16-A2: no tiene token anti-CSRF y por tanto no puede
+    // probar el origen de una mutacion. Se corta aqui, con 401, para que el
+    // usuario vuelva a entrar y reciba una sesion completa — en vez de navegar
+    // con normalidad y descubrir el problema al pulsar «Guardar» (ADR-021).
+    const csrfToken = contexto.csrfToken;
+    if (csrfToken === null) {
+      throw new SesionInvalidaError('sin_csrf');
+    }
+
     await this.refrescarActividad({
       companyId: contexto.companyId,
       sessionId: contexto.sessionId,
@@ -134,6 +152,7 @@ export class ValidarSesion {
       permisos: contexto.permisos,
       alcance: contexto.alcance,
       ubicacionesDeCompany: contexto.ubicacionesDeCompany,
+      csrfToken,
     };
   }
 

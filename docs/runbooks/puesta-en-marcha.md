@@ -277,6 +277,7 @@ queda en el log de auditoría.
 |---|---|
 | `La unidad "l" no está en el catálogo. Las válidas son: doc, g, gal, kg, lb, lt, mg, ml, oz, unid.` | El litro es `lt`. Corrige el CSV |
 | `El precio de un ítem comprado necesita su artículo` | Falta cargar `ARTICULOS` antes |
+| `Estos ítems ya existen en tu company (…): …` · `Estos artículos de compra ya existen en tu company (…): …` | **Reimportar el mismo archivo no duplica nada: el lote entero se para y no escribe ni una fila** (P16-A2; antes de eso, el de artículos salía como un 500). Quita del CSV las filas que ya están. **El choque ignora mayúsculas y espacios de sobra**, que es más estricto que el índice único de la base: «AZUCAR YA 2KG» choca con «Azucar Ya 2kg» aunque la base las habría aceptado como dos filas distintas, y por eso el nombre del mensaje es el del archivo y puede no estar tal cual en el catálogo |
 | Columnas no reconocidas en el informe | Renombra la cabecera del CSV, o dímelo y ajusto los alias: es media hora y no toca el camino de escritura |
 
 ---

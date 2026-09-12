@@ -94,13 +94,13 @@ describe('back office', () => {
       [`operador-${sufijo}@ejemplo.invalid`, await new Argon2Hasher().hash(CONTRASENA)],
     );
 
-    const token = await backoffice.get(IniciarSesionDeOperador).ejecutar({
+    const abierta = await backoffice.get(IniciarSesionDeOperador).ejecutar({
       email: `operador-${sufijo}@ejemplo.invalid`,
       contrasena: CONTRASENA,
       ip: null,
       userAgent: null,
     });
-    const operador = await backoffice.get(ValidarSesionDeOperador).ejecutar(token);
+    const operador = await backoffice.get(ValidarSesionDeOperador).ejecutar(abierta.token);
     peticion = { operador, motivo: MOTIVO, ip: null };
 
     companyDePrueba = await backoffice

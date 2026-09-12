@@ -416,6 +416,13 @@ model Session {
   userAgent String? @map("user_agent")
   deviceId  String? @map("device_id") @db.Uuid
 
+  /// Token anti-CSRF de esta sesion, EN CLARO (ADR-021).
+  ///
+  /// Nullable solo por las sesiones abiertas ANTES de P16-A2: una sesion sin
+  /// el se trata como invalida y obliga a volver a entrar. Ninguna sesion
+  /// nueva nace sin token.
+  csrfToken String? @map("csrf_token")
+
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   usuario AppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1568,6 +1575,9 @@ model BackofficeSession {
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
   ip         String?   @db.Inet
   userAgent  String?   @map("user_agent")
+
+  /// Token anti-CSRF del operador, EN CLARO. Mismo criterio que `Session`.
+  csrfToken  String?   @map("csrf_token")
 
   usuario BackofficeUser @relation(fields: [userId], references: [id], onDelete: Restrict)
 

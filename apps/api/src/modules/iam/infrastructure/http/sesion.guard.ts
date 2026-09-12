@@ -9,10 +9,14 @@
  *   grep -rn "@Publico" apps/api/src
  *
  * NO ACEPTA `Authorization: Bearer`, SOLO LA COOKIE. Admitir las dos vias
- * duplicaria la superficie y, sobre todo, reabriria el CSRF que
- * `SameSite=Strict` cierra: una cabecera la pone quien hace la peticion, y eso
- * permite montar el ataque desde otro sitio. Cuando exista un cliente que no
- * sea navegador se decidira entonces, con su caso delante.
+ * duplicaria la superficie sin que nadie la pida: hoy el unico cliente es un
+ * navegador. Cuando exista uno que no lo sea se decidira entonces, con su caso
+ * delante.
+ *
+ * (Hasta P16-A1 la razon escrita aqui era otra —«reabriria el CSRF que
+ * `SameSite=Strict` cierra»— y ya no se sostiene: desde P16-A2 toda mutacion
+ * pasa ademas por `CsrfGuard`, que exige un token que un sitio cruzado no
+ * conoce. La razon que queda es la de arriba, que es mas modesta y mas cierta.)
  *
  * EL TENANT NO SE LEE DE NINGUN SITIO MAS. Ningun endpoint acepta `company_id`;
  * el que sale de aqui es el unico que existe en la peticion.

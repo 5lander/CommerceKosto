@@ -17,16 +17,20 @@ import { z } from 'zod';
 /**
  * Los parámetros de consulta del costeo.
  *
- * NO ES `.strict()`, por la misma razón que `CONSULTA_DE_RECETA`: un navegador
- * puede añadir parámetros de rastreo a una URL y rechazar la petición por eso
- * sería hostil sin ganar nada. Lo que importa es que los campos que sí se leen
- * estén validados, y lo están.
+ * **ES `.strict()` DESDE P16-A2**, como los otros siete `CONSULTA_*`. Este
+ * comentario decía lo contrario, y por la misma razón que `CONSULTA_DE_RECETA`
+ * —los parámetros de rastreo de un navegador—; la refutación completa está allí
+ * y no se repite aquí. En una frase: ese rastreo se le añade a la URL de una
+ * página, no a una llamada `fetch`, y a cambio un parámetro de más se descartaba
+ * en silencio con un 200 (SEGURIDAD.md §3, asignación masiva).
  */
-export const CONSULTA_DE_COSTEO = z.object({
-  locationId: z.uuid(),
-  /** ISO 8601. Ausente = hoy. Es el criterio E8: se puede preguntar por atrás. */
-  fecha: z.iso.datetime().optional(),
-});
+export const CONSULTA_DE_COSTEO = z
+  .object({
+    locationId: z.uuid(),
+    /** ISO 8601. Ausente = hoy. Es el criterio E8: se puede preguntar por atrás. */
+    fecha: z.iso.datetime().optional(),
+  })
+  .strict();
 
 export type ConsultaDeCosteo = z.infer<typeof CONSULTA_DE_COSTEO>;
 

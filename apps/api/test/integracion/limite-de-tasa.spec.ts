@@ -32,6 +32,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const ACEPTADO = 202;
@@ -89,13 +90,13 @@ describe('el limite de tasa de los endpoints sin sesion o con correo', () => {
   }
 
   function invitar(ip: string, email: string): request.Test {
-    return request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-Forwarded-For', ip).send({ email });
+    return request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).set('X-Forwarded-For', ip).send({ email });
   }
 
   function reenviar(ip: string, id: string): request.Test {
     return request(servidor())
       .post(`/usuarios/${id}/reenvio-de-invitacion`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .set('X-Forwarded-For', ip);
   }
 
@@ -163,7 +164,7 @@ describe('el limite de tasa de los endpoints sin sesion o con correo', () => {
 
     const login = await request(servidor()).post('/auth/login').send({ email: admin, contrasena: CONTRASENA });
     expect(login.status).toBe(OK);
-    cookie = (login.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    cookie = cookieConCsrf(login);
   });
 
   afterAll(async () => {

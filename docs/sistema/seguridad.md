@@ -292,6 +292,21 @@ Token opaco de 256 bits del CSPRNG, **hasheado con SHA-256 en la base**. SHA-256
 
 Vida absoluta 12 h, inactividad 4 h. Cookie `HttpOnly; SameSite=Strict; Path=/`, con `Secure` decidido por configuración y no por el socket —con TLS terminado en un proxy, `socket.encrypted` es `false` en producción—.
 
+**Y desde P16-A2, un token anti-CSRF en toda mutación** (U4, ADR-021). Segundo token de 256 bits del mismo CSPRNG, guardado **en claro** en `session.csrf_token` —no es una credencial: sin la cookie no sirve para nada, y guardarlo en claro es lo que permite devolverlo tras una recarga—, entregado en el cuerpo del login y de `GET /auth/sesion`, y exigido en la cabecera `X-CSRF-Token` de todo `POST`/`PUT`/`PATCH`/`DELETE`. Lo comprueba `CsrfGuard`, global, entre el de sesión y el de permisos; el fallo es **403 `CSRF_INVALIDO`**. La comparación va con `timingSafeEqual` sobre los SHA-256 de los dos lados, para que ni el contenido ni la longitud sean un canal de tiempo. El back office lleva el suyo, en su propio proceso y con su propia tabla. **Nace con la sesión y muere con ella:** no rota dentro de la sesión, y volver a entrar **no** invalida el de la sesión anterior —abrir sesión no revoca ninguna, para que el móvil y el ordenador funcionen a la vez—; lo que la generación por sesión garantiza es que el token nunca lo elige el cliente y que ninguno vale en otra sesión. **Y no aparece en los logs**: `X-CSRF-Token` se borra en `redact` junto a `authorization`, la cookie y el `set-cookie` (`logger.options.ts`, lista clavada por su `.spec`).
+
+**Las cuatro rutas `@Publico()` quedan fuera del guard, y el login por una razón distinta a las otras tres.** En activación, olvido y restablecimiento no hay sesión que proteger. En el login sí hay algo: una petición cruzada no *usa* una credencial, la **crea** —*login CSRF* / fijación—, y `SameSite` gobierna el envío de la cookie, no su almacenamiento. Lo que lo cierra es que **la API solo analiza `application/json`** (`bootstrap.ts`: `bodyParser: false` + `useBodyParser('json')`), que es justo lo que un `<form>` cruzado no puede emitir; un `fetch` cruzado necesitaría un preflight que decide la lista blanca de CORS.
+
+`SameSite=Strict` sigue puesto y sigue siendo la primera línea; lo que cambió es que ya no es la única. **Las dos fallan por motivos distintos**: `SameSite` lo aplica el navegador —uno viejo lo ignora entero— y mira el *sitio* y no el *origen*, así que un subdominio del mismo dominio manda la cookie con normalidad. El token no depende de ninguna de las dos cosas. La sesión abierta **antes** de la migración no tiene token y se trata como inválida: 401, y a entrar de nuevo.
+
+**Y una tercera capa que el estándar pide y aquí NO existe: la verificación de `Origin`/`Referer`.**
+`docs/SEGURIDAD.md` §4.2 la nombra como «capa extra» y P16-A2 la descartó con su razón (D-16.69,
+ADR-021 §Alternativa 2): duplicaría la lista blanca de CORS, y en desarrollo y en las pruebas esa
+lista está vacía —`CORS_ORIGENES` sin nada deja `cors: false`—, de modo que la comprobación
+necesitaría un «si está vacía, pasa» que **falla abierto**; el back office no tiene lista que
+consultar; y `supertest` no manda `Origin`. Lo que ocupa su sitio, y solo para el caso que de
+verdad quedaba abierto, es el analizador de cuerpo restringido a JSON. **Señal para reabrirlo:** un
+cliente que no sea `apps/web`, o el back office publicado fuera de loopback.
+
 **Aplazado a P12, dicho en voz alta:** el refresh rotativo con detección de reuso que pide SEGURIDAD.md §2.2. Riesgo residual: un token robado sirve hasta 4 h de inactividad o 12 h absolutas, salvo revocación. El razonamiento completo está en ADR-006.
 
 ### Contraseñas
@@ -302,7 +317,7 @@ Lista local y no HIBP: la comprobación por k-anonimato mete una llamada de red 
 
 ## Autorización
 
-**Deny by default.** `SesionGuard` es global: toda ruta exige sesión salvo las marcadas `@Publico()`, y la lista completa se lee con `grep -rn "@Publico" apps/api/src`. El sentido contrario —un `@Autenticado()` que hubiera que acordarse de poner— falla abierto.
+**Deny by default.** `SesionGuard` es global: toda ruta exige sesión salvo las marcadas `@Publico()`, y la lista completa se lee con `grep -rn "@Publico" apps/api/src`. El sentido contrario —un `@Autenticado()` que hubiera que acordarse de poner— falla abierto. **Los guards globales son tres desde P16-A2**, y el orden importa: sesión (quién pregunta) → CSRF (¿la originó de verdad la página?) → permisos (¿puede?).
 
 **Capacidades, no roles** (SPEC §4). El endpoint declara qué hace falta poder hacer; qué rol tiene esa capacidad es una fila en `role_permission`, no un despliegue.
 

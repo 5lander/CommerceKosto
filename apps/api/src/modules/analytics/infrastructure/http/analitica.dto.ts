@@ -44,12 +44,19 @@ const MES_DE_UBICACION = {
   mes: z.number().int().min(PRIMER_MES).max(ULTIMO_MES),
 };
 
-/** En query string todo llega como texto, asi que aqui si se coacciona. */
-export const CONSULTA_DEL_MES = z.object({
-  ...MES_DE_UBICACION,
+/**
+ * En query string todo llega como texto, asi que aqui si se coacciona.
+ *
+ * Vive aparte porque las DOS consultas del mes lo necesitan igual, y escribirlo
+ * dos veces es un clon de `audit:duplication` — que es tambien la forma en que
+ * el proyecto se entera de que dos fronteras han empezado a divergir.
+ */
+const MES_COACCIONADO = {
   anio: z.coerce.number().int().min(PRIMER_ANIO).max(ULTIMO_ANIO),
   mes: z.coerce.number().int().min(PRIMER_MES).max(ULTIMO_MES),
-});
+};
+
+export const CONSULTA_DEL_MES = z.object({ ...MES_DE_UBICACION, ...MES_COACCIONADO }).strict();
 
 /**
  * El mes de la COMPANY: lo mismo sin `locationId`, y esa ausencia es el punto.
@@ -57,11 +64,13 @@ export const CONSULTA_DEL_MES = z.object({
  * Un consolidado que aceptara `locationId` seria una vista por ubicacion con
  * otro nombre. Aqui el alcance sale del permiso y de la sesion, nunca del
  * parametro — CLAUDE.md §4.1, barrera 3.
+ *
+ * **Y por eso este es el esquema al que mas le hacia falta el `.strict()`**
+ * (P16-A2): sin el, `?locationId=<la de al lado>` se descartaba en silencio y
+ * la respuesta era 200. El alcance nunca llego a moverse —el caso de uso ni
+ * mira ese parametro—, pero el intento se perdia en vez de quedar registrado.
  */
-export const CONSULTA_DEL_MES_DE_COMPANY = z.object({
-  anio: z.coerce.number().int().min(PRIMER_ANIO).max(ULTIMO_ANIO),
-  mes: z.coerce.number().int().min(PRIMER_MES).max(ULTIMO_MES),
-});
+export const CONSULTA_DEL_MES_DE_COMPANY = z.object({ ...MES_COACCIONADO }).strict();
 
 export const CUERPO_DE_VENTAS = z
   .object({
@@ -178,8 +187,15 @@ export interface ComparativaDeCompraDto {
 export type CuerpoDeVentas = z.infer<typeof CUERPO_DE_VENTAS>;
 export type CuerpoDeCostos = z.infer<typeof CUERPO_DE_COSTOS>;
 
+/**
+ * **LLEVA `nombre` DESDE P16-A2.** Sin el, la rejilla de ventas tenia que pedir
+ * `GET /costeo` en paralelo —costear la carta entera— solo para traducir ids a
+ * texto, y unir por clave en el navegador. Vacio si el producto ya no esta en
+ * la carta: la venta ocurrio igual y la fila no se esconde.
+ */
 export interface VentaDto {
   readonly productId: string;
+  readonly nombre: string;
   readonly unidades: string;
 }
 
@@ -191,6 +207,8 @@ export interface CostoDto {
 
 export interface ProductoDelMenuDto {
   readonly productId: string;
+  /** Ver `VentaDto.nombre`: mismo motivo, mismo contrato. */
+  readonly nombre: string;
   readonly unidades: string;
   readonly popularidad: string | null;
   readonly indicePopularidad: string | null;

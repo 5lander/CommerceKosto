@@ -22,10 +22,17 @@ import type { ReactNode, SyntheticEvent } from 'react';
 
 import { Logotipo } from '../../componentes/ui/Marca';
 import { ErrorDeApi, llamar } from '../../lib/api';
+import { guardarCsrf } from '../../lib/csrf';
 import { TEXTOS } from '../../textos/es';
 
 /** El código de dominio con el que el backend avisa del bloqueo progresivo. */
 const BLOQUEADO = 'ACCESO_BLOQUEADO';
+
+/** Lo que devuelve `POST /auth/login`. El token de sesión va en la cookie. */
+interface RespuestaDeLogin {
+  readonly expiraEn: string;
+  readonly csrf: string;
+}
 
 export default function Entrar(): ReactNode {
   const router = useRouter();
@@ -40,7 +47,15 @@ export default function Entrar(): ReactNode {
     setEntrando(true);
 
     try {
-      await llamar({ ruta: '/auth/login', metodo: 'POST', cuerpo: { email: correo, contrasena } });
+      // El cuerpo trae el token anti-CSRF de la sesión recién abierta: se
+      // guarda en memoria para que la primera mutación no tenga que ir a
+      // buscarlo a `GET /auth/sesion` (ADR-021).
+      const abierta = await llamar<RespuestaDeLogin>({
+        ruta: '/auth/login',
+        metodo: 'POST',
+        cuerpo: { email: correo, contrasena },
+      });
+      guardarCsrf(abierta.csrf);
       router.replace('/sucursal');
     } catch (fallo) {
       // El mensaje del bloqueo SÍ se toma del backend, que sabe cuánto falta.

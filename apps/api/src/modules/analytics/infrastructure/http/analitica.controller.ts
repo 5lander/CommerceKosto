@@ -160,7 +160,11 @@ export class CargaController {
     @Query(new EsquemaPipe(CONSULTA_DEL_MES)) consulta: ConsultaDelMes,
   ): Promise<readonly VentaDto[]> {
     const ventas = await this.cargas.leerVentas.ejecutar(sesion, mesDe(consulta));
-    return ventas.map((venta) => ({ productId: venta.productId, unidades: venta.unidades }));
+    return ventas.map((venta) => ({
+      productId: venta.productId,
+      nombre: venta.nombre,
+      unidades: venta.unidades,
+    }));
   }
 
   /** T6: los costos del mes, con su clasificación explícita (SPEC §17). */

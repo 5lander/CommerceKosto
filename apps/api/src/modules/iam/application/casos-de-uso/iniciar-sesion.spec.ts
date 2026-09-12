@@ -146,8 +146,18 @@ describe('IniciarSesion', () => {
       necesitaRehash: () => pideRehash,
     };
 
+    // EL DOBLE DEVUELVE UN TOKEN DISTINTO EN CADA LLAMADA, y eso importa desde
+    // P16-A2: `abrir` pide DOS —el de sesion y el anti-CSRF— y un doble que
+    // devolviera siempre lo mismo dejaria pasar el error de derivar uno del
+    // otro, que es justo el que rompe el CSRF (ADR-021).
+    let generados = 0;
     const tokens: GeneradorDeTokens = {
-      generar: (): TokenDeSesion => ({ token: 'token-en-claro', hash: 'hash-del-token' }),
+      generar: (): TokenDeSesion => {
+        generados += 1;
+        return generados === 1
+          ? { token: 'token-en-claro', hash: 'hash-del-token' }
+          : { token: `csrf-en-claro-${String(generados)}`, hash: `hash-csrf-${String(generados)}` };
+      },
       hashDe: () => 'hash-del-token',
     };
 
@@ -193,6 +203,16 @@ describe('IniciarSesion', () => {
       expect(repositorio.sesiones).toHaveLength(1);
       expect(repositorio.sesiones[0]?.tokenHash).toBe('hash-del-token');
       expect(JSON.stringify(repositorio.sesiones)).not.toContain('token-en-claro');
+    });
+
+    it('el token anti-CSRF SI se guarda en claro, y no es el de sesion (ADR-021)', async () => {
+      const abierta = await entrar();
+
+      // Es la asimetria deliberada: del token de sesion —la credencial— se
+      // guarda el hash; el anti-CSRF no es credencial, y guardarlo en claro es
+      // lo que permite devolverlo en `GET /auth/sesion` tras recargar.
+      expect(abierta.csrf).not.toBe(abierta.token);
+      expect(repositorio.sesiones[0]?.csrfToken).toBe(abierta.csrf);
     });
 
     it('normaliza el correo antes de todo lo demas', async () => {

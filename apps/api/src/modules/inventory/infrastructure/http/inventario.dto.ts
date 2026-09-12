@@ -137,17 +137,19 @@ export const CUERPO_DE_CONSUMO = z
   })
   .strict();
 
-export const CONSULTA_DE_SALDOS = z.object({ locationId: z.uuid() });
+export const CONSULTA_DE_SALDOS = z.object({ locationId: z.uuid() }).strict();
 
-export const CONSULTA_DEL_LIBRO = z.object({
-  locationId: z.uuid(),
-  itemId: z.uuid().optional(),
-  desde: z.iso.datetime().optional(),
-  hasta: z.iso.datetime().optional(),
-  limite: z.coerce.number().int().min(1).max(MAXIMO_POR_PAGINA).default(POR_PAGINA_POR_DEFECTO),
-  /** Opaco: es el `id` del último movimiento de la página anterior. */
-  cursor: z.uuid().optional(),
-});
+export const CONSULTA_DEL_LIBRO = z
+  .object({
+    locationId: z.uuid(),
+    itemId: z.uuid().optional(),
+    desde: z.iso.datetime().optional(),
+    hasta: z.iso.datetime().optional(),
+    limite: z.coerce.number().int().min(1).max(MAXIMO_POR_PAGINA).default(POR_PAGINA_POR_DEFECTO),
+    /** Opaco: es el `id` del último movimiento de la página anterior. */
+    cursor: z.uuid().optional(),
+  })
+  .strict();
 
 export type CuerpoDeMovimiento = z.infer<typeof CUERPO_DE_MOVIMIENTO>;
 export type CuerpoDeCorreccion = z.infer<typeof CUERPO_DE_CORRECCION>;

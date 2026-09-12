@@ -4,6 +4,94 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-A2 — El token que el servidor comprueba, la frontera que dejó de mentir, y las fichas que faltaban · 2026-09-10
+
+> Segundo paquete de código de la pasada P16 → P20. Un commit, **una migración reversible**
+> (`20260910202336_p16a2_csrf`), **un ADR (021, que supersede en parte a ADR-006)**, ninguna
+> incidencia nueva —dos recurrencias registradas, INC-007 a 11 e INC-012 a 3—, y tres revisiones
+> adversariales por etapa con **catorce hallazgos atendidos, cinco de ellos 🔴**.
+
+**El token anti-CSRF, y por qué `SameSite=Strict` no bastaba (U4, ADR-021).** Toda mutación de los
+**dos** procesos —app cliente y back office— exige la cabecera `X-CSRF-Token`, comparada con
+`timingSafeEqual` sobre los SHA-256 de los dos lados (hashear iguala la longitud, que si no sería un
+oráculo del tamaño del token); el fallo es **403 `CSRF_INVALIDO`**, con código propio porque un
+`PERMISO_DENEGADO` manda al usuario al sitio contrario. El token es un **synchronizer**: 256 bits del
+mismo CSPRNG, **no derivado** del de sesión, guardado **en claro** en `session.csrf_token` —no es una
+credencial: sin la cookie no habilita nada, y hashearlo impediría recuperarlo— y entregado en el
+**cuerpo** del login, nunca en una cookie, que es el canal del que defiende. `CsrfGuard` es global y
+corre **entre** el de sesión y el de permisos. Aparece **`GET /auth/sesion`** →
+`{ userId, permisos, alcance, csrf }`, sin `companyId` y con el `alcance` como unión discriminada:
+es lo que permite recargar sin rotar el token, y lo que el armazón del frontend necesitaba.
+**Las sesiones abiertas antes de la migración se invalidan (401), no se rellenan**: media sesión no
+es una sesión, y a cambio `csrfToken` es `string` en todo el código de encima. `SameSite` sigue
+puesto y sigue siendo la primera línea; lo que se dice ahora es por qué no puede ser la única —lo
+aplica el navegador y mira el *sitio*, no el *origen*—, y los tres comentarios del árbol que
+afirmaban lo contrario se **reescriben, no se borran**. La verificación de `Origin`/`Referer` que
+SEGURIDAD.md §4.2 pide como capa extra **no se implementa**, con sus cuatro razones y su señal de
+reapertura escritas (D-16.69).
+
+**La frontera HTTP dejó de mentir en cuatro sitios.** Los tres errores de borde que salían como
+`500 INTERNAL_ERROR` —identificador, unidad de uso y decimal— son **400 `ENTRADA_INVALIDA`** con un
+mensaje que dice qué corregir, y la traducción va **en el dominio**, no en un `if` del filtro: el
+`Record` exhaustivo de P0 ya mapeaba el código, solo faltaba que el dominio dijera de qué clase era
+su error. `EscalaExcedidaError` **se queda en 500** a propósito —es un desbordamiento a mitad de
+cálculo, no del usuario— y lo que se cierra es su camino de entrada. «Mes sin abrir» gana código
+propio, **`PERIODO_SIN_DATOS`** (404, como antes), para que la pantalla distinga un estado normal del
+producto de un enlace roto. Los **ocho** esquemas de consulta pasan a `.strict()`: hasta ahora un
+`?companyId=<otra>` **se descartaba en silencio con un 200** y no quedaba rastro del intento. CORS
+gana `DELETE` —`DELETE /usuarios/roles` existía desde P1 y era inalcanzable desde un navegador,
+invisible porque `supertest` no hace preflight—, **declara** sus cabeceras en vez de reflejarlas,
+expone `x-correlation-id` y `Retry-After`, y cachea el preflight 10 minutos. Y los DTO de ventas y
+menu engineering publican el **nombre** del producto, lo que deja sin trabajo al rodeo del frontend
+que costeaba la carta entera para traducir ids a texto.
+
+**Las lecturas de catálogo que faltaban.** `GET /catalogo/unidades` —las diez, con nombre y
+dimensión, ordenadas por tamaño y **sin el factor a base**, que es el interior del tipo decimal— y
+las dos fichas, `GET /catalogo/items/:id` (con su grupo y sus artículos dentro) y
+`GET /catalogo/articulos/:id` (con su ítem): la pertenencia va **en el WHERE** de cada lectura y un
+recurso de otra company da **404 con el mismo texto** que uno inventado, comparado carácter a
+carácter por una prueba. El alta suelta de ítem comprueba por fin que la unidad **exista** y no solo
+que esté bien escrita —`"l"` está perfecto y no existe: el litro es `lt`— y las cuatro
+comprobaciones de unidad del sistema comparten ya **un solo mensaje**, el que enumera las válidas.
+Las tres escrituras que reventaban con un `P2002` sin traducir —renombrar un ítem, reimportar
+artículos, la carrera de los dos lotes— salen ahora como **409** con el nombre que sobra dentro;
+el rescate de la carrera relee **en una transacción nueva**, porque la que falló está abortada.
+
+**Lo que destaparon las tres revisiones adversariales**, todo atendido y nada rebajado: **el token
+salía en claro en el log de cada mutación** (la cabecera se introdujo sin tocar `redact`; ahora la
+lista se deriva de `CABECERA_DE_CSRF` y su `.spec` la clava, y **C14 de `AUDITORIA.md`** pasa a
+exigir que todo secreto nuevo entre ahí en el mismo paquete); **un `<form>` cruzado podía iniciar
+sesión** —Nest monta `urlencoded` por defecto y el login lo analizaba: no se documentó como riesgo,
+se cerró con `bodyParser: false` + `useBodyParser('json')` (D-16.74)—; **26 aserciones de 403
+comprobaban solo el estado**, varias de ellas 🔴 de CLAUDE.md §7, y como `CsrfGuard` corre antes que
+`PermisosGuard` les habría bastado el 403 equivocado (regla nueva de `audit:forbidden`,
+`403-de-integracion-sin-su-code`, verificada por sabotaje); **el cliente web no sabía recuperarse de
+un `CSRF_INVALIDO`** sin atacante de por medio (reintento único); **una 🔴 no medía lo que decía y
+su afirmación era falsa** —volver a entrar no cierra la sesión anterior, y así se documenta
+(D-16.73)—; **la prueba del preflight no distinguía lista declarada de reflejo** (se escribió la que
+sí, y se vio en rojo); **`detalle` no lo leía nadie**, así que pasar los tres errores a 4xx borraba
+su diagnóstico en vez de reubicarlo (ahora sale en nivel `debug`); **`.strict()` reabrió el eco que
+`valorParaMensaje` acababa de cerrar** (el mensaje de Zod lleva los nombres de las claves verbatim);
+**el 409 de reimportar artículos y el rescate de la carrera no tenían ni una prueba**; y
+**`app-cliente.md` afirmaba que «todos» los esquemas de consulta son estrictos** cuando cinco
+lecturas siguen tomando el parámetro suelto — ahora están nombradas una a una en el documento que
+lee quien integra.
+
+**Números.** Unitarias: **870** (eran 823; +47, 62 archivos). Integración: **465 casos, 460 en verde
+y 5 saltadas con motivo** (INC-016) en **32** archivos (eran 400 en 30; +2 suites: `cors` y
+`frontera-http`). `audit:forbidden` **45 reglas sobre 455 archivos** (eran 44 / 433);
+`audit:arch` **368 módulos, 1608 dependencias**, 0 violaciones; **16** migraciones reversibles;
+**0 clones**. `migrate:verify` 4/4. Bundle de `apps/web`: **126,9 KiB gzip de piso** y 138,7 KiB la
+pantalla mayor, contra 200/350. `npm run bench`: tres de cuatro presupuestos en verde y **el
+consolidado en 944,0 ms contra 800**, igual que en P16-A1 y sin regresión —normalizado al suelo del
+entorno que el propio bench mide son **116,5 «suelos» frente a los 144,8 de P16-A1**—; el umbral no
+se sube y la duda sigue abierta en `ESTADO.md`. **Lo que queda dicho:** `Origin`/`Referer` sin
+implementar con su señal; los 16 `@Param` siguen sin `ParseUUIDPipe` (dan 400, pero dentro del
+manejador); las cinco lecturas con `@Query` crudo no son estrictas; el back office conserva sus dos
+analizadores de cuerpo (D-16.75); y el índice de ADR sigue saltando del 012 al 021.
+
+---
+
 ## P16-A1 — El IVA en dos niveles, el correo que llega, y el límite que limita de verdad · 2026-09-10
 
 > Primer paquete de código de la pasada P16 → P20. Un commit, dos migraciones reversibles

@@ -5,9 +5,22 @@
 
 ## Reglas que valen para toda la superficie
 
-**Ningún endpoint acepta `company_id`.** El tenant sale de la sesión, y solo de ahí (Barrera 3, ADR-006). Todos los esquemas de entrada son `.strict()`: una clave de más **se rechaza con 400**, no se limpia en silencio. Mandar `companyId` es un error, no un campo ignorado.
+**Ningún endpoint acepta `company_id`.** El tenant sale de la sesión, y solo de ahí (Barrera 3, ADR-006). Todo esquema de **cuerpo** es `.strict()`: una clave de más **se rechaza con 400**, no se limpia en silencio. Mandar `companyId` es un error, no un campo ignorado.
 
-**Autenticación por cookie, nunca por cabecera.** La sesión viaja en una cookie `HttpOnly; SameSite=Strict; Path=/` (más `Secure` en producción). No se acepta `Authorization: Bearer`: admitir las dos vías reabriría el CSRF que `SameSite=Strict` cierra.
+**Y desde P16-A2 también los ocho esquemas de consulta** (`/analitica/*`, `/consolidado`, `/costeo`, `/recetas`, `/inventario/saldos`, `/inventario/movimientos`, `/conteos`, `/periodos`). Hasta entonces eran laxos: un `?utm_source=…` o un `?companyId=…` **se descartaba en silencio y la respuesta era 200**. Ahora un parámetro de más devuelve `400 ENTRADA_INVALIDA` diciendo cuál sobra —con el nombre de la clave recortado, que el cuerpo de un error no es el eco de la petición—. Construye la URL con los parámetros documentados y ninguno más; si un enlace tuyo pega parámetros de rastreo, quítalos antes de llamar.
+
+> **Cinco lecturas todavía no lo hacen, y aquí están nombradas para que nadie lo dé por hecho:** `GET /precios?itemId=`, `GET /precios/costo/:itemId?fecha=`, `GET /catalogo/articulos?itemId=`, `GET /catalogo/items?incluirInactivos=` y `GET /recetas/propagacion/previsualizacion?productId=&origen=`. Toman el parámetro suelto, sin esquema, así que **una clave de más ahí se sigue ignorando y la respuesta es 200**. Es deuda anotada de P16-A2 y se cierra en P16-B; hasta entonces, no cuentes con el rechazo en estas cinco.
+
+**CORS.** En producción no hay CORS: el frontend y la API se sirven desde el mismo origen y `CORS_ORIGENES` está vacío a propósito. Cuando sí se declaran orígenes (desarrollo, o un frontend en otro dominio), la lista es **exacta** —jamás `*`, que con credenciales el navegador rechaza— y la política permite `GET, POST, PUT, PATCH, DELETE`, las cabeceras `Content-Type` y `X-CSRF-Token`, y **expone** `x-correlation-id` y `Retry-After` para que el JavaScript de la página pueda leerlos. *(`DELETE` entra en P16-A2: existía la ruta y el preflight la rechazaba.)*
+
+**Autenticación por cookie, nunca por cabecera.** La sesión viaja en una cookie `HttpOnly; SameSite=Strict; Path=/` (más `Secure` en producción). No se acepta `Authorization: Bearer`: hoy el único cliente es un navegador y admitir las dos vías duplicaría la superficie sin que nadie lo pida.
+
+**Toda mutación exige la cabecera `X-CSRF-Token`** *(P16-A2, U4, ADR-021)*. Es decir: `POST`, `PUT`, `PATCH` y `DELETE`. Las lecturas no la necesitan —un CSRF sirve para provocar un efecto, y el sitio cruzado no puede leer la respuesta— y las **cuatro rutas públicas tampoco**: sin sesión no hay credencial que el navegador adjunte, luego no hay nada que suplantar. *(El login es la excepción interesante: ahí una petición cruzada no usaría una credencial, la crearía. Lo que lo cierra es que **el cuerpo de toda petición va en `application/json`** —la API no analiza formularios—, así que un `<form>` cruzado no llega a nada. Ver ADR-021.)*
+
+- El token se obtiene del **cuerpo** de `POST /auth/login`, y se recupera tras recargar la página con `GET /auth/sesion`. Nunca viaja en una cookie: una cookie la manda el navegador sola, justo en la petición cruzada de la que este token defiende.
+- Es **el de tu sesión**: uno de otra sesión da 403 igual que ninguno, aunque las dos sesiones sean del mismo usuario. Volver a entrar abre una sesión **nueva** con su propio token; **la anterior no se cierra** y sigue funcionando con el suyo — el móvil y el ordenador a la vez son dos sesiones vivas, cada una con su token. Dentro de una sesión el token **no rota**: dura lo que dure ella.
+- Si falta o no coincide: **403 `CSRF_INVALIDO`**. Se arregla recargando la página, no pidiendo permisos — por eso tiene código propio y no comparte el de `PERMISO_DENEGADO`.
+- **Por qué existe si la cookie ya es `SameSite=Strict`:** porque `SameSite` lo aplica el navegador y no la API (un navegador viejo lo ignora entero), y porque mira el *sitio* y no el *origen* (un subdominio del mismo dominio manda la cookie con normalidad). ADR-021 lo desarrolla.
 
 **Deny by default.** Toda ruta exige sesión salvo las cuatro marcadas como públicas abajo.
 
@@ -21,13 +34,19 @@
 | `CREDENCIALES_INVALIDAS` | 401 | Correo o contraseña incorrectos. **Idéntico** exista o no la cuenta |
 | `SESION_INVALIDA` | 401 | Sin sesión, caducada, inactiva o revocada |
 | `PERMISO_DENEGADO` | 403 | Autenticado, pero le falta la capacidad. El mensaje dice cuál |
+| `CSRF_INVALIDO` | 403 | La mutación no trae `X-CSRF-Token`, o el que trae no es el de esta sesión. Recarga y reintenta *(P16-A2)* |
 | `RECURSO_NO_ENCONTRADO` | 404 | No existe **en tu company** |
+| `PERIODO_SIN_DATOS` | 404 | Ese **mes no se ha abierto** en esa ubicación: ni ventas, ni movimientos, ni conteo. No es un enlace roto ni un mes en cero *(P16-A2, D-16.2)* |
 | `LIMITE_DEL_PLAN` | 409 | El permiso está bien; lo que no da es el plan |
 | `CONFLICTO` | 409 | La petición está bien formada; lo que choca es el estado que ya hay (un nombre repetido) |
 | `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos. Escala: 1 → 5 → 15 → 60 min |
 | `TOO_MANY_REQUESTS` | 429 | El limitador de peticiones. **No es lo mismo** que el anterior |
 | `LIMITE_DE_SOLICITUDES` | 429 | Demasiadas veces la **misma solicitud**: olvido, restablecimiento, invitar o reenviar, por IP o por destinatario. Trae `Retry-After` en segundos y el minuto en el mensaje *(P16-A1)* |
 | `INTERNAL_ERROR` | 5xx | Fallo inesperado. Cita `x-correlation-id` en el ticket |
+
+**Los dos 404 también se distinguen por el `code`, y esto importa en pantalla.** `RECURSO_NO_ENCONTRADO` es un error: el enlace está roto o el id no es tuyo. `PERIODO_SIN_DATOS` **no lo es**: es un estado normal del producto —el mes todavía no se ha trabajado— y lo que corresponde enseñar no es un aviso rojo sino «este mes está sin abrir» con el camino para abrirlo (cargar las ventas). Lo devuelven las **seis vistas** de analítica; `GET /analitica/ventas` y `GET /analitica/costos-fijos` **no**, porque para ellas un mes sin abrir es la lista vacía.
+
+**Un identificador mal formado es 400, no 500** *(P16-A2, INC-012)*. Un `:id` de ruta o un `?itemId=` que no sea un UUID, una `unidadDeUso` que no tenga la forma de un código corto en minúsculas (`kg`, `lt`, `unid`) y un decimal con más de 30 decimales devuelven `400 ENTRADA_INVALIDA` con un mensaje que dice qué corregir. Antes los tres salían como `INTERNAL_ERROR` y no decían nada.
 
 Los tres 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dice «espera un momento», otro «tu cuenta está bloqueada» y el tercero «ya pediste esto demasiadas veces». **La IP que cuenta es la del cliente, no la del proxy**: detrás de Caddy se toma el último salto de `X-Forwarded-For` solo porque Caddy está en `PROXY_DE_CONFIANZA`; una cabecera falseada desde fuera no cambia nada (D-16.49).
 
@@ -41,11 +60,34 @@ Los tres 429 son mecanismos distintos y el `code` es cómo se distinguen: uno di
 { "email": "ana@snacklab.ec", "contrasena": "tres cebollas moradas" }
 ```
 
-**200** → `{ "expiraEn": "2026-09-05T00:00:00.000Z" }` más `Set-Cookie: sesion=…`.
+**200** → `{ "expiraEn": "2026-09-05T00:00:00.000Z", "csrf": "8Kb…" }` más `Set-Cookie: sesion=…`.
 
-**El token no viaja en el cuerpo.** Devolverlo además en el JSON anularía el `HttpOnly`: cualquier script de la página podría leerlo de la respuesta.
+**El token de sesión no viaja en el cuerpo.** Devolverlo además en el JSON anularía el `HttpOnly`: cualquier script de la página podría leerlo de la respuesta.
+
+**`csrf` sí, y no es lo mismo** *(P16-A2)*. Es el token anti-CSRF de la sesión recién abierta, y **tiene** que ser legible por la página: su trabajo es que la página lo ponga en la cabecera `X-CSRF-Token` de cada mutación, algo que un sitio cruzado no puede hacer. No es una credencial: sin la cookie no sirve para nada. Guárdalo en memoria; si se pierde, `GET /auth/sesion` lo devuelve.
 
 **401** con el mismo cuerpo exista o no la cuenta, y con el mismo coste en tiempo. **429** `ACCESO_BLOQUEADO` tras cinco fallos de la cuenta en quince minutos. Con el quinto fallo se **encola** un aviso al titular (`email_outbox`, plantilla `BLOQUEO`, sin enlace y sin datos); lo entrega el despachador, como los demás correos *(P16-A1; antes salía de la API por `MailerPort`, que en producción es `fake`)*.
+
+### `GET /auth/sesion` — sesión *(P16-A2)*
+
+**200** →
+
+```json
+{
+  "userId": "018f2b8c-2222-7000-8000-000000000002",
+  "permisos": ["catalog.read", "inventory.write"],
+  "alcance": { "clase": "ubicaciones", "ids": ["018f…"] },
+  "csrf": "8Kb…"
+}
+```
+
+**Es la primera llamada de cada carga de página.** Devuelve quién eres, qué puedes, sobre qué, y el token con el que firmar las mutaciones — que es lo que permite recargar sin rotar el token ni guardarlo en `localStorage`.
+
+`alcance` es una **unión discriminada**, no una lista: `{ "clase": "company" }` cuando el usuario puede con todas las ubicaciones de su company, o `{ "clase": "ubicaciones", "ids": [...] }` cuando su rol es de ubicación. **No se aplana**: un `ids: []` que significara «todas» es la convención que alguien lee al revés una vez y convierte en fuga.
+
+**No lleva `companyId`, y no es un olvido.** El tenant no es un dato que el cliente pueda usar —ningún endpoint lo acepta, Barrera 3— y publicarlo solo invitaría a intentarlo.
+
+**401** `SESION_INVALIDA` sin cookie válida. No exige ninguna capacidad: el mínimo de la API es estar autenticado, y esto no devuelve nada que el usuario no sea ya.
 
 ### `POST /auth/logout` — sesión
 
@@ -145,6 +187,22 @@ Sin cuerpo. **202**: el invitado recibe un enlace **nuevo** y **el anterior deja
 
 > **Los decimales entran y salen como CADENA, nunca como número.** `"0.85"`, no `0.85`. ADR-003: un `double` de JavaScript no representa exactamente ni `0.1`, y este es el sistema donde un centavo de diferencia se acumula hasta romper la conciliación. Mandar un número JSON devuelve **400**.
 
+### `GET /catalogo/unidades` — `catalog.read` *(P16-A2)*
+
+El catálogo **global** de unidades, para que una pantalla ofrezca una lista en vez de un campo libre.
+
+```json
+[{ "codigo": "kg", "nombre": "kilogramo", "dimension": "MASA" }]
+```
+
+`dimension` ∈ `MASA` · `VOLUMEN` · `CONTEO`. **Ordenadas por dimensión y dentro por tamaño** —`mg, g, oz, lb, kg`—, que se lee como una escala; alfabéticamente no se lee como nada.
+
+No lleva tenant: un kilogramo pesa lo mismo en todas las companies, la tabla es semilla de migración y el rol de la aplicación no tiene `INSERT` sobre ella. Sigue exigiendo sesión.
+
+**No se publica el factor a base.** Es para multiplicar, no para enseñar, y serializarlo expondría el interior del tipo decimal (ADR-003). El `factorDeConversion` de un artículo lo calcula el servidor.
+
+> **Por qué existe este endpoint.** `unidadDeUso` valida la FORMA del código y deja pasar `"l"`, que está bien escrito y no existe: el litro es `lt`. Eso llegaba al `INSERT` y moría en una clave foránea con un **500** (INC-012). Desde P16-A2 el alta de ítem lo rechaza con **400** y la lista de válidas dentro — y esta ruta es para que el usuario no llegue a escribirlo.
+
 ### `GET /catalogo/items?incluirInactivos=true` — `catalog.read`
 
 Los ítems de la company. Por defecto solo los activos.
@@ -171,7 +229,30 @@ Los ítems de la company. Por defecto solo los activos.
 
 **`llevaStock` es obligatorio en una preparación y prohibido en un ítem comprado.** Dice si se produce en lote —y aparece en inventario— o si al vender se explota su receta.
 
-**201** con `{ id }`. **409** si el nombre ya existe.
+**`unidadDeUso` tiene que EXISTIR en `GET /catalogo/unidades`**, no solo estar bien escrita *(P16-A2)*. `"l"`, `"Kg"` o `"litro"` son **400** `ENTRADA_INVALIDA`, y el mensaje enumera las diez válidas. Antes `"l"` era un **500** de la clave foránea.
+
+**201** con `{ id }`. **409** `CONFLICTO` si el nombre ya existe en tu company. El índice es `(company_id, nombre)`: que otra company use ese nombre no estorba.
+
+### `GET /catalogo/items/:id` — `catalog.read` *(P16-A2)*
+
+**La ficha del insumo en una sola llamada**: el ítem, su grupo entero y sus artículos de compra.
+
+```json
+{
+  "id": "…", "nombre": "Leche", "tipo": "COMPRADO", "unidadDeUso": "ml",
+  "rendimiento": "0.950000000000", "grupoId": "…", "estado": "ACTIVE",
+  "confianzaDePrecio": "FACTURA", "llevaStock": null,
+  "grupo": { "id": "…", "nombre": "Lácteos", "ivaTarifa": "0.000000000000" },
+  "articulos": [{ "id": "…", "itemId": "…", "nombre": "Leche entera 1lt", "marca": null,
+                  "proveedor": null, "presentacion": "1.000000000000",
+                  "unidadDePresentacion": "lt", "factorDeConversion": "1000.000000000000",
+                  "ivaTarifa": "0.000000000000", "estado": "ACTIVE" }]
+}
+```
+
+Es un **superconjunto de la fila de la lista**: `grupoId` sigue estando, para que el cliente pueda usar el mismo tipo en las dos pantallas. `grupo` es `null` si el ítem no tiene; `articulos` es `[]` si aún no tiene ninguno. La `ivaTarifa` del grupo es la que heredan las **compras sin artículo** de este ítem (D-16.9).
+
+**404** `RECURSO_NO_ENCONTRADO` si el ítem no existe **o es de otra company** — las dos respuestas son idénticas palabra por palabra, y esa indistinción es la defensa: decir «existe pero no es tuyo» convertiría la ruta en un oráculo del catálogo del vecino. **400** `ENTRADA_INVALIDA` si `:id` no es un UUID.
 
 ### `PUT /catalogo/items/:id` — `catalog.update`
 
@@ -186,9 +267,29 @@ Los ítems de la company. Por defecto solo los activos.
 
 **No hay `DELETE`.** Se archiva con `"estado": "INACTIVE"`.
 
+**404** si el ítem no existe en tu company. **409** `CONFLICTO` si el nombre nuevo ya lo usa otro ítem *(P16-A2: antes era un **500** del índice único)*.
+
 ### `GET /catalogo/articulos?itemId=…` — `catalog.read`
 
 Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem. Cada uno trae su `ivaTarifa` *(P16-A1)*.
+
+### `GET /catalogo/articulos/:id` — `catalog.read` *(P16-A2)*
+
+El artículo con **su ítem dentro**, que es lo que la pantalla titula.
+
+```json
+{
+  "id": "…", "itemId": "…", "nombre": "Harina Ya 2kg", "marca": "Ya", "proveedor": null,
+  "presentacion": "2.000000000000", "unidadDePresentacion": "kg",
+  "factorDeConversion": "2000.000000000000", "ivaTarifa": "0.150000000000",
+  "estado": "ACTIVE",
+  "item": { "id": "…", "nombre": "Harina de trigo", "tipo": "COMPRADO", "unidadDeUso": "g",
+            "rendimiento": "1.000000000000", "grupoId": null, "estado": "ACTIVE",
+            "confianzaDePrecio": "FACTURA", "llevaStock": null }
+}
+```
+
+**404** si no existe o es de otra company, igual que en la ficha del ítem. **400** si `:id` no es un UUID.
 
 ### `POST /catalogo/articulos` — `catalog.create`
 
@@ -211,7 +312,13 @@ Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina so
 
 **`factorExplicito` hace falta cuando las dimensiones NO coinciden** —cuántas unidades de uso salen de una de compra, «un huevo pesa 50 g»— porque ahí no hay física que lo deduzca. Omitirlo es **400** con el motivo dentro.
 
-**201** con `{ id }`. **404** si el ítem no existe en tu company. **409** si el nombre ya existe.
+**`unidadDePresentacion` tiene que EXISTIR en `GET /catalogo/unidades`.** Ya se comprobaba; lo que
+cambia en P16-A2 es el **mensaje**: ahora enumera las diez válidas, igual que en el alta de ítem y en
+los dos lotes del importador. Antes cada uno de los cuatro decía una cosa distinta y solo uno servía
+para corregir.
+
+**201** con `{ id }`. **404** si el ítem no existe en tu company. **409** `CONFLICTO` si el nombre ya
+existe en tu company.
 
 ### `PUT /catalogo/articulos/:id` — `catalog.update` *(P16-A1)*
 
@@ -918,6 +1025,16 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
 | `400` | El mismo producto dos veces en el lote |
 | `409` | El período está cerrado (D6): si la cifra de ventas de un mes sellado cambiara, su food cost real cambiaría con ella |
 
+### `GET /analitica/ventas` — `sales.read`
+
+```json
+[ { "productId": "…", "nombre": "Bolón de verde", "unidades": "320" } ]
+```
+
+**200 siempre, y `[]` si el mes no se ha abierto.** No devuelve `PERIODO_SIN_DATOS`: para una carga, un mes sin fila de período no tiene ventas, y la lista vacía es la verdad. Ese 404 es de las **seis vistas**, no de aquí.
+
+`nombre` desde P16-A2, con el mismo contrato que en menu engineering: vacío si el producto ya no está en la carta.
+
 ### `POST /analitica/costos-fijos` — `cost.write`
 
 ```json
@@ -935,6 +1052,12 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
 **`importe` significa dos cosas según la clasificación:** `VARIABLE` lo trae como **fracción de la venta neta** (`0.03` es 3 %); las otras dos, como **monto mensual**. Lo declara el catálogo, no el nombre del concepto.
 
 **`400` si un concepto se repite**, comparando sin espacios de sobra y sin distinguir mayúsculas: «Arriendo» y «arriendo » son el mismo gasto, y contarlo dos veces daría una utilidad operativa plausible y equivocada.
+
+### Las seis vistas y el mes sin abrir
+
+`GET /analitica/resumen`, `/menu-engineering`, `/food-cost-real`, `/punto-de-equilibrio`, `/inventario` y `/reposicion` devuelven **`404 PERIODO_SIN_DATOS`** cuando en esa ubicación y ese mes no hay nada registrado —ni ventas, ni movimientos, ni conteo—. No es un error de la petición: es un mes que nadie ha trabajado todavía, y devolver ceros haría creer que se analizó. Distíngase de `RECURSO_NO_ENCONTRADO` **por el `code`**, no por el estado (D-16.2).
+
+El consolidado es la excepción: no propaga el 404, lo convierte en su lista `sinDatos` (ADR-012).
 
 ### `GET /analitica/food-cost-real` — `analytics.read`
 
@@ -955,11 +1078,13 @@ Los porcentajes son `null` —no cero— cuando la venta neta del mes es cero: u
 ### `GET /analitica/menu-engineering` — `analytics.read`
 
 ```json
-{ "productos": [ { "productId": "…", "unidades": "210",
+{ "productos": [ { "productId": "…", "nombre": "Bolón de verde", "unidades": "210",
     "popularidad": "0.233333333333", "indicePopularidad": "1",
     "margenContribucion": "6.65", "cuadrante": "ESTRELLA" } ],
   "mcPromedio": "2", "unidadesTotales": "900", "productosActivos": 3 }
 ```
+
+**`nombre` desde P16-A2.** Antes había que pedir `GET /costeo` en paralelo —la carta entera costeada— solo para traducir ids a texto. Sale vacío si el producto ya no está en la carta de la company: la venta ocurrió igual y la fila no se esconde.
 
 `cuadrante` es `ESTRELLA`, `CABALLO`, `ROMPECABEZAS`, `PERRO`, `SIN_DATOS` (activo sin unidades, o sin PVP) o `INACTIVO`. **`índice ≥ 1` es popular**, y el empate exacto es determinista: el índice se calcula con una sola división para que un producto que debe dar `1` dé `1` y no `0.999999999999`.
 

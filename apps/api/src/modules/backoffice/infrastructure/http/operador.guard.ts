@@ -28,11 +28,17 @@ import { ValidarSesionDeOperador, type OperadorActivo } from '../../application/
 /** El nombre de la cookie. Distinto del de la app cliente, y a propósito. */
 export const COOKIE_DE_OPERADOR = 'costeo_backoffice';
 
-const SIN_SESION = 'backoffice.publico';
+/**
+ * La clave de la marca. Se EXPORTA desde P16-A2 porque `CsrfDeOperadorGuard`
+ * tiene que leer la misma: dos guards que decidan «publico» por criterios
+ * distintos acabarian discrepando, y la discrepancia que importa es la que
+ * deja pasar.
+ */
+export const CLAVE_SIN_SESION = 'backoffice.publico';
 
 /** Marca una ruta como abierta. Hoy solo el login. */
 export function PublicoEnBackoffice(): CustomDecorator {
-  return SetMetadata(SIN_SESION, true);
+  return SetMetadata(CLAVE_SIN_SESION, true);
 }
 
 /** Donde el controlador encuentra al operador ya validado. */
@@ -50,7 +56,7 @@ export class OperadorGuard implements CanActivate {
   public async canActivate(contexto: ExecutionContext): Promise<boolean> {
     // `boolean | undefined` y no `boolean`: sin la marca no hay valor, y dejar
     // que el tipo lo diga evita el `any` que devuelve la firma por defecto.
-    const abierta = this.reflector.getAllAndOverride<boolean | undefined>(SIN_SESION, [
+    const abierta = this.reflector.getAllAndOverride<boolean | undefined>(CLAVE_SIN_SESION, [
       contexto.getHandler(),
       contexto.getClass(),
     ]);

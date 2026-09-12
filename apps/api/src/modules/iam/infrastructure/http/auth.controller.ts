@@ -1,11 +1,18 @@
 /**
- * La superficie HTTP de sesion: abrir y cerrar.
+ * La superficie HTTP de sesion: abrir, leer y cerrar.
  *
- * EL TOKEN NO SALE EN EL CUERPO, SOLO EN LA COOKIE `HttpOnly`. Devolverlo
- * ademas en el JSON anularia el `HttpOnly`: cualquier script de la pagina
- * podria leerlo de la respuesta y guardarlo donde un XSS lo encuentra. El
- * cuerpo lleva solo cuando caduca, que es lo unico que un cliente necesita
- * saber para renovar a tiempo.
+ * EL TOKEN DE SESION NO SALE EN EL CUERPO, SOLO EN LA COOKIE `HttpOnly`.
+ * Devolverlo ademas en el JSON anularia el `HttpOnly`: cualquier script de la
+ * pagina podria leerlo de la respuesta y guardarlo donde un XSS lo encuentra.
+ *
+ * EL TOKEN ANTI-CSRF SI SALE EN EL CUERPO, Y NO CONTRADICE LO ANTERIOR (ADR-021).
+ * Son dos cosas distintas: la cookie es la CREDENCIAL —quien la tiene, es el
+ * usuario— y el CSRF no lo es —quien lo tiene y no tiene la cookie no puede
+ * hacer nada—. El CSRF TIENE que ser legible por el JavaScript de la pagina,
+ * porque su trabajo es que la pagina lo ponga en una cabecera que un sitio
+ * cruzado no puede poner. Meterlo en una cookie seria lo contrario de
+ * protegerlo: el navegador la mandaria sola, justo en la peticion de la que
+ * defiende.
  *
  * LA IP LA RESUELVE `ipDelCliente` CON `PROXY_DE_CONFIANZA` (D-16.49). Hasta
  * P16-A1 salia del socket sin mas, «hasta que el despliegue tuviera proxy de
@@ -24,7 +31,7 @@
  * hace falta.
  */
 
-import { Body, Controller, HttpCode, HttpStatus, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Post, Req, Res } from '@nestjs/common';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { CONFIGURATION, type Configuration } from '../../../../shared/infrastructure/config/environment';
@@ -43,6 +50,34 @@ const LARGO_MAXIMO_DE_USER_AGENT = 512;
 
 export interface RespuestaDeLogin {
   readonly expiraEn: string;
+  /** El token anti-CSRF de la sesion recien abierta. Ver la cabecera. */
+  readonly csrf: string;
+}
+
+/**
+ * El alcance, con la MISMA forma que tiene dentro: una union discriminada.
+ *
+ * NO SE APLANA A UNA LISTA. Un `ubicaciones: []` que significara «todas» es la
+ * convencion que alguien lee al reves una vez y convierte en fuga; el puerto
+ * lo dice con esas palabras y el contrato publico no lo va a desmentir.
+ */
+export type AlcanceDto =
+  | { readonly clase: 'company' }
+  | { readonly clase: 'ubicaciones'; readonly ids: readonly string[] };
+
+/**
+ * Lo que el cliente necesita para pintarse: quien es, que puede, sobre que, y
+ * con que token firma sus mutaciones.
+ *
+ * NO LLEVA `companyId` A PROPOSITO. El tenant no es un dato que el cliente use
+ * —no puede mandarlo en ninguna peticion, Barrera 3— y publicarlo solo
+ * invitaria a intentarlo.
+ */
+export interface RespuestaDeSesion {
+  readonly userId: string;
+  readonly permisos: readonly string[];
+  readonly alcance: AlcanceDto;
+  readonly csrf: string;
 }
 
 @Controller('auth')
@@ -78,7 +113,32 @@ export class AuthController {
       }),
     );
 
-    return { expiraEn: abierta.expiraEn.toISOString() };
+    return { expiraEn: abierta.expiraEn.toISOString(), csrf: abierta.csrf };
+  }
+
+  /**
+   * Quien soy — la primera llamada de cada carga de pagina.
+   *
+   * ES LA QUE DEVUELVE EL TOKEN ANTI-CSRF TRAS RECARGAR. El token del login
+   * vive en la memoria del JavaScript, asi que una recarga se lo lleva; la
+   * cookie sobrevive. Sin esta ruta habria que rotar el token —y romper las
+   * demas pestanas— o guardarlo en `localStorage`, donde un XSS lo encuentra.
+   *
+   * SIN `@Requiere(...)`: el minimo de la API es estar autenticado, y esto no
+   * devuelve nada que el usuario no sea ya. Que un usuario lea sus propios
+   * permisos no es una filtracion; es lo que evita que el cliente los adivine.
+   */
+  @Get('sesion')
+  public sesion(@SesionActual() sesion: SesionActiva): RespuestaDeSesion {
+    return {
+      userId: sesion.userId,
+      permisos: [...sesion.permisos],
+      alcance:
+        sesion.alcance.clase === 'company'
+          ? { clase: 'company' }
+          : { clase: 'ubicaciones', ids: [...sesion.alcance.ids] },
+      csrf: sesion.csrfToken,
+    };
   }
 
   @Post('logout')

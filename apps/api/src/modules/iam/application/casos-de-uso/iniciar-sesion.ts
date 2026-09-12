@@ -81,6 +81,12 @@ export interface DatosDeLogin {
 export interface SesionAbierta {
   /** Viaja al cliente una sola vez, en la cookie. No se guarda en ningun sitio. */
   readonly token: string;
+  /**
+   * El token anti-CSRF (ADR-021). Viaja en el CUERPO de la respuesta, no en
+   * una cookie: una cookie viajaria sola en la peticion cruzada, que es
+   * exactamente el canal del que este token defiende.
+   */
+  readonly csrf: string;
   readonly expiraEn: Date;
   readonly userId: UserId;
   readonly companyId: CompanyId;
@@ -231,12 +237,24 @@ export class IniciarSesion {
     await this.endurecerSiHaceFalta(credencial, contrasena);
 
     const { token, hash } = this.deps.tokens.generar();
+    // DOS tokens independientes, del mismo generador y del mismo tamano. No se
+    // deriva uno del otro: un CSRF que fuera `hash(sesion)` se recalcularia
+    // desde la cookie robada.
+    //
+    // EL TOKEN NACE CON LA SESION Y MUERE CON ELLA, y no hay rotacion en medio.
+    // Abrir sesion NO revoca las anteriores —este caso de uso no llama a
+    // ningun `revocar`, a proposito: el movil y el ordenador a la vez son dos
+    // sesiones vivas—, asi que volver a entrar no invalida el token de antes:
+    // le da uno nuevo a una sesion nueva. Lo que si garantiza es que ningun
+    // token lo elige el cliente y que ninguno vale en otra sesion (ADR-021).
+    const csrf = this.deps.tokens.generar().token;
     const expiraEn = caducidadDesde(intento.ahora);
 
     await this.deps.repositorio.abrirSesion({
       companyId: credencial.companyId,
       userId: credencial.userId,
       tokenHash: hash,
+      csrfToken: csrf,
       expiresAt: expiraEn,
       ip: intento.ip,
       userAgent: intento.userAgent,
@@ -256,7 +274,7 @@ export class IniciarSesion {
       detail: {},
     });
 
-    return { token, expiraEn, userId: credencial.userId, companyId: credencial.companyId };
+    return { token, csrf, expiraEn, userId: credencial.userId, companyId: credencial.companyId };
   }
 
   /**

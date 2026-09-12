@@ -87,3 +87,55 @@ describe('EsquemaPipe · caracteres de control', () => {
     expect(pipe.transform(conSaltos)).toEqual(conSaltos);
   });
 });
+
+/**
+ * LA REVISION DE P16-A2: `.strict()` abrio en la otra puerta el eco que
+ * `valorParaMensaje` acababa de cerrar.
+ *
+ * El mensaje que Zod escribe para las claves sobrantes las lleva dentro tal
+ * cual, y desde que los ocho `CONSULTA_*` son estrictos ese texto sale al
+ * cliente en el cuerpo del 400. Una clave de 300 caracteres volvia entera.
+ *
+ * Se comprueba lo que importa —que el mensaje NO es un eco— y no solo que hay
+ * un 400: el 400 ya lo daba antes, y verlo verde no distinguia una cosa de la
+ * otra (INC-007).
+ */
+describe('EsquemaPipe · las claves que sobran no vuelven como eco', () => {
+  const CLAVE_LARGA = 'u'.repeat(300);
+
+  it('nombra que sobran parametros, en espanol y con el numero', () => {
+    let capturado: unknown = null;
+    try {
+      pipe.transform({ nombre: 'Aji', cantidad: '2', utm_source: 'boletin', gclid: 'x' });
+    } catch (error) {
+      capturado = error;
+    }
+
+    expect(capturado).toBeInstanceOf(EntradaInvalidaError);
+    expect((capturado as Error).message).toContain('sobran parametros (2)');
+    expect((capturado as Error).message).toContain('utm_source');
+  });
+
+  it('recorta la clave sobrante: el mensaje no devuelve la peticion entera', () => {
+    let capturado: unknown = null;
+    try {
+      pipe.transform({ nombre: 'Aji', cantidad: '2', [CLAVE_LARGA]: '1' });
+    } catch (error) {
+      capturado = error;
+    }
+
+    expect((capturado as Error).message).not.toContain(CLAVE_LARGA);
+    expect((capturado as Error).message.length).toBeLessThan(CLAVE_LARGA.length);
+  });
+
+  it('y la limpia: una clave con un control no parte la linea del log en dos', () => {
+    let capturado: unknown = null;
+    try {
+      pipe.transform({ nombre: 'Aji', cantidad: '2', [`sobra${NUL}`]: '1' });
+    } catch (error) {
+      capturado = error;
+    }
+
+    expect((capturado as Error).message).not.toContain(NUL);
+  });
+});

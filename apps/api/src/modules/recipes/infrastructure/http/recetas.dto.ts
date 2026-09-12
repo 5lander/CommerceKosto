@@ -82,17 +82,39 @@ export const CUERPO_DE_PROPAGACION = z
 /**
  * Los parametros de consulta de la receta vigente.
  *
- * NO ES `.strict()`, y es la unica excepcion del proyecto: un navegador puede
- * anadir parametros de rastreo a una URL —`utm_source` y companía— y rechazar
- * la peticion por eso seria hostil sin ganar nada. Lo que importa es que los
- * campos que SI se leen esten validados, y lo estan.
+ * **ES `.strict()`, Y ESTE COMENTARIO EXPLICA POR QUE DEJO DE NO SERLO**
+ * (P16-A2). Hasta aqui decia que era «la unica excepcion del proyecto» porque
+ * un navegador puede anadir parametros de rastreo a una URL —`utm_source` y
+ * companía— y rechazar la peticion por eso seria hostil sin ganar nada.
+ *
+ * El argumento era razonable y resulto ser dos cosas a la vez, las dos falsas:
+ *
+ *  1. **No era la unica excepcion: eran OCHO**, todas las `CONSULTA_*` del
+ *     proyecto. Un comentario que dice «unica» y no lo es deja de avisar de
+ *     nada, y mientras tanto `esquema.pipe.ts` afirmaba en su cabecera que
+ *     «TODO esquema de este proyecto es `.strict()`». Dos archivos mintiendo en
+ *     sentidos opuestos.
+ *
+ *  2. **`utm_source` no llega aqui.** Los parametros de rastreo los pega un
+ *     enlace a una URL de PAGINA, que sirve `apps/web`; esto es una llamada
+ *     `fetch` a la API, y la URL la construye el propio cliente carácter a
+ *     carácter. Nadie le anade nada por el camino.
+ *
+ * Y lo que se ganaba tolerandolos era, en realidad, lo que se perdia: con el
+ * modo laxo de Zod una clave de mas **se descarta en silencio y la respuesta es
+ * 200**. `GET /analitica/resumen?...&companyId=<otra>` respondia con los datos
+ * de la sesion y tiraba el `companyId` sin dejar rastro: el intento no fallaba,
+ * se perdia. Es la asignacion masiva de SEGURIDAD.md §3 vista desde la
+ * consulta, y la razon por la que TODO cuerpo ya era estricto.
  */
-export const CONSULTA_DE_RECETA = z.object({
-  locationId: z.uuid(),
-  productId: z.uuid().optional(),
-  itemId: z.uuid().optional(),
-  fecha: z.iso.datetime().optional(),
-});
+export const CONSULTA_DE_RECETA = z
+  .object({
+    locationId: z.uuid(),
+    productId: z.uuid().optional(),
+    itemId: z.uuid().optional(),
+    fecha: z.iso.datetime().optional(),
+  })
+  .strict();
 
 export type ConsultaDeReceta = z.infer<typeof CONSULTA_DE_RECETA>;
 

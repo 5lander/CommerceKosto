@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
-| **Recurrencias** | **10** |
+| **Recurrencias** | **11** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -263,6 +263,42 @@ Momentos ya identificados en los que esto toca hacerse:
 | **P12** | Workspace `apps/web`: globs, `tsconfig`, reglas de capa y de complejidad nuevas | **Los once**, sobre el workspace nuevo |
 | Cualquiera | Se añade una carpeta que no casa con los globs existentes | Los checks cuyo glob se amplió |
 | Cualquiera | Se sube una herramienta de auditoría a un major nuevo | Los checks que la usan: las claves de configuración cambian de nombre y de semántica sin avisar (caso 5) |
+
+## Caso 11 (P16-A2) — no era un check: era una 🔴, y su titulo mentia
+
+**El modo de fallo es el mismo y por eso vive aqui, pero el sujeto es nuevo: una PRUEBA, no un check.**
+
+### Que paso
+
+La etapa del token anti-CSRF cerro con una 🔴 titulada «volver a entrar rota el token, y el anterior
+deja de servir». La prueba estaba en verde. El titulo era falso —`IniciarSesion` no revoca ninguna
+sesion— y lo que la prueba media era **cookie nueva + token viejo**, que es exactamente el caso de la
+prueba de al lado («con el token de OTRA sesion es 403»). Dos pruebas para un solo hecho, y el hecho
+del titulo sin cubrir.
+
+La afirmacion falsa no se quedo en el archivo de pruebas: viajo al contrato publico
+(`docs/apis/app-cliente.md`), al comentario de `iniciar-sesion.ts` y a **ADR-021**, donde era el
+argumento con el que se descarto rotar el token en cada mutacion. **Una prueba en verde firmando una
+afirmacion falsa es peor que no tener la prueba**, porque el resto de la documentacion se apoya en
+ella.
+
+### Que lo caza
+
+Lo mismo de siempre, aplicado a una prueba: **preguntarle que pasaria si el sistema NO cumpliera lo
+que el titulo dice.** Si la respuesta es «pasaria igual», la prueba no lo mide. Aqui bastaba con
+ejecutar la sonda contraria —sesion anterior con SU token— y ver el 201.
+
+La segunda mitad del mismo paquete es el hermano gemelo, y ese si se automatizo: desde P16-A2 hay
+**dos** 403 distintos (`PERMISO_DENEGADO` y `CSRF_INVALIDO`) y el guard de CSRF corre primero, asi
+que 26 aserciones de autorizacion que solo miraban el ESTADO habrian pasado igual sin ejercitar
+ningun permiso. La regla `403-de-integracion-sin-su-code` de `audit:forbidden` lo impide, y se
+verifico borrando una asercion a mano para comprobar que **falla**.
+
+### La leccion, que es nueva
+
+> **Un titulo de prueba es una afirmacion sobre el sistema, y nadie lo verifica.** El cuerpo se
+> revisa; el titulo se cree. Cuando el titulo dice mas de lo que el cuerpo mide, la diferencia acaba
+> copiada en la documentacion y en un ADR, donde ya nadie puede distinguirla de un hecho.
 
 ## Referencias
 

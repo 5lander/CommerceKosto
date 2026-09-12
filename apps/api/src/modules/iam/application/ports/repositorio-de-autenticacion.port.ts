@@ -47,6 +47,15 @@ export interface NuevaSesion {
   readonly companyId: CompanyId;
   readonly userId: UserId;
   readonly tokenHash: string;
+  /**
+   * El token anti-CSRF, EN CLARO y no hasheado (ADR-021).
+   *
+   * Es la excepcion a la regla de la linea de arriba, y tiene su razon: del
+   * token de sesion se guarda el hash porque es la CREDENCIAL; este no lo es
+   * —sin la cookie no sirve para nada— y guardarlo en claro es lo que permite
+   * devolverlo en `GET /auth/sesion` tras recargar la pagina sin rotarlo.
+   */
+  readonly csrfToken: string;
   readonly expiresAt: Date;
   readonly ip: string | null;
   readonly userAgent: string | null;
@@ -88,6 +97,14 @@ export interface ContextoDeSesion {
    * una ubicacion creada hace un segundo esta en la siguiente peticion.
    */
   readonly ubicacionesDeCompany: readonly LocationId[];
+  /**
+   * El token anti-CSRF de esta sesion.
+   *
+   * `null` SOLO en las sesiones abiertas antes de P16-A2. `ValidarSesion` las
+   * trata como invalidas, asi que por encima de el el token es `string` y
+   * nadie tiene que acordarse de comprobar el caso.
+   */
+  readonly csrfToken: string | null;
 }
 
 /** Lo que devuelve `password_reset_consume`: a quien pertenece el token que se acaba de gastar. */

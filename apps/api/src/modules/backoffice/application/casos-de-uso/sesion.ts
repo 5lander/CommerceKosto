@@ -71,7 +71,7 @@ export class IniciarSesionDeOperador {
     readonly contrasena: string;
     readonly ip: string | null;
     readonly userAgent: string | null;
-  }): Promise<string> {
+  }): Promise<SesionDeOperadorAbierta> {
     const credencial = await this.deps.repositorio.buscarCredencial(entrada.email.toLowerCase());
 
     // SE VERIFICA SIEMPRE, exista el operador o no, y por eso el puerto acepta
@@ -88,22 +88,35 @@ export class IniciarSesionDeOperador {
     }
 
     const token = randomBytes(BYTES_DEL_TOKEN).toString('base64url');
+    const csrf = randomBytes(BYTES_DEL_TOKEN).toString('base64url');
     await this.deps.repositorio.abrirSesion({
       operatorId: credencial.operatorId,
       tokenHash: hashDelToken(token),
+      csrfToken: csrf,
       expiraEn: new Date(this.deps.reloj.ahora().getTime() + VIGENCIA_MS),
       ip: entrada.ip,
       userAgent: entrada.userAgent,
     });
 
-    return token;
+    return { token, csrf };
   }
+}
+
+/**
+ * Lo que el login del operador entrega: la credencial y el token que firma sus
+ * mutaciones. El primero va a la cookie; el segundo al cuerpo (ADR-021).
+ */
+export interface SesionDeOperadorAbierta {
+  readonly token: string;
+  readonly csrf: string;
 }
 
 /** El contexto que viaja con cada petición del back office. */
 export interface OperadorActivo {
   readonly operatorId: OperatorId;
   readonly email: string;
+  /** El token anti-CSRF de esta sesión, ya comprobado como no nulo. */
+  readonly csrfToken: string;
 }
 
 export class ValidarSesionDeOperador {
@@ -122,7 +135,12 @@ export class ValidarSesionDeOperador {
 
     exigirVigente(sesion, this.deps.reloj.ahora());
 
-    return { operatorId: sesion.operatorId, email: sesion.email };
+    // Sesión anterior a P16-A2: sin token anti-CSRF no puede probar el origen
+    // de una mutación, y media sesión no es una sesión. Vuelve a entrar.
+    const csrfToken = sesion.csrfToken;
+    if (csrfToken === null) throw new SesionDeOperadorInvalidaError('sin_csrf');
+
+    return { operatorId: sesion.operatorId, email: sesion.email, csrfToken };
   }
 }
 

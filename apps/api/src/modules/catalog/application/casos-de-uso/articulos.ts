@@ -26,13 +26,10 @@ import type { AuditLogPort } from '../../../../shared/application/ports/audit-lo
 import type { ItemId, PurchaseArticleId } from '../../../../shared/domain/identity/identificadores';
 import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Quantity, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
-import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
+import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import {
-  ConversionInvalidaError,
-  factorDeConversion,
-  type UnidadDelCatalogo,
-} from '../../domain/conversion';
+import { exigirUnidad } from '../../domain/catalogo-de-unidades';
+import { ConversionInvalidaError, factorDeConversion } from '../../domain/conversion';
 import {
   ArticuloNoEncontradoError,
   ConflictoDeCatalogoError,
@@ -216,15 +213,4 @@ function calcular(entrada: Parameters<typeof factorDeConversion>[0]): Ratio {
     }
     throw error;
   }
-}
-
-function exigirUnidad(
-  catalogo: readonly UnidadDelCatalogo[],
-  codigo: UnidadDeUso,
-): UnidadDelCatalogo {
-  const encontrada = catalogo.find((u) => u.codigo === codigo);
-  if (encontrada === undefined) {
-    throw new EntradaDeCatalogoInvalidaError(`La unidad "${codigo}" no está en el catálogo.`);
-  }
-  return encontrada;
 }

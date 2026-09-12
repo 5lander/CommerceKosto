@@ -50,7 +50,7 @@ export const CUERPO_DE_LINEAS = z
   })
   .strict();
 
-export const CONSULTA_DE_CONTEOS = z.object({ locationId: z.uuid() });
+export const CONSULTA_DE_CONTEOS = z.object({ locationId: z.uuid() }).strict();
 
 export type CuerpoDeConteo = z.infer<typeof CUERPO_DE_CONTEO>;
 export type CuerpoDeLineas = z.infer<typeof CUERPO_DE_LINEAS>;

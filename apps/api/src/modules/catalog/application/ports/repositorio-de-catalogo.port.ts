@@ -64,6 +64,24 @@ export interface GrupoLeido {
   readonly ivaTarifa: string | null;
 }
 
+/**
+ * Una unidad del catálogo **tal como se publica**, que no es lo mismo que la
+ * `UnidadDelCatalogo` del dominio.
+ *
+ * Esta lleva el `nombre` legible («kilogramo») y NO lleva `factorABase`; la del
+ * dominio es justo al revés. No es duplicación: son dos lecturas con dos
+ * propósitos. El factor es un `Ratio` que sirve para multiplicar y no significa
+ * nada en una pantalla —y serializarlo tal cual expondría el interior del tipo
+ * decimal, que es lo que ADR-003 prohíbe—; el nombre no entra en ningún
+ * cálculo, y meterlo en el tipo del dominio sería presentación dentro de la
+ * única parte del módulo que corre con la base apagada.
+ */
+export interface UnidadLeida {
+  readonly codigo: string;
+  readonly nombre: string;
+  readonly dimension: string;
+}
+
 export type ResultadoDeAlta<T> =
   | { readonly clase: 'creado'; readonly id: T }
   | { readonly clase: 'nombre_en_uso' };
@@ -74,6 +92,24 @@ export type ResultadoDeAlta<T> =
  * 500 que no dice qué nombre sobra (INC-012).
  */
 export type ResultadoDeCambio = 'actualizado' | 'no_encontrado' | 'nombre_en_uso';
+
+/**
+ * El desenlace del lote de ARTÍCULOS, que tiene dos choques distintos.
+ *
+ * `nombres_en_uso` significa aquí, heredado, «estos ítems NO existen»: los
+ * artículos apuntan a su ítem por nombre y un archivo puede nombrar uno que
+ * nadie ha creado. `articulos_en_uso` es el otro, y es el que faltaba: los
+ * nombres de ARTÍCULO que ya están en la company. Reimportar el mismo archivo
+ * chocaba con `purchase_article_company_id_name_key` y salía como **500**.
+ *
+ * Se añade aquí y no como variante de `ResultadoDeLote`, que es compartido por
+ * cuatro módulos: los otros tres tendrían que tratar un caso que en ellos no
+ * puede ocurrir, y una rama muerta que el compilador exige se lee como si
+ * pudiera pasar.
+ */
+export type ResultadoDeLoteDeArticulos =
+  | ResultadoDeLote
+  | { readonly clase: 'articulos_en_uso'; readonly nombres: readonly string[] };
 
 /**
  * El alta de un ITEM, que ademas puede toparse con el limite del plan (D5).
@@ -180,6 +216,12 @@ export interface RepositorioDeCatalogo {
    */
   unidades(): Promise<readonly UnidadDelCatalogo[]>;
 
+  /**
+   * El mismo catálogo, en la forma que se publica: código, nombre y dimensión.
+   * Ver `UnidadLeida` para por qué son dos lecturas y no una.
+   */
+  listarUnidades(): Promise<readonly UnidadLeida[]>;
+
   crearGrupo(entrada: {
     readonly companyId: CompanyId;
     readonly nombre: string;
@@ -198,8 +240,12 @@ export interface RepositorioDeCatalogo {
 
   crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAltaDeItem>;
 
-  /** @returns `false` si el ítem no existe en esa company. */
-  actualizarItem(datos: DatosParaActualizarItem): Promise<boolean>;
+  /**
+   * `no_encontrado` si el ítem no existe en esa company; `nombre_en_uso` si el
+   * nombre nuevo ya lo tiene otro ítem. Devolvía un `boolean` y el choque de
+   * nombres salía como **500** del índice único (P16-A2).
+   */
+  actualizarItem(datos: DatosParaActualizarItem): Promise<ResultadoDeCambio>;
 
   listarItems(entrada: {
     readonly companyId: CompanyId;
@@ -233,7 +279,7 @@ export interface RepositorioDeCatalogo {
   crearArticulosEnLote(datos: {
     readonly companyId: CompanyId;
     readonly articulos: readonly DatosDeArticuloEnLote[];
-  }): Promise<ResultadoDeLote>;
+  }): Promise<ResultadoDeLoteDeArticulos>;
 
   listarArticulos(entrada: {
     readonly companyId: CompanyId;

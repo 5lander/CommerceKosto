@@ -64,11 +64,31 @@ export interface FilaDeReposicion {
   readonly semaforo: Semaforo;
 }
 
+/**
+ * El menu clasificado y, aparte, el nombre de cada producto.
+ *
+ * **VAN SEPARADOS Y NO DENTRO DE `ProductoClasificado` a proposito** (P16-A2).
+ * `menu-engineering.ts` es dominio puro y clasifica por numeros: unidades,
+ * popularidad y margen. El nombre no entra en ninguna regla —cambiarlo no mueve
+ * un cuadrante—, asi que meterlo alli seria meter un dato de presentacion en el
+ * unico sitio del modulo que se prueba con la base apagada. Se une al borde,
+ * como el catalogo en `ItemConNombre`.
+ *
+ * **No cuesta una consulta**: `datos.carta` ya trae el nombre de cada producto
+ * costeado, y se estaba tirando.
+ */
+export interface MenuConNombres {
+  readonly menu: Menu;
+  /** Vacio para un producto vendido que ya no esta en la carta. */
+  readonly nombres: ReadonlyMap<ProductId, string>;
+}
+
 export class ConsultarMenuEngineering {
   public constructor(private readonly deps: DependenciasDeVistas) {}
 
-  public async ejecutar(sesion: SesionActiva, pedido: MesDeUbicacion): Promise<Menu> {
-    return menuDe(await contexto({ deps: this.deps, sesion, pedido }));
+  public async ejecutar(sesion: SesionActiva, pedido: MesDeUbicacion): Promise<MenuConNombres> {
+    const datos = await contexto({ deps: this.deps, sesion, pedido });
+    return { menu: menuDe(datos), nombres: nombresDeLaCarta(datos) };
   }
 }
 
@@ -177,6 +197,10 @@ export class ConsultarReposicion {
 }
 
 /* --- Las cuatro vistas, sobre el contexto ya armado ------------------------ */
+
+function nombresDeLaCarta(datos: ContextoDelPeriodo): ReadonlyMap<ProductId, string> {
+  return new Map(datos.carta.map((producto) => [producto.productId, producto.nombre]));
+}
 
 function menuDe(datos: ContextoDelPeriodo): Menu {
   return clasificarMenu({

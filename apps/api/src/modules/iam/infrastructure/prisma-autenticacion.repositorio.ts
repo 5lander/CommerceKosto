@@ -96,6 +96,7 @@ const FILA_DE_SESION = z.object({
   ubicaciones: z.array(z.uuid()),
   alcance_company: z.boolean(),
   ubicaciones_de_company: z.array(z.uuid()),
+  csrf_token: z.string().nullable(),
 });
 
 const CREDENCIALES = z.array(FILA_DE_CREDENCIAL);
@@ -196,7 +197,7 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
     const filas = await this.transaccion.runWithoutTenant(MOTIVO_SESION, async (tx) =>
       tx.$queryRaw`SELECT session_id, user_id, company_id, created_at, last_seen_at, expires_at,
                           revoked_at, user_status, company_status, permisos, ubicaciones,
-                          alcance_company, ubicaciones_de_company
+                          alcance_company, ubicaciones_de_company, csrf_token
                    FROM session_lookup(${tokenHash})`,
     );
 
@@ -222,6 +223,7 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
         ? { clase: 'company' }
         : { clase: 'ubicaciones', ids: fila.ubicaciones.map(locationId) },
       ubicacionesDeCompany: fila.ubicaciones_de_company.map(locationId),
+      csrfToken: fila.csrf_token,
     };
   }
 
@@ -280,6 +282,7 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
           companyId: nueva.companyId,
           userId: nueva.userId,
           tokenHash: nueva.tokenHash,
+          csrfToken: nueva.csrfToken,
           expiresAt: nueva.expiresAt,
           ip: nueva.ip,
           userAgent: nueva.userAgent,

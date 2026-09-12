@@ -50,10 +50,20 @@ export class AccesoBloqueadoError extends ErrorDeDominio {
   }
 }
 
+/**
+ * `sin_csrf` ES DE P16-A2 Y SOLO OCURRE UNA VEZ POR SESION VIEJA. Las sesiones
+ * abiertas antes de que existiera `session.csrf_token` no tienen token, y una
+ * sesion que no puede probar el origen de sus mutaciones no es media sesion:
+ * es una sesion invalida. Sale como 401 —«vuelve a entrar»— y no como el 403
+ * de CSRF, que le diria al usuario que recargue una pagina que va a fallar
+ * igual. Ver ADR-021.
+ */
 export class SesionInvalidaError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'SESION_INVALIDA';
 
-  public constructor(motivo: 'ausente' | 'desconocida' | 'revocada' | 'caducada' | 'inactiva') {
+  public constructor(
+    motivo: 'ausente' | 'desconocida' | 'revocada' | 'caducada' | 'inactiva' | 'sin_csrf',
+  ) {
     super('Sesion no valida. Inicia sesion de nuevo.', { motivo });
   }
 }

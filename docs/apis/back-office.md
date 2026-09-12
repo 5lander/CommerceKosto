@@ -2,6 +2,17 @@
 
 > Proceso aparte (`npm run backoffice`, `apps/api/src/backoffice.ts`), en loopback, al que se llega por túnel SSH. Toda ruta exige sesión de operador (`POST /sesion`), y toda ruta que mira datos de **un** cliente exige además la cabecera `X-Motivo` (≥ 20 caracteres) y deja fila en `backoffice_access_log`. Las rutas de companies, planes, auditoría y accesos están descritas en `docs/pasos/P11/CONSTRUCCION.md` y `docs/pasos/P13/CONSTRUCCION.md`; aquí van las que se añadieron después.
 
+> **Y desde P16-A2, toda mutación exige la cabecera `X-CSRF-Token`** (U4, ADR-021). El back office
+> tiene **su propio** token: lo devuelve `POST /sesion` en el cuerpo, junto a `expiraEn`, vive en
+> `backoffice_session.csrf_token` y no vale en la app cliente ni al revés. Lo comprueba
+> `CsrfDeOperadorGuard`; sin él, o con uno ajeno, **403 `CSRF_INVALIDO`**. Las lecturas no lo
+> necesitan. Una sesión de operador abierta **antes** de la migración no tiene token y se trata como
+> inválida (401): hay que volver a entrar. **Por qué el panel más protegido de hecho lo lleva
+> igualmente:** hoy lo defienden el `cors: false`, el `Content-Type: application/json` de su propia
+> página y el loopback tras el túnel SSH — tres propiedades del despliegue de hoy, no del contrato.
+> El día que alguien sirva un `<form method="post">` desde estas rutas, esas tres desaparecen sin que
+> ningún check avise.
+
 ## Correo (P16-A1)
 
 ### `GET /correo/salud` — sesión de operador, sin motivo

@@ -206,7 +206,76 @@ function copiasEnElLock(paquetes, nombre) {
     .map(([clave, entrada]) => ({ clave, version: entrada.version ?? '' }));
 }
 
+/** `expect(x.status).toBe(PROHIBIDO)` o `.toBe(403)`, escrito como sea. */
+const ASERCION_DE_403 = /toBe\((?:PROHIBIDO|403)\)/;
+
+/** Cualquier asercion sobre el `code` del cuerpo: `{ code: 'PERMISO_DENEGADO' }`. */
+const ASERCION_DE_CODIGO = /\bcode:/;
+
+/**
+ * Recorre el CUERPO DE LA PRUEBA a partir de la asercion de 403 buscando una
+ * asercion de codigo.
+ *
+ * El limite es la sangria, no un numero de lineas: se para en la primera linea
+ * menos sangrada que la del `expect`, que es el `});` que cierra el `it`. Con
+ * una ventana fija de N lineas, un comentario de dos lineas en medio la
+ * desbordaba —paso— y N+1 lineas mas abajo se colaba el `code` de la prueba
+ * SIGUIENTE, que es peor: aprobaba una prueba que no comprueba nada.
+ *
+ * @param {readonly string[]} lineas
+ * @param {number} desde indice (base 0) de la linea del 403
+ * @returns {boolean}
+ */
+function afirmaElCodigo(lineas, desde) {
+  const sangria = sangriaDe(lineas[desde] ?? '');
+
+  for (let n = desde; n < lineas.length; n += 1) {
+    const linea = lineas[n] ?? '';
+    if (linea.trim() === '') continue;
+    if (n > desde && sangriaDe(linea) < sangria) return false;
+    if (ASERCION_DE_CODIGO.test(linea)) return true;
+  }
+  return false;
+}
+
+/** @param {string} linea @returns {number} */
+function sangriaDe(linea) {
+  return linea.length - linea.trimStart().length;
+}
+
 export const repoRules = [
+  {
+    id: '403-de-integracion-sin-su-code',
+    descripcion: 'Una asercion de 403 en las pruebas de integracion que no comprueba tambien el `code`',
+    porQue:
+      'DESDE P16-A2 HAY DOS 403 DISTINTOS: `PERMISO_DENEGADO` y `CSRF_INVALIDO`, y `CsrfGuard` corre ' +
+      'ANTES que `PermisosGuard`. Una mutacion a la que se le olvide `X-CSRF-Token` responde 403 y ' +
+      'deja en verde una prueba de autorizacion que no llego a ejercitar ningun permiso — incluidas ' +
+      'las 🔴 de aislamiento y confidencialidad de CLAUDE.md §7, que son las que menos pueden ' +
+      'permitirse pasar por la razon equivocada. El estado dice que se rechazo; solo el codigo dice ' +
+      'POR QUE. Vale cualquier asercion sobre `code` dentro del mismo `it`.',
+    referencia: 'CLAUDE.md §7 · ADR-021 · docs/pasos/P16-A2/CONSTRUCCION.md',
+    desde: 'P16-A2',
+    incluye: ['apps/api/test/integracion/**/*.spec.ts'],
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      /** @type {Hallazgo[]} */
+      const hallazgos = [];
+
+      for (const ruta of archivos.filter((a) => matchesAny(a, this.incluye ?? []))) {
+        const lineas = leer(ruta).split('\n');
+        lineas.forEach((linea, indice) => {
+          if (!ASERCION_DE_403.test(linea) || afirmaElCodigo(lineas, indice)) return;
+          hallazgos.push({ ruta, linea: indice + 1, extracto: linea.trim() });
+        });
+      }
+
+      return hallazgos;
+    },
+  },
   {
     id: 'script-de-package-json-apunta-a-nada',
     descripcion: 'Un script de `package.json` que invoca un archivo que no existe',

@@ -15,13 +15,40 @@
  *                      cuando quiera".
  *
  *   SameSite=Strict    el navegador no manda la cookie en peticiones venidas de
- *                      otro sitio. Es la defensa CSRF de esta API: no hace
- *                      falta un token anti-CSRF porque no hay peticion
- *                      cruzada que lleve credencial.
+ *                      otro sitio. Es la PRIMERA defensa contra CSRF, y desde
+ *                      P16-A2 no es la unica: ver abajo.
  *
  *   Secure             la cookie no viaja por HTTP en claro.
  *
  *   Path=/             una sola sesion para toda la API.
+ *
+ * POR QUE HAY ADEMAS UN TOKEN ANTI-CSRF, AUNQUE LA COOKIE SEA `Strict`
+ * (U4, ADR-021). Hasta P16-A1 este comentario decia que el token no hacia
+ * falta «porque no hay peticion cruzada que lleve credencial». Era cierto
+ * SUPONIENDO que el navegador cumpla, y esa suposicion es justo la que no se
+ * puede comprobar desde el servidor:
+ *
+ *   1. `SameSite` LO APLICA EL CLIENTE. Un navegador antiguo que no lo
+ *      entienda ignora el atributo entero y manda la cookie: la defensa
+ *      desaparece sin que la API se entere. El token lo comprueba el servidor,
+ *      que es la unica parte de esta conversacion que controlamos.
+ *
+ *   2. `SameSite` MIRA EL SITIO, NO EL ORIGEN. `otro.midominio.com` es el
+ *      MISMO sitio que `app.midominio.com`: un subdominio comprometido —una
+ *      pagina de marketing, un `wildcard` de DNS mal cerrado— manda la cookie
+ *      con toda normalidad. El token no viaja solo, asi que ese subdominio
+ *      sigue sin poder hacer nada.
+ *
+ *   3. Y NO SE ARGUMENTA POR REDUNDANCIA. «Dos defensas por si una falla» es
+ *      una excusa comoda; lo que sostiene esta es que las dos fallan por
+ *      motivos DISTINTOS y que ninguna cubre el hueco de la otra. Una cookie
+ *      `Strict` no protege de un subdominio; un token no protege de un XSS en
+ *      la propia pagina. Juntas dejan menos hueco que cualquiera de las dos.
+ *
+ * EL TOKEN NO VIAJA EN NINGUNA COOKIE, y por eso no aparece en este archivo:
+ * sale en el cuerpo del login y de `GET /auth/sesion`, y vuelve en la cabecera
+ * `X-CSRF-Token`. Una cookie la manda el navegador sola, incluso en la
+ * peticion cruzada, que es exactamente lo que se esta intentando cortar.
  *
  * `Secure` SE OMITE FUERA DE PRODUCCION, y solo ahi: en desarrollo la
  * aplicacion habla por `http://localhost` y el navegador descartaria la cookie

@@ -110,6 +110,13 @@ type Deps = DependenciasDeRecetasNest;
       useFactory: (deps: DependenciasDeRecetasNest): GuardarRecetasEnLote => new GuardarRecetasEnLote(deps),
     },
   ],
-  exports: [CrearProductosEnLote, GuardarRecetasEnLote, LeerCarta, LeerReceta, ListarVersionesDeReceta],
+  exports: [
+    CrearProductosEnLote,
+    GuardarRecetasEnLote,
+    LeerCarta,
+    LeerReceta,
+    ListarProductos,
+    ListarVersionesDeReceta,
+  ],
 })
 export class RecipesModule {}

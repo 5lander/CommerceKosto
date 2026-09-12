@@ -65,6 +65,8 @@ El trigger `audit_log_no_se_edita` (`RAISE EXCEPTION`) es ⚪ por construcción:
 | `item_keeps_stock_solo_en_producido` | 🔴 | **`problemaDeItem`**: `llevaStock` solo tiene sentido en un `PRODUCIDO` |
 | `purchase_article_presentacion_positiva` | 🟡 | Esquema |
 | `purchase_article_factor_positivo` | 🔴 | **`problemaDeConversion`** en `catalog/domain/conversion.ts`, que además distingue los tres casos: derivable, exigido y sobrante |
+| **clave foránea** `item_unit_of_use_fkey` · `purchase_article_presentation_unit_fkey` | 🔴 | **`exigirUnidad`** en `catalog/domain/catalogo-de-unidades.ts`. No es un `CHECK`, pero falla igual de opaco: `"l"` está bien formado —la regex de `unidadDeUso` lo acepta— y no existe, así que llegaba al `INSERT` y salía como **500**. El mensaje enumera las diez válidas. El lote la tenía desde P14b; **el alta suelta de ítem, desde P16-A2**. `GET /catalogo/unidades` es la otra mitad: que el usuario no llegue a escribirla. **Prueba:** `test/integracion/catalogo.spec.ts` («la unidad tiene que EXISTIR») y `catalog/domain/catalogo-de-unidades.spec.ts` |
+| **índices únicos** `item_company_id_name_key` · `purchase_article_company_id_name_key` | 🔴 | El repositorio traduce el `P2002` a la unión del puerto (`nombre_en_uso`, `articulos_en_uso`) y el caso de uso lo convierte en **409** con el nombre dentro. Tres escrituras lo hacían salir como 500 hasta P16-A2: `actualizarItem`, el lote de artículos al reimportarse, y la carrera de los dos lotes. **El lote compara los nombres sin distinguir mayúsculas ni espacios de sobra** (`clavePorNombre`), que es más estricto que el índice —byte a byte—, y el mensaje del 409 lo dice para no afirmar algo falso. **Prueba:** `test/integracion/catalogo.spec.ts` (renombrar a un nombre ocupado, y que el de otra company no choca), `test/integracion/importacion.spec.ts` («reimportar ARTÍCULOS es 409, no 500») y `shared/infrastructure/persistence/rescate-de-choque.spec.ts` (las tres ramas de la carrera, con la base apagada) |
 
 ---
 
@@ -301,12 +303,50 @@ La cola de correo, el token de restablecimiento y los golpes del límite de tasa
 
 ---
 
+## `20260910202336_p16a2_csrf`
+
+El token anti-CSRF de la sesión (U4, ADR-021). La columna `csrf_token` la escribe **solo** el servidor, con `GeneradorDeTokens.generar()`, en el momento de abrir la sesión; **ninguna ruta acepta un `csrf_token` de entrada** —lo que llega de fuera es la cabecera `X-CSRF-Token`, que se compara y se descarta, nunca se guarda—. Las dos restricciones son por tanto ⚪ y están para que un `UPDATE` a mano o una migración futura no dejen una cadena vacía, que el comparador leería como «sin token» en un sitio y como «token» en otro.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `session_csrf_acotado` | ⚪ | El único escritor es `abrirSesion` en `iam/infrastructure/prisma-autenticacion.repositorio.ts`, con el token que produce `GeneradorDeTokensCriptografico` (32 bytes en `base64url` = 43 caracteres). No hay endpoint que reciba el valor |
+| `backoffice_session_csrf_acotado` | ⚪ | Lo mismo en el otro proceso: `IniciarSesionDeOperador` genera el token y `abrirSesion` (`backoffice/infrastructure/prisma-backoffice.repositorio.ts`) lo escribe |
+
+**Lo que la base NO comprueba aquí, y quién sí.** Que la sesión *tenga* token no es un `CHECK` —`NULL` es legítimo para las sesiones abiertas antes de esta migración—, y por eso la regla vive en el dominio: `ValidarSesion` trata una sesión sin `csrf_token` como inválida y lanza `SesionInvalidaError('sin_csrf')` → **401**, que manda al usuario a entrar de nuevo. Y que la cabecera coincida lo comprueba `CsrfGuard` → `CsrfInvalidoError` → **403 `CSRF_INVALIDO`**, nunca un 500: las dos son guardas de aplicación con prueba de integración, en `autenticacion-y-autorizacion.spec.ts`.
+
+---
+
+## Los tipos del borde — tres guardas sin `CHECK` detrás *(P16-A2)*
+
+**Esta sección rompe el molde del documento a propósito.** Todas las de arriba parten de una restricción de la base; estas tres no tienen ninguna. Y aun así son exactamente el mismo fallo, que es lo que las trae aquí: **una regla que se hace cumplir y no se explica sale como `INTERNAL_ERROR 500`**. Lo único que cambia es quién la hace cumplir — allí un `CHECK`, aquí el constructor de un tipo de dominio.
+
+Las tres clases extendían `Error` a secas, así que `errorResponseFor` no las reconocía como `ErrorDeDominio` y las trataba como fallo inesperado: 500, mensaje genérico, alerta de operación y cero información para quien había escrito mal un dato suyo. Ahora extienden `ErrorDeDominio` con `codigo = 'ENTRADA_INVALIDA'` → **400**.
+
+| Guarda | | Qué la dispara y qué dice ahora |
+|---|---|---|
+| `IdentificadorInvalidoError` (`shared/domain/identity/identificadores.ts`) | 🔴 | Un `:id` de ruta o un `?itemId=` que no es un UUID. Alcanzable desde 16 `@Param` y 5 `@Query` que no pasan por `ParseUUIDPipe` ni por esquema: `GET /costeo/:productId`, `GET /precios?itemId=`, `PUT /catalogo/items/:id`… El mensaje nombra el tipo esperado y da un UUID de ejemplo |
+| `UnidadDeUsoInvalidaError` (`shared/domain/unidad/unidad-de-uso.ts`) | 🔴 | `POST /catalogo/items` con `unidadDeUso: "KG"`, `"Litro"` o `"unid de medida"` — las tres cosas que un humano escribe la primera vez. El mensaje dice la forma (minúsculas, sin espacios ni acentos) y tres ejemplos. **No enumera el catálogo**: este error es de FORMA y se lanza sin leer nada; de la existencia se encarga `exigirUnidad`, que sí lo ha leído |
+| `ValorDecimalInvalidoError` (`shared/domain/decimal/nucleo.ts`) | 🔴 | Un decimal con coma, con exponente, con separador de miles… **o con más de 30 decimales**. Este último caso es nuevo: antes llegaba hasta el constructor de `Money` y saltaba con `EscalaExcedidaError`. El mensaje dice el límite y que hay que redondear antes de enviar |
+
+**`EscalaExcedidaError` NO se convirtió, y esa es la decisión que sostiene el resto.** Se planteó pasarlo también a 400 y se descartó: ese error no es del borde, es el techo de escala saltando **a mitad de un cálculo**, o sea un bug del motor. Un 400 le diría al usuario que arregle algo que no es suyo y —peor— el filtro dejaría de escribir la traza en el log, que es lo único con lo que se diagnostica. Lo que se hizo es **cerrarle la puerta de entrada**: `desdeCadena` cuenta los decimales de la cadena y rechaza antes, con el error de entrada. Después de eso, si `EscalaExcedidaError` salta, es de casa y el 500 es la respuesta honesta.
+
+**Lo que estos mensajes obligaron a añadir:** `valorParaMensaje` (`shared/domain/errors/valor-en-mensaje.ts`). Los tres citan el valor que el usuario escribió, y desde que salen como 400 ese valor **vuelve al cliente**: se recorta a 60 caracteres —para que el cuerpo del error no sea el eco de la petición— y se le quitan los caracteres de control, porque los parámetros de ruta no pasan por `EsquemaPipe` y un salto de línea dentro de un mensaje parte en dos la línea del log.
+
+**Probadas por HTTP** en `apps/api/test/integracion/frontera-http.spec.ts`, que es donde se ve lo único que importa: `{ status: 400, code: 'ENTRADA_INVALIDA' }` sobre la respuesta cruda.
+
+---
+
 ## Cómo se mantiene
 
 Al añadir una migración con `CHECK` o `RAISE EXCEPTION`:
 
 1. Añade su sección aquí, con una fila por restricción y su categoría.
 2. Por cada 🔴, escribe la guarda de dominio **y** la prueba de que devuelve 4xx.
-3. `npm run audit:migrations` (M11) falla mientras falte la sección.
+3. **Y nombra esa prueba en la fila** —el archivo, y entre paréntesis el caso—, no solo la guarda. Una guarda sin prueba funciona hoy y vuelve al 500 en el próximo refactor sin que ningún check se entere: es la tercera recurrencia de **INC-012**, y se detectó leyendo, no fallando. Las filas anteriores a P16-A2 todavía no la citan; se completan a medida que se tocan.
+4. `npm run audit:migrations` (M11) falla mientras falte la sección.
+
+**Una clave foránea o un índice único también son 🔴**, aunque M11 no pueda vigilarlos: no hay dónde poner el `-- GUARDA:` de un `CHECK` y su error —`P2002`, violación de clave foránea— sube igual de opaco. Por esa grieta entró la tercera recurrencia de INC-012.
+
+Y si la regla **no** vive en la base sino en el constructor de un tipo de dominio, va a «Los tipos del borde»: M11 no la vigila —no hay migración que mirar— pero el fallo que produce es el mismo 500 sin explicación.
 
 **Si dudas entre 🔴 y ⚪, es 🔴.** El coste de una guarda de más son tres líneas; el de una de menos es un 500 en producción que nadie sabe explicar.

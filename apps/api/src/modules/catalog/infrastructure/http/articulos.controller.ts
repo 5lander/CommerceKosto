@@ -32,6 +32,7 @@ import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
+import { LeerFichaDeArticulo, type FichaDeArticulo } from '../../application/casos-de-uso/fichas';
 import type { ArticuloLeido, GrupoLeido } from '../../application/ports/repositorio-de-catalogo.port';
 import {
   CUERPO_DE_ARTICULO,
@@ -59,6 +60,7 @@ export class ArticulosController {
   public constructor(
     private readonly articulos: GestionDeArticulos,
     private readonly grupos: GestionDeGrupos,
+    private readonly ficha: LeerFichaDeArticulo,
   ) {}
 
   @Get('articulos')
@@ -68,6 +70,20 @@ export class ArticulosController {
     @Query('itemId') item?: string,
   ): Promise<readonly ArticuloLeido[]> {
     return this.articulos.listar.ejecutar(sesion, item === undefined ? null : itemId(item));
+  }
+
+  /**
+   * LA FICHA DEL ARTICULO: el artículo con su ítem dentro, que es lo que la
+   * pantalla titula. Un id ajeno es **404**, igual que uno inexistente: la
+   * company va en el WHERE de la lectura (CLAUDE.md §4.4).
+   */
+  @Get('articulos/:id')
+  @Requiere('catalog.read')
+  public leer(
+    @SesionActual() sesion: SesionActiva,
+    @Param('id') id: string,
+  ): Promise<FichaDeArticulo> {
+    return this.ficha.ejecutar(sesion, purchaseArticleId(id));
   }
 
   @Post('articulos')

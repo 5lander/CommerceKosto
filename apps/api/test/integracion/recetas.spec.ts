@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -61,14 +62,14 @@ describe('recetas, productos y propagación', () => {
       .send({ email, contrasena: CONTRASENA });
 
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /** Un ítem del catálogo, comprado o producido. */
   async function crearItem(tipo: 'COMPRADO' | 'PRODUCIDO'): Promise<string> {
     const respuesta = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `${tipo} ${randomUUID().slice(0, 8)}`,
         tipo,
@@ -86,7 +87,7 @@ describe('recetas, productos y propagación', () => {
   async function crearProducto(): Promise<string> {
     const respuesta = await request(servidor())
       .post('/productos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ nombre: `Plato ${randomUUID().slice(0, 8)}`, tipo: 'SIMPLE', categoria: null });
 
     expect(respuesta.status).toBe(CREADO);
@@ -96,7 +97,7 @@ describe('recetas, productos y propagación', () => {
   async function activarEn(productId: string, locationId: string): Promise<void> {
     const respuesta = await request(servidor())
       .put(`/productos/${productId}/ubicaciones`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ locationId, activo: true, pvp: '5.00', rendimientoPorciones: '1' });
 
     expect(respuesta.status).toBe(SIN_CONTENIDO);
@@ -105,7 +106,7 @@ describe('recetas, productos y propagación', () => {
   function guardarReceta(destino: Cuerpo, locationId: string, lineas: Cuerpo[], quien = cookie) {
     return request(servidor())
       .put('/recetas')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({ destino, locationId, validFrom: AHORA, nota: null, lineas });
   }
 
@@ -117,7 +118,7 @@ describe('recetas, productos y propagación', () => {
     return request(servidor())
       .get('/recetas')
       .query({ productId: productoId, locationId })
-      .set('Cookie', quien);
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
   }
 
   beforeAll(async () => {
@@ -299,7 +300,7 @@ describe('recetas, productos y propagación', () => {
       const sinRecetas = await request(servidor())
         .get('/recetas/propagacion/previsualizacion')
         .query({ productId: producto, origen: centro })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(sinRecetas.status).toBe(OK);
       expect(sinRecetas.body).toMatchObject({ personalizadas: 0 });
@@ -312,7 +313,7 @@ describe('recetas, productos y propagación', () => {
       const conReceta = await request(servidor())
         .get('/recetas/propagacion/previsualizacion')
         .query({ productId: producto, origen: centro })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(conReceta.body).toMatchObject({ personalizadas: 1 });
     });
@@ -325,7 +326,7 @@ describe('recetas, productos y propagación', () => {
 
       const propagacion = await request(servidor())
         .post('/recetas/propagacion')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ productId: producto, origen: centro, destinos: [norte] });
       expect(propagacion.status).toBe(CREADO);
 
@@ -349,13 +350,13 @@ describe('recetas, productos y propagación', () => {
 
       const propagacion = await request(servidor())
         .post('/recetas/propagacion')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ productId: producto, origen: centro, destinos: [norte] });
       const propagacionId = (propagacion.body as { id: string }).id;
 
       const reversion = await request(servidor())
         .post(`/recetas/propagacion/${propagacionId}/reversion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({});
       expect(reversion.status).toBe(SIN_CONTENIDO);
 
@@ -369,12 +370,12 @@ describe('recetas, productos y propagación', () => {
 
       const propagacion = await request(servidor())
         .post('/recetas/propagacion')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ productId: producto, origen: centro, destinos: [norte] });
 
       await request(servidor())
         .post(`/recetas/propagacion/${(propagacion.body as { id: string }).id}/reversion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({});
 
       // Una versión VOID, no una receta vacía: una receta vacía costaría cero.
@@ -386,14 +387,14 @@ describe('recetas, productos y propagación', () => {
       const { producto } = await prepararPropagable();
       const propagacion = await request(servidor())
         .post('/recetas/propagacion')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ productId: producto, origen: centro, destinos: [norte] });
       const id = (propagacion.body as { id: string }).id;
 
-      await request(servidor()).post(`/recetas/propagacion/${id}/reversion`).set('Cookie', cookie).send({});
+      await request(servidor()).post(`/recetas/propagacion/${id}/reversion`).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({});
       const segunda = await request(servidor())
         .post(`/recetas/propagacion/${id}/reversion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({});
 
       expect(segunda.body).toMatchObject({ code: 'CONFLICTO' });
@@ -429,6 +430,7 @@ describe('recetas, productos y propagación', () => {
       );
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('y NO propaga: un gerente no decide cómo cocina el local de al lado', async () => {
@@ -442,7 +444,7 @@ describe('recetas, productos y propagación', () => {
 
       const respuesta = await request(servidor())
         .post('/recetas/propagacion')
-        .set('Cookie', suya)
+        .set('Cookie', suya).set('X-CSRF-Token', csrfDe(suya))
         .send({ productId: producto, origen: centro, destinos: [norte] });
 
       expect(respuesta.status).toBe(PROHIBIDO);
@@ -462,6 +464,7 @@ describe('recetas, productos y propagación', () => {
       const respuesta = await leerReceta(producto, centro, suya);
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
       // Y la cantidad no aparece por ninguna parte del cuerpo: con la cantidad
       // y el precio se despeja la receta.
       expect(JSON.stringify(respuesta.body)).not.toContain('12345');

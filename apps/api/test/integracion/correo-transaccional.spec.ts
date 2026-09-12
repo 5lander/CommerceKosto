@@ -35,6 +35,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const ACEPTADO = 202;
@@ -172,7 +173,7 @@ describe('correo transaccional y restablecimiento', () => {
   async function entrar(email: string, contrasena = CONTRASENA): Promise<string> {
     const respuesta = await request(servidor()).post('/auth/login').send({ email, contrasena });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function correosA(destinatario: string): Promise<readonly FilaDeOutbox[]> {
@@ -276,7 +277,7 @@ describe('correo transaccional y restablecimiento', () => {
       const cookie = await entrar(uno.admin);
       const nuevo = `nuevo.${randomUUID().slice(0, 8)}@snacklab.ec`;
 
-      const invitacion = await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo });
+      const invitacion = await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: nuevo });
       expect(invitacion.status).toBe(ACEPTADO);
 
       const correo = await ultimoCorreoA(nuevo);
@@ -297,7 +298,7 @@ describe('correo transaccional y restablecimiento', () => {
       const antes = (await correosA(otra.ana)).length;
 
       // El correo ya esta en uso en OTRA company: 202 igual, y ningun correo.
-      const respuesta = await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: otra.ana });
+      const respuesta = await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: otra.ana });
       expect(respuesta.status).toBe(ACEPTADO);
       expect(await correosA(otra.ana)).toHaveLength(antes);
     });
@@ -314,7 +315,7 @@ describe('correo transaccional y restablecimiento', () => {
         `ALTER TABLE email_outbox ADD CONSTRAINT tmp_outbox_cerrado CHECK (plantilla <> 'INVITACION') NOT VALID`,
       );
       try {
-        const respuesta = await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo });
+        const respuesta = await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: nuevo });
         expect(respuesta.status).toBe(ERROR_INTERNO);
         expect(respuesta.body).toMatchObject({ code: 'INTERNAL_ERROR' });
       } finally {
@@ -325,7 +326,7 @@ describe('correo transaccional y restablecimiento', () => {
       expect(await correosA(nuevo)).toHaveLength(0);
 
       // Y la siguiente entra entera: no quedo nada a medias.
-      const despues = await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo });
+      const despues = await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: nuevo });
       expect(despues.status).toBe(ACEPTADO);
       expect(await correosA(nuevo)).toHaveLength(1);
     });
@@ -336,12 +337,12 @@ describe('correo transaccional y restablecimiento', () => {
       const cookie = await entrar(uno.admin);
       const nuevo = `reenvio.${randomUUID().slice(0, 8)}@snacklab.ec`;
 
-      await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo });
+      await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: nuevo });
       const viejo = tokenDe((await ultimoCorreoA(nuevo)).enlace);
 
       const reenvio = await request(servidor())
         .post(`/usuarios/${await idDelUsuario(nuevo)}/reenvio-de-invitacion`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       expect(reenvio.status).toBe(ACEPTADO);
 
       const correos = await correosA(nuevo);
@@ -365,7 +366,7 @@ describe('correo transaccional y restablecimiento', () => {
       const cookie = await entrar(uno.admin);
       const respuesta = await request(servidor())
         .post(`/usuarios/${await idDelUsuario(uno.ana)}/reenvio-de-invitacion`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(NO_ENCONTRADO);
       expect(respuesta.body).toMatchObject({ code: 'RECURSO_NO_ENCONTRADO' });
@@ -374,12 +375,12 @@ describe('correo transaccional y restablecimiento', () => {
     it('un invitado de OTRA company no existe: 404, no 202 en silencio', async () => {
       const cookieOtra = await entrar(otra.admin);
       const ajeno = `ajeno.${randomUUID().slice(0, 8)}@snacklab.ec`;
-      await request(servidor()).post('/usuarios').set('Cookie', cookieOtra).send({ email: ajeno });
+      await request(servidor()).post('/usuarios').set('Cookie', cookieOtra).set('X-CSRF-Token', csrfDe(cookieOtra)).send({ email: ajeno });
 
       const cookie = await entrar(uno.admin);
       const respuesta = await request(servidor())
         .post(`/usuarios/${await idDelUsuario(ajeno)}/reenvio-de-invitacion`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(NO_ENCONTRADO);
       expect(respuesta.body).toMatchObject({ code: 'RECURSO_NO_ENCONTRADO' });
@@ -390,7 +391,7 @@ describe('correo transaccional y restablecimiento', () => {
       const cookie = await entrar(uno.gerente);
       const respuesta = await request(servidor())
         .post(`/usuarios/${await idDelUsuario(uno.ana)}/reenvio-de-invitacion`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(PROHIBIDO);
       expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
@@ -400,7 +401,7 @@ describe('correo transaccional y restablecimiento', () => {
       const cookie = await entrar(uno.admin);
       const respuesta = await request(servidor())
         .post('/usuarios/no-es-un-uuid/reenvio-de-invitacion')
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(PETICION_INVALIDA);
       expect(respuesta.body).toMatchObject({ code: 'BAD_REQUEST' });
@@ -448,7 +449,7 @@ describe('correo transaccional y restablecimiento', () => {
     it('con un invitado que aun no activo: 202 y nada, porque no tiene contrasena que restablecer', async () => {
       const cookie = await entrar(uno.admin);
       const invitado = `pendiente.${randomUUID().slice(0, 8)}@snacklab.ec`;
-      await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: invitado });
+      await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: invitado });
 
       const respuesta = await request(servidor()).post('/auth/password/olvido').send({ email: invitado });
       expect(respuesta.status).toBe(ACEPTADO);
@@ -493,7 +494,7 @@ describe('correo transaccional y restablecimiento', () => {
   describe('POST /auth/password/restablecimiento, sin sesion', () => {
     it('gasta el token, cambia la contrasena y revoca las sesiones abiertas', async () => {
       const sesionAnterior = await entrar(otra.ana);
-      expect((await request(servidor()).get('/ubicaciones').set('Cookie', sesionAnterior)).status).toBe(OK);
+      expect((await request(servidor()).get('/ubicaciones').set('Cookie', sesionAnterior).set('X-CSRF-Token', csrfDe(sesionAnterior))).status).toBe(OK);
 
       const token = await pedirRestablecimiento(otra.ana);
       const respuesta = await restablecer(token, CONTRASENA_NUEVA);
@@ -501,7 +502,7 @@ describe('correo transaccional y restablecimiento', () => {
 
       // La sesion que estaba abierta se cae, la contrasena vieja ya no entra y
       // la nueva si.
-      expect((await request(servidor()).get('/ubicaciones').set('Cookie', sesionAnterior)).status).toBe(
+      expect((await request(servidor()).get('/ubicaciones').set('Cookie', sesionAnterior).set('X-CSRF-Token', csrfDe(sesionAnterior))).status).toBe(
         NO_AUTORIZADO,
       );
       const conLaVieja = await request(servidor())

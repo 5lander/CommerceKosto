@@ -731,3 +731,78 @@ la IP de Caddy, para todos. `ipDelCliente` (`shared/infrastructure/http/`) es el
 cree el último salto de `X-Forwarded-For` solo si el socket está en `PROXY_DE_CONFIANZA`. Lo usan
 el login, el back office, el limitador global de 300/min y el límite de tasa de las cuatro rutas
 (ADR-026, INC-022).
+
+---
+
+## La sesión y el token anti-CSRF (desde P16-A2)
+
+Hasta P16-A2 la única defensa contra CSRF era el atributo `SameSite=Strict` de la cookie de sesión.
+Lo aplica el **navegador**, no la API; mira el **sitio** y no el **origen**; y la API no tiene forma
+de saber si se aplicó. Desde P16-A2 hay además un **token por sesión** que comprueba el servidor
+(U4, **ADR-021**), y los tres guards globales corren en un orden que no es estético: **sesión → CSRF
+→ permisos**. Sin sesión no hay token con el que comparar, y comprobar permisos de una petición que
+ni siquiera originó el usuario sería autorizar un ataque antes de rechazarlo.
+
+```mermaid
+sequenceDiagram
+    participant P as Pagina (apps/web)
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL
+
+    Note over P,DB: 1. Entrar - nacen los DOS tokens de la misma sesion
+    P->>API: POST /auth/login {email, contrasena}   (solo application/json)
+    API->>API: GeneradorDeTokens x2 - sesion y csrf, 32 bytes cada uno, NO derivados
+    API->>DB: INSERT session (token_hash = SHA256(sesion), csrf_token EN CLARO)
+    API-->>P: 200 {expiraEn, csrf} + Set-Cookie: sesion=... (HttpOnly, SameSite=Strict)
+    Note over P: guardarCsrf() - en memoria, nunca en localStorage ni en una cookie
+
+    Note over P,DB: 2. Mutar - la cabecera es lo que un sitio cruzado no puede poner
+    P->>API: POST /conteos  Cookie: sesion=...  X-CSRF-Token: el token
+    API->>DB: session_lookup(SHA256(cookie)) - devuelve permisos, alcance y csrf_token
+    Note over API: SesionGuard deja la sesion en el WeakMap de la peticion
+    alt csrf_token es NULL (sesion anterior a la migracion)
+        API-->>P: 401 SESION_INVALIDA - media sesion no es una sesion
+    else falta la cabecera o no coincide
+        API->>API: CsrfGuard - timingSafeEqual(SHA256(esperado), SHA256(recibido))
+        API-->>P: 403 CSRF_INVALIDO (el motivo ausente/no_coincide se queda en el log)
+    else coincide
+        API->>API: PermisosGuard - la capacidad que el endpoint declara
+        API->>DB: TenantTransaction.run(companyId) - la escritura
+        API-->>P: 201
+    end
+
+    Note over P,DB: 3. Recargar - el token se recupera, no se rota
+    P->>API: GET /auth/sesion   Cookie: sesion=...   (lectura: sin cabecera)
+    API-->>P: 200 {userId, permisos, alcance, csrf} - el MISMO token, sin companyId
+
+    Note over P,DB: 4. Dos pestanas, sin atacante - el reintento unico
+    P->>API: POST /ventas con un token que dejo de valer
+    API-->>P: 403 CSRF_INVALIDO
+    P->>API: GET /auth/sesion - tira el de memoria y pide el vigente
+    P->>API: POST /ventas otra vez (UNA sola vez; si vuelve a fallar, el error sube)
+```
+
+Lo que el diagrama no enseña y decide el diseño:
+
+- **El token se guarda en claro, y el de sesión no.** No es una credencial de acceso: quien tenga la
+  columna no puede entrar, porque la credencial es la cookie, de la que la base guarda solo el
+  SHA-256. Y quien ya tenga la cookie **no necesita** el token: está actuando *como* la víctima, no
+  *contra* ella. Guardarlo hasheado, además, haría imposible el paso 3.
+- **La comparación se hace sobre los SHA-256 de los dos lados.** `timingSafeEqual` lanza con
+  longitudes distintas, así que comparar los tokens crudos obligaría a mirar la longitud primero —y
+  esa comprobación instantánea es un oráculo del tamaño del token bueno—. Hasheando, siempre son 32
+  bytes. El hash aquí no guarda nada: iguala longitudes.
+- **Cero consultas nuevas.** El token viaja en `session_lookup`, que ya corría en cada petición, y
+  sale de la misma fila. `GET /auth/sesion` no consulta nada: devuelve lo que el guard dejó en el
+  `WeakMap`.
+- **Las cuatro rutas públicas quedan fuera del guard, y el login por una razón distinta a las otras
+  tres.** En activación, olvido y restablecimiento no hay sesión que suplantar. En el login sí había
+  algo: una petición cruzada no *usa* una credencial, la **crea** —*login CSRF* / fijación—, y
+  `SameSite` gobierna el envío de la cookie, no su almacenamiento. Lo que lo cierra es que la API
+  **analiza solo `application/json`** (`bootstrap.ts`: `bodyParser: false` + `useBodyParser('json')`),
+  que es justo lo que un `<form>` cruzado no puede emitir. `POST /auth/logout` **no** queda fuera.
+- **El back office lleva el suyo**, en su proceso, su tabla y su guard; lo único que comparten los
+  dos es la comparación en tiempo constante, que vive una sola vez en `shared/infrastructure/http/csrf.ts`.
+- **`Origin`/`Referer` no se comprueba** (D-16.69): duplicaría la lista blanca de CORS, que en
+  desarrollo y en las pruebas está vacía, y la comprobación necesitaría un «si está vacía, pasa» que
+  falla abierto. La señal para reabrirlo está en ADR-021.

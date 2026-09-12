@@ -17,6 +17,9 @@
  * nativo"), sin que cambie nada de lo que se escriba encima.
  */
 
+import { ErrorDeDominio, type CodigoDeDominio } from '../errors/error-de-dominio';
+import { valorParaMensaje } from '../errors/valor-en-mensaje';
+
 declare const MARCA_UNIDAD: unique symbol;
 
 export type UnidadDeUso = string & { readonly [MARCA_UNIDAD]: 'unidad-de-uso' };
@@ -24,13 +27,30 @@ export type UnidadDeUso = string & { readonly [MARCA_UNIDAD]: 'unidad-de-uso' };
 /** El codigo es corto, en minusculas y sin espacios: `kg`, `lt`, `unid`, `g`. */
 const CODIGO_VALIDO = /^[a-z][a-z0-9_]{0,15}$/;
 
-export class UnidadDeUsoInvalidaError extends Error {
-  public override readonly name = 'UnidadDeUsoInvalidaError';
+/**
+ * ES UN ERROR DE DOMINIO, Y ESO LO CONVIERTE EN UN 400 (P16-A2, INC-012).
+ *
+ * Antes extendia `Error` a secas: `POST /catalogo/items` con
+ * `unidadDeUso: "KG"`, `"Litro"` o `"unid de medida"` —las tres cosas que un
+ * humano escribe la primera vez— respondia **500 `INTERNAL_ERROR`**, sin decir
+ * cual era el problema ni cual era la forma correcta.
+ *
+ * El mensaje dice ahora las dos cosas que hacen falta para corregir: que el
+ * codigo va en minusculas y sin espacios, y tres ejemplos. Lo que NO dice es la
+ * lista completa de unidades del catalogo, porque este error es de FORMA y se
+ * lanza sin consultar nada; de la existencia se encarga `exigirUnidad`, que si
+ * ha leido el catalogo y por eso puede enumerarlo.
+ *
+ * Como los identificadores, no tiene camino interno: la unidad que nace dentro
+ * sale de la columna `item.unit_of_use`, atada por clave foranea a `unit`.
+ */
+export class UnidadDeUsoInvalidaError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
 
   public constructor(codigo: string) {
     super(
-      `Unidad de uso invalida "${codigo}": se espera un codigo corto en minusculas ` +
-        '(por ejemplo "kg", "lt", "unid").',
+      `Unidad de uso invalida "${valorParaMensaje(codigo)}": se espera un codigo corto ` +
+        'en minusculas, sin espacios ni acentos (por ejemplo "kg", "lt", "unid").',
     );
   }
 }

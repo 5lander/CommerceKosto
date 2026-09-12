@@ -23,6 +23,7 @@ import { companyId as aCompanyId } from '../../src/shared/domain/identity/identi
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { PrismaConnection } from '../../src/shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../src/shared/infrastructure/persistence/tenant-transaction';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -65,14 +66,14 @@ describe('precios de referencia', () => {
       .send({ email, contrasena: CONTRASENA });
 
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /** Un ítem comprado con su artículo de 2 kg, medido en gramos. */
   async function itemConArticulo(): Promise<{ itemId: string; articuloId: string }> {
     const item = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `Harina ${randomUUID().slice(0, 8)}`,
         tipo: 'COMPRADO',
@@ -87,7 +88,7 @@ describe('precios de referencia', () => {
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         itemId,
         nombre: `Saco 2kg ${randomUUID().slice(0, 8)}`,
@@ -106,19 +107,19 @@ describe('precios de referencia', () => {
   function sugerir(cuerpo: Cuerpo, quien = cookie) {
     return request(servidor())
       .post('/precios')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({ ivaCompra: '0.15', origen: 'MANUAL', nota: null, ...cuerpo });
   }
 
   function confirmar(precioId: string, decision = 'CONFIRMED') {
     return request(servidor())
       .post(`/precios/${precioId}/decision`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ decision });
   }
 
   function costo(itemId: string, fecha?: string) {
-    const peticion = request(servidor()).get(`/precios/costo/${itemId}`).set('Cookie', cookie);
+    const peticion = request(servidor()).get(`/precios/costo/${itemId}`).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
     return fecha === undefined ? peticion : peticion.query({ fecha });
   }
 
@@ -184,7 +185,7 @@ describe('precios de referencia', () => {
 
   describe('la company nace con sus parámetros de costeo (D3)', () => {
     it('los valores son los del Excel original, y ninguno está en el código', async () => {
-      const respuesta = await request(servidor()).get('/ajustes').set('Cookie', cookie);
+      const respuesta = await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(OK);
       expect(respuesta.body).toMatchObject({
@@ -202,22 +203,22 @@ describe('precios de referencia', () => {
     });
 
     it('un IVA de 15 en vez de 0.15 se rechaza: multiplicaría el costo por dieciséis', async () => {
-      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
 
       const respuesta = await request(servidor())
         .put('/ajustes')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...actuales, ivaVenta: '15' });
 
       expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
     });
 
     it('los umbrales del semáforo tienen que ir en orden', async () => {
-      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
 
       const respuesta = await request(servidor())
         .put('/ajustes')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...actuales, foodCostObjetivo: '0.30', foodCostUmbralVerde: '0.28' });
 
       expect((respuesta.body as { message: string }).message).toContain('orden');
@@ -240,7 +241,7 @@ describe('precios de referencia', () => {
       const historial = await request(servidor())
         .get('/precios')
         .query({ itemId })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       expect((historial.body as unknown[]).length).toBe(1);
 
       const sinConfirmar = await costo(itemId, MARZO);
@@ -290,10 +291,11 @@ describe('precios de referencia', () => {
 
       const intento = await request(servidor())
         .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-        .set('Cookie', suya)
+        .set('Cookie', suya).set('X-CSRF-Token', csrfDe(suya))
         .send({ decision: 'CONFIRMED' });
 
       expect(intento.status).toBe(PROHIBIDO);
+      expect(intento.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -341,10 +343,10 @@ describe('precios de referencia', () => {
 
       const conRecuperacion = (await costo(itemId, MARZO)).body as { costoNetoDeUso: string };
 
-      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
       await request(servidor())
         .put('/ajustes')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...actuales, ivaCompraRecuperable: false });
 
       const sinRecuperacion = (await costo(itemId, MARZO)).body as { costoNetoDeUso: string };
@@ -355,7 +357,7 @@ describe('precios de referencia', () => {
         10,
       );
 
-      await request(servidor()).put('/ajustes').set('Cookie', cookie).send(actuales);
+      await request(servidor()).put('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send(actuales);
     });
   });
 

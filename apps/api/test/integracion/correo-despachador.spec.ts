@@ -47,6 +47,7 @@ import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher
 import { MAILER_PORT } from '../../src/shared/application/ports/mailer.port';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { FakeMailer } from '../../src/shared/infrastructure/fakes/fake-mailer';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const ACEPTADO = 202;
@@ -124,14 +125,14 @@ describe('el despachador de correo', () => {
   async function entrar(email: string): Promise<string> {
     const respuesta = await request(servidor()).post('/auth/login').send({ email, contrasena: CONTRASENA });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /** Invita desde la company dada: encola una INVITACION. @returns el correo del invitado. */
   async function invitar(desde: Sembrado): Promise<string> {
     const cookie = await entrar(desde.admin);
     const invitado = `inv.${randomUUID().slice(0, 8)}@snacklab.ec`;
-    const respuesta = await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: invitado });
+    const respuesta = await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: invitado });
     expect(respuesta.status).toBe(ACEPTADO);
     return invitado;
   }

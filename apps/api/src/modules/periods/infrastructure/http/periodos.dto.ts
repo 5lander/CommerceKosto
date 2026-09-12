@@ -16,7 +16,7 @@ import { z } from 'zod';
 const LARGO_MINIMO_DE_MOTIVO = 3;
 const LARGO_MAXIMO_DE_MOTIVO = 500;
 
-export const CONSULTA_DE_PERIODOS = z.object({ locationId: z.uuid() });
+export const CONSULTA_DE_PERIODOS = z.object({ locationId: z.uuid() }).strict();
 
 export const CUERPO_DE_REAPERTURA = z
   .object({

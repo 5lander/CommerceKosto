@@ -27,6 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -107,7 +108,7 @@ describe('costeo', () => {
       .send({ email, contrasena: CONTRASENA });
 
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /**
@@ -126,7 +127,7 @@ describe('costeo', () => {
   }): Promise<ItemConArticulo> {
     const item = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `Insumo ${randomUUID().slice(0, 8)}`,
         tipo: 'COMPRADO',
@@ -141,7 +142,7 @@ describe('costeo', () => {
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         itemId,
         nombre: `Presentacion ${randomUUID().slice(0, 8)}`,
@@ -169,13 +170,13 @@ describe('costeo', () => {
   async function confirmarPrecio(cuerpo: Cuerpo): Promise<void> {
     const sugerido = await request(servidor())
       .post('/precios')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ origen: 'MANUAL', nota: null, ...cuerpo });
     expect(sugerido.status).toBe(CREADO);
 
     const decision = await request(servidor())
       .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
   }
@@ -183,14 +184,14 @@ describe('costeo', () => {
   async function crearProducto(empaqueItemId: string | null): Promise<string> {
     const producto = await request(servidor())
       .post('/productos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ nombre: `Plato ${randomUUID().slice(0, 8)}`, tipo: 'SIMPLE', categoria: null });
     expect(producto.status).toBe(CREADO);
     const id = (producto.body as { id: string }).id;
 
     const empaque = await request(servidor())
       .put(`/productos/${id}/empaque`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ empaqueItemId });
     expect(empaque.status).toBe(SIN_CONTENIDO);
 
@@ -205,7 +206,7 @@ describe('costeo', () => {
   }): Promise<void> {
     const respuesta = await request(servidor())
       .put(`/productos/${datos.productId}/ubicaciones`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         locationId: datos.locationId,
         activo: true,
@@ -219,7 +220,7 @@ describe('costeo', () => {
   async function desactivarSinPrecio(productId: string): Promise<void> {
     const respuesta = await request(servidor())
       .put(`/productos/${productId}/ubicaciones`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ locationId: centro, activo: false, pvp: null, rendimientoPorciones: '1' });
     expect(respuesta.status).toBe(SIN_CONTENIDO);
   }
@@ -231,20 +232,20 @@ describe('costeo', () => {
   ): Promise<void> {
     const respuesta = await request(servidor())
       .put('/recetas')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ destino, locationId, validFrom: ENERO, nota: null, lineas });
     expect(respuesta.status).toBe(CREADO);
   }
 
   function costear(locationId: string, quien = cookie, fecha = MARZO) {
-    return request(servidor()).get('/costeo').query({ locationId, fecha }).set('Cookie', quien);
+    return request(servidor()).get('/costeo').query({ locationId, fecha }).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
   }
 
   async function costearUno(productId: string, fecha = MARZO): Promise<ProductoCosteado> {
     const respuesta = await request(servidor())
       .get(`/costeo/${productId}`)
       .query({ locationId: centro, fecha })
-      .set('Cookie', cookie);
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
     expect(respuesta.status).toBe(OK);
     return respuesta.body as ProductoCosteado;
@@ -385,6 +386,10 @@ describe('costeo', () => {
       const respuesta = await costear(centro, cookieBodega);
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      // EL CODIGO, NO SOLO EL ESTADO: desde P16-A2 hay dos 403 distintos y el
+      // de CSRF corre ANTES que el de permisos; sin esta linea, una prueba de
+      // confidencialidad podria estar midiendo una cabecera que falta.
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
 
       // Sobre el cuerpo crudo, no sobre un objeto interpretado: lo que importa
       // es lo que viaja por el cable.
@@ -407,9 +412,10 @@ describe('costeo', () => {
       const respuesta = await request(servidor())
         .get(`/costeo/${primero?.productId ?? ''}`)
         .query({ locationId: centro })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
       expect(JSON.stringify(respuesta.body)).not.toContain('foodCost');
     });
   });
@@ -423,6 +429,7 @@ describe('costeo', () => {
     it('y recibe 403 sobre otra', async () => {
       const respuesta = await costear(norte, cookieGerente);
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -460,7 +467,7 @@ describe('costeo', () => {
     it('un insumo sin precio confirmado sale listado, no escondido', async () => {
       const item = await request(servidor())
         .post('/catalogo/items')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           nombre: `Sin precio ${randomUUID().slice(0, 8)}`,
           tipo: 'COMPRADO',
@@ -520,7 +527,7 @@ describe('costeo', () => {
 
       const salsa = await request(servidor())
         .post('/catalogo/items')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           nombre: `Salsa ${randomUUID().slice(0, 8)}`,
           tipo: 'PRODUCIDO',

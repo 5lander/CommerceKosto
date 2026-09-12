@@ -1,7 +1,7 @@
 # Modelo de datos
 
 > Se completa en cada paquete que cree tablas, **en el mismo commit**, con el diagrama de entidades actualizado.
-> Estado: **P2**. Auditoría (P0), identidad y organización (P1) y catálogo (P2).
+> Estado: **P16-A2**. El documento cubre de P0 a P16-A2; la cabecera decía «P2» desde entonces y era falsa — corregido al cerrar P16-A2 (AUDITORIA.md H13).
 
 ## Reglas transversales
 
@@ -877,6 +877,35 @@ RESTRICT`.
 | `password_reset_token(user_id, created_at DESC)` | Los tokens de un usuario, del más reciente |
 | `rate_limit_hit(kind, clave, at DESC)` | `golpear`: `ORDER BY at DESC LIMIT golpesQueDeciden` → `Index Only Scan` de 11 entradas, 0,07 ms con 38.000 golpes. **La purga (`WHERE at < ahora − 24 h`) no lo usa**: `Seq Scan` sobre un día de golpes como mucho (4 ms con 38.000); si aparece en las consultas caras, índice sobre `(at)` |
 
+## Lo que cambia P16-A2 — el token anti-CSRF de la sesión
+
+**Ninguna tabla nueva.** Las dos tablas de sesión —una por proceso— ganan una columna, y la función
+`session_lookup` la devuelve (ADR-021).
+
+```mermaid
+erDiagram
+    session {
+        text csrf_token "NULL solo en las sesiones abiertas ANTES de P16-A2. CHECK: NULL o 32..128"
+    }
+    backoffice_session {
+        text csrf_token "lo mismo, en el otro proceso y en la otra tabla"
+    }
+```
+
+| Decisión | Por qué |
+|---|---|
+| **El token se guarda EN CLARO**, al revés que el de sesión (que va hasheado) | No es una credencial de acceso: quien tenga la columna no puede entrar, porque la credencial es la cookie. Y quien ya tenga la cookie no necesita el token: está actuando *como* la víctima, no *contra* ella. Hashearlo, además, haría imposible devolverlo en `GET /auth/sesion`, que es lo que evita rotarlo en cada recarga |
+| **Nullable, y sin relleno de las filas existentes** | Rellenarlas con un valor generado en SQL dejaría sesiones vivas cuyo token nadie ha entregado al cliente: navegarían con normalidad y fallarían al guardar. `ValidarSesion` trata la sesión sin token como inválida (**401**) y el usuario vuelve a entrar. El despliegue de este paquete cierra las sesiones abiertas |
+| **`CHECK` de longitud (`NULL` o 32–128)**, categoría ⚪ | El token lo genera siempre el servidor y ninguna ruta acepta un `csrf_token` de entrada, así que no hay petición que pueda violarlo. Está para que un `UPDATE` a mano no deje una cadena vacía, que el comparador leería como «sin token» en un sitio y como «token» en otro. Guardas en `guardas-de-dominio.md` |
+| **`session_lookup` se rehace con `DROP` + `CREATE`** | Cambia el tipo de retorno (13 → 14 columnas) y `CREATE OR REPLACE` no sirve para eso. La migración repite el `REVOKE … FROM PUBLIC` y el `GRANT … TO costeo_app`: una función nueva nace **sin** los privilegios de la anterior |
+| **Ningún `GRANT` nuevo** | `costeo_app` ya tiene `INSERT`/`UPDATE` sobre `session` desde P1, y una columna nueva la cubren los privilegios de tabla |
+
+**Ningún índice nuevo, y no es un olvido.** El token nunca se busca: se **lee** de la fila que
+`session_lookup` ya traía por `session(token_hash)`, una vez por petición autenticada. Cero consultas
+añadidas al camino crítico.
+
+---
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -892,6 +921,7 @@ RESTRICT`.
 | **P8** | `product_sales`, `fixed_cost` + `fixed_cost_classification`. **Ninguna tabla derivada**: las seis vistas se calculan al vuelo sobre un contexto único por (ubicación, mes). Las materializadas de período cerrado se aplazan a P9 | ✅ |
 | P10 | `import_job`, `import_job_status` | ✅ |
 | **P16-A1** | `email_outbox`, `password_reset_token`, `rate_limit_hit` (ADR-025, ADR-026) + las dos funciones definer que escriben. Y sin tabla nueva en la otra mitad: `purchase_article.iva_tarifa`, `item_group.iva_tarifa` y los cuatro campos del desglose en `inventory_movement`, con sus cuatro `CHECK` (ADR-024) | ✅ |
+| **P16-A2** | **Ninguna tabla nueva.** `session.csrf_token` y `backoffice_session.csrf_token` (nullable, con `CHECK` de longitud) y `session_lookup` rehecha para devolver la columna (ADR-021) | ✅ |
 
 **`import_row` no existe, y es una decisión.** El plan la listaba; el análisis vive en un `jsonb`
 dentro de `import_job` porque es una **cache de algo reproducible** —si se pierde, se vuelve a subir

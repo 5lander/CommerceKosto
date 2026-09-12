@@ -203,8 +203,8 @@ export class BackofficeController {
     @Body(new EsquemaPipe(CUERPO_DE_LOGIN_DE_OPERADOR)) cuerpo: CuerpoDeLoginDeOperador,
     @Req() peticion: IncomingMessage,
     @Res({ passthrough: true }) respuesta: ServerResponse,
-  ): Promise<{ readonly expiraEn: string }> {
-    const token = await this.sesion.iniciar.ejecutar({
+  ): Promise<{ readonly expiraEn: string; readonly csrf: string }> {
+    const { token, csrf } = await this.sesion.iniciar.ejecutar({
       email: cuerpo.email,
       contrasena: cuerpo.contrasena,
       ip: ipDelCliente(peticion, this.sesion.proxiesDeConfianza),
@@ -225,7 +225,10 @@ export class BackofficeController {
       }),
     );
 
-    return { expiraEn: expiraEn.toISOString() };
+    // El token anti-CSRF va en el CUERPO y no en una cookie: una cookie la
+    // manda el navegador sola, incluso en la peticion cruzada de la que este
+    // token defiende (ADR-021).
+    return { expiraEn: expiraEn.toISOString(), csrf };
   }
 
   @Post('salir')

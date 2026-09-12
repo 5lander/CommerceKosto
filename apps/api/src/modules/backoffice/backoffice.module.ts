@@ -60,6 +60,7 @@ import {
   LosRegistros,
   SesionDelOperador,
 } from './infrastructure/http/backoffice.controller';
+import { CsrfDeOperadorGuard } from './infrastructure/http/csrf-de-operador.guard';
 import { OperadorGuard } from './infrastructure/http/operador.guard';
 
 type Repo = RepositorioDeBackoffice;
@@ -94,6 +95,8 @@ const DE_SESION = { inject: [REPOSITORIO_DE_BACKOFFICE, HASHER_DE_CONTRASENAS, R
     // nace protegida. Al revés, la que se olvida queda abierta — y aquí lo que
     // queda abierto son todos los tenants a la vez.
     { provide: APP_GUARD, useClass: OperadorGuard },
+    // Y despues el del token: necesita al operador que deja el de arriba.
+    { provide: APP_GUARD, useClass: CsrfDeOperadorGuard },
 
     // EL MISMO FILTRO QUE LA APP CLIENTE, y por la misma razón: un `23514` de
     // PostgreSQL sin traducir sale como 500 y cuenta la restricción que violó.

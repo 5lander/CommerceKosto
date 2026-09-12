@@ -32,6 +32,8 @@ export interface SesionDeOperador {
   readonly expiraEn: Date;
   readonly revocadaEn: Date | null;
   readonly estado: string;
+  /** El token anti-CSRF. `null` solo en sesiones anteriores a P16-A2. */
+  readonly csrfToken: string | null;
 }
 
 export interface PlanLeido {
@@ -116,6 +118,8 @@ export interface RepositorioDeBackoffice {
   abrirSesion(entrada: {
     readonly operatorId: OperatorId;
     readonly tokenHash: string;
+    /** En claro, como en la app cliente y por la misma razon (ADR-021). */
+    readonly csrfToken: string;
     readonly expiraEn: Date;
     readonly ip: string | null;
     readonly userAgent: string | null;

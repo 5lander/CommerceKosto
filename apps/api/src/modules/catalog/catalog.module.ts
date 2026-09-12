@@ -22,6 +22,7 @@ import {
   CrearArticulo,
   ListarArticulos,
 } from './application/casos-de-uso/articulos';
+import { LeerFichaDeArticulo, LeerFichaDeItem } from './application/casos-de-uso/fichas';
 import { CrearArticulosEnLote, CrearItemsEnLote } from './application/casos-de-uso/lotes';
 import {
   ActualizarGrupo,
@@ -33,30 +34,23 @@ import {
   ListarItems,
 } from './application/casos-de-uso/items';
 import { TarifasDeIva } from './application/casos-de-uso/tarifas-de-iva';
+import { ListarUnidades } from './application/casos-de-uso/unidades';
 import { REPOSITORIO_DE_CATALOGO } from './application/ports/repositorio-de-catalogo.port';
 import { ArticulosController } from './infrastructure/http/articulos.controller';
 import { GestionDeArticulos } from './infrastructure/http/gestion-de-articulos';
 import { GestionDeGrupos } from './infrastructure/http/gestion-de-grupos';
+import { GestionDeItems } from './infrastructure/http/gestion-de-items';
 import { ItemsController } from './infrastructure/http/items.controller';
+import { UnidadesController } from './infrastructure/http/unidades.controller';
 import { PrismaCatalogoRepositorio } from './infrastructure/prisma-catalogo.repositorio';
 import { DependenciasDeCatalogoNest } from './infrastructure/dependencias-de-catalogo';
 
 @Module({
-  controllers: [ItemsController, ArticulosController],
+  controllers: [ItemsController, ArticulosController, UnidadesController],
   providers: [
     { provide: REPOSITORIO_DE_CATALOGO, useClass: PrismaCatalogoRepositorio },
     DependenciasDeCatalogoNest,
 
-    {
-      provide: CrearItem,
-      inject: [DependenciasDeCatalogoNest],
-      useFactory: (deps: DependenciasDeCatalogoNest): CrearItem => new CrearItem(deps),
-    },
-    {
-      provide: ActualizarItem,
-      inject: [DependenciasDeCatalogoNest],
-      useFactory: (deps: DependenciasDeCatalogoNest): ActualizarItem => new ActualizarItem(deps),
-    },
     {
       provide: LeerItem,
       inject: [DependenciasDeCatalogoNest],
@@ -81,6 +75,28 @@ import { DependenciasDeCatalogoNest } from './infrastructure/dependencias-de-cat
       provide: TarifasDeIva,
       inject: [DependenciasDeCatalogoNest],
       useFactory: (deps: DependenciasDeCatalogoNest): TarifasDeIva => new TarifasDeIva(deps),
+    },
+    {
+      provide: ListarUnidades,
+      inject: [DependenciasDeCatalogoNest],
+      useFactory: (deps: DependenciasDeCatalogoNest): ListarUnidades => new ListarUnidades(deps),
+    },
+    {
+      provide: LeerFichaDeItem,
+      inject: [DependenciasDeCatalogoNest],
+      useFactory: (deps: DependenciasDeCatalogoNest): LeerFichaDeItem => new LeerFichaDeItem(deps),
+    },
+    {
+      provide: LeerFichaDeArticulo,
+      inject: [DependenciasDeCatalogoNest],
+      useFactory: (deps: DependenciasDeCatalogoNest): LeerFichaDeArticulo =>
+        new LeerFichaDeArticulo(deps),
+    },
+    {
+      provide: GestionDeItems,
+      inject: [DependenciasDeCatalogoNest, ListarItems],
+      useFactory: (deps: DependenciasDeCatalogoNest, listar: ListarItems): GestionDeItems =>
+        new GestionDeItems(new CrearItem(deps), listar, new ActualizarItem(deps)),
     },
     {
       provide: GestionDeArticulos,

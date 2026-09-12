@@ -22,11 +22,15 @@ import { auditarLote } from '../../../../shared/application/auditoria-de-lote';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
 import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
 import { Quantity, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
-import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
+import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ProblemaDelLote } from '../../../../shared/domain/lote/problemas';
 import { PRIMERA_POSICION } from '../../../../shared/domain/lote/problemas';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { LimiteDelPlanError } from '../../../iam/domain/errores';
+import {
+  buscarUnidad,
+  mensajeDeUnidadDesconocida,
+} from '../../domain/catalogo-de-unidades';
 import {
   ConversionInvalidaError,
   factorDeConversion,
@@ -53,6 +57,20 @@ interface ContextoDeArticulos {
   /** Tarifa de IVA por id de grupo; `null` donde el grupo no la define. */
   readonly tarifasDeGrupo: ReadonlyMap<string, string | null>;
 }
+
+/**
+ * QUE EL MENSAJE NO AFIRME ALGO FALSO.
+ *
+ * Los lotes comparan los nombres con `clavePorNombre` —sin mayúsculas y sin
+ * espacios de sobra—, que es MAS ESTRICTO que el índice único de la base, que
+ * compara byte a byte. Un archivo que trae «AZUCAR YA 2KG» cuando la company
+ * tiene «Azucar Ya 2kg» se para aquí, y el nombre que se enseña es el del
+ * archivo: sin esta coletilla, quien la lea iría a buscar ese nombre al
+ * catálogo y no lo encontraría. Es deliberado —dos filas que solo se
+ * distinguen por la caja son la misma cosa escrita dos veces— y por eso se
+ * dice, en vez de dejar que se descubra.
+ */
+const COMO_SE_COMPARAN = '(los nombres se comparan sin distinguir mayúsculas ni espacios de sobra)';
 
 export interface DependenciasDeLotesDeCatalogo {
   readonly repositorio: RepositorioDeCatalogo;
@@ -83,7 +101,7 @@ export class CrearItemsEnLote {
 
     if (resultado.clase === 'nombres_en_uso') {
       throw new ConflictoDeCatalogoError(
-        `Estos ítems ya existen en tu company: ${resultado.nombres.join(', ')}.`,
+        `Estos ítems ya existen en tu company ${COMO_SE_COMPARAN}: ${resultado.nombres.join(', ')}.`,
       );
     }
     // El lote ENTERO se para. Escribir los que caben y callar el resto dejaría
@@ -118,7 +136,6 @@ export class CrearItemsEnLote {
   private async exigirUnidadesConocidas(items: readonly ItemDelLote[]): Promise<void> {
     const catalogo = await this.deps.repositorio.unidades();
     const conocidas = new Set<string>(catalogo.map((unidad) => unidad.codigo));
-    const validas = [...conocidas].sort().join(', ');
 
     const problemas = items.flatMap((item, indice) =>
       conocidas.has(item.unidadDeUso)
@@ -126,7 +143,7 @@ export class CrearItemsEnLote {
         : [
             {
               posicion: indice + PRIMERA_POSICION,
-              motivo: `La unidad "${item.unidadDeUso}" no está en el catálogo. Las válidas son: ${validas}.`,
+              motivo: mensajeDeUnidadDesconocida(catalogo, item.unidadDeUso),
             },
           ],
     );
@@ -155,6 +172,13 @@ export class CrearArticulosEnLote {
     if (resultado.clase === 'nombres_en_uso') {
       throw new ConflictoDeCatalogoError(
         `Estos ítems no existen en tu company: ${resultado.nombres.join(', ')}.`,
+      );
+    }
+    // LOS QUE YA ESTAN, que es lo que pasa al reimportar el mismo archivo.
+    // Hasta P16-A2 esto era un 500 del indice unico (P2002 sin capturar).
+    if (resultado.clase === 'articulos_en_uso') {
+      throw new ConflictoDeCatalogoError(
+        `Estos artículos de compra ya existen en tu company ${COMO_SE_COMPARAN}: ${resultado.nombres.join(', ')}.`,
       );
     }
 
@@ -247,8 +271,8 @@ function conFactor(
   const { item, unidades, ivaTarifa } = resuelto;
   const compra = buscarUnidad(unidades, unidadDeUso(articulo.unidadDePresentacion));
   const uso = buscarUnidad(unidades, unidadDeUso(item.unidadDeUso));
-  if (compra === null) return `La unidad «${articulo.unidadDePresentacion}» no está en el catálogo.`;
-  if (uso === null) return `La unidad de uso «${item.unidadDeUso}» no está en el catálogo.`;
+  if (compra === null) return mensajeDeUnidadDesconocida(unidades, articulo.unidadDePresentacion);
+  if (uso === null) return mensajeDeUnidadDesconocida(unidades, item.unidadDeUso);
 
   try {
     const factor = factorDeConversion({
@@ -280,9 +304,3 @@ function conFactor(
   }
 }
 
-function buscarUnidad(
-  unidades: readonly UnidadDelCatalogo[],
-  codigo: UnidadDeUso,
-): UnidadDelCatalogo | null {
-  return unidades.find((u) => u.codigo === codigo) ?? null;
-}

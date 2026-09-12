@@ -29,6 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -63,10 +64,17 @@ interface FoodCostDto {
 interface MenuDto {
   readonly productos: readonly {
     readonly productId: string;
+    readonly nombre: string;
     readonly indicePopularidad: string | null;
     readonly cuadrante: string;
   }[];
   readonly mcPromedio: string | null;
+}
+
+interface VentaDto {
+  readonly productId: string;
+  readonly nombre: string;
+  readonly unidades: string;
 }
 
 interface InventarioDto {
@@ -102,11 +110,11 @@ describe('vistas analiticas', () => {
       .post('/auth/login')
       .send({ email, contrasena: CLAVE });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function crear(ruta: string, cuerpo: Cuerpo, quien = admin): Promise<string> {
-    const respuesta = await request(servidor()).post(ruta).set('Cookie', quien).send(cuerpo);
+    const respuesta = await request(servidor()).post(ruta).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien)).send(cuerpo);
     expect(respuesta.status).toBe(CREADO);
     return (respuesta.body as { id: string }).id;
   }
@@ -145,7 +153,7 @@ describe('vistas analiticas', () => {
     });
     const decision = await request(servidor())
       .post(`/precios/${precioId}/decision`)
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
 
@@ -169,7 +177,7 @@ describe('vistas analiticas', () => {
 
     const ubicacion = await request(servidor())
       .put(`/productos/${productId}/ubicaciones`)
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
         locationId: ubicacionId,
         activo: true,
@@ -182,7 +190,7 @@ describe('vistas analiticas', () => {
     // vigencia, no edita la anterior (P4). El verbo lo dice.
     const receta = await request(servidor())
       .put('/recetas')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
         destino: { clase: 'producto', productId },
         locationId: ubicacionId,
@@ -198,14 +206,14 @@ describe('vistas analiticas', () => {
   function cargarVentas(ventas: readonly Cuerpo[], quien = admin, donde = local) {
     return request(servidor())
       .post('/analitica/ventas')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({ locationId: donde, anio: ANIO, mes: MARZO, ventas });
   }
 
   function cargarCostos(costos: readonly Cuerpo[]) {
     return request(servidor())
       .post('/analitica/costos-fijos')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({ locationId: local, anio: ANIO, mes: MARZO, costos });
   }
 
@@ -213,7 +221,7 @@ describe('vistas analiticas', () => {
     return request(servidor())
       .get(`/analitica/${nombre}`)
       .query({ locationId: donde, anio: ANIO, mes: MARZO })
-      .set('Cookie', quien);
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
   }
 
   async function foodCost(): Promise<FoodCostDto> {
@@ -384,6 +392,72 @@ describe('vistas analiticas', () => {
     });
   });
 
+  /**
+   * P16-A2: el nombre del producto sale de la API.
+   *
+   * **NO CREA NADA: LEE LO QUE DEJÓ EL BLOQUE DE ARRIBA.** `cargarVentas` es
+   * por REEMPLAZO, así que sembrar aquí borraría las ventas del mes de esa
+   * ubicación y las pruebas siguientes medirían otro dataset. Estas cuatro son
+   * de solo lectura a propósito.
+   *
+   * Lo que se cierra es un rodeo del frontend: la pantalla pedía `GET /costeo`
+   * —la carta entera costeada— **en paralelo** solo para traducir ids a texto,
+   * y unía por clave en el navegador. El nombre estaba ya cargado en el
+   * servidor y se estaba tirando.
+   */
+  describe('el nombre del producto viaja en el DTO (P16-A2)', () => {
+    it('menu engineering trae nombre, y no es el id', async () => {
+      const respuesta = await vista('menu-engineering', admin, soloMenu);
+      expect(respuesta.status).toBe(OK);
+
+      const menu = respuesta.body as MenuDto;
+      expect(menu.productos.length).toBeGreaterThan(0);
+      for (const producto of menu.productos) {
+        expect(producto.nombre).toMatch(/^Plato /u);
+        expect(producto.nombre).not.toBe(producto.productId);
+      }
+    });
+
+    it('la carga de ventas del mes tambien', async () => {
+      const respuesta = await request(servidor())
+        .get('/analitica/ventas')
+        .query({ locationId: soloMenu, anio: ANIO, mes: MARZO })
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin));
+
+      expect(respuesta.status).toBe(OK);
+      const ventas = respuesta.body as readonly VentaDto[];
+      expect(ventas.length).toBeGreaterThan(0);
+      for (const venta of ventas) {
+        expect(venta.nombre).toMatch(/^Plato /u);
+      }
+    });
+
+    /**
+     * Publicar un campo nuevo es exactamente el momento en que una fuga se
+     * cuela: `BODEGA` no tiene `sales.read` ni `analytics.read`, y el nombre
+     * del producto no cambia eso.
+     */
+    it('y a BODEGA no le llega ninguno de los dos, ni el nombre ni nada', async () => {
+      const ventas = await request(servidor())
+        .get('/analitica/ventas')
+        .query({ locationId: soloMenu, anio: ANIO, mes: MARZO })
+        .set('Cookie', bodeguero).set('X-CSRF-Token', csrfDe(bodeguero));
+
+      expect(ventas.status).toBe(PROHIBIDO);
+      expect(ventas.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+      expect(JSON.stringify(ventas.body)).not.toContain('Plato ');
+    });
+
+    it('el semaforo de BODEGA sigue sin traer nombres de PRODUCTO', async () => {
+      const respuesta = await vista('reposicion', bodeguero);
+      expect(respuesta.status).toBe(OK);
+
+      // Los nombres que sí lleva son de ÍTEM (§4 lo permite: es lo que hay que
+      // reponer). Un nombre de producto ahí sería la carta del local.
+      expect(JSON.stringify(respuesta.body)).not.toContain('Plato ');
+    });
+  });
+
   describe('punto de equilibrio (SPEC §17)', () => {
     it('la mano de obra se identifica por CLASIFICACION, no por el texto', async () => {
       expect(
@@ -438,7 +512,7 @@ describe('vistas analiticas', () => {
 
       const compra = await request(servidor())
         .post('/inventario/movimientos')
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({
           locationId: local,
           itemId: item,
@@ -459,7 +533,7 @@ describe('vistas analiticas', () => {
       // Ahora se registra el consumo en el libro, que es lo que P6 permite.
       const consumo = await request(servidor())
         .post('/inventario/consumos')
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({
           locationId: local,
           ventas: [{ productId: plato, unidades: '30' }],
@@ -487,11 +561,20 @@ describe('vistas analiticas', () => {
       'punto-de-equilibrio',
       'inventario',
     ])('la vista %s le devuelve 403', async (nombre) => {
-      expect((await vista(nombre, bodeguero)).status).toBe(PROHIBIDO);
+      const respuesta = await vista(nombre, bodeguero);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      // EL CODIGO, NO SOLO EL ESTADO: desde P16-A2 hay dos 403 distintos, y una
+      // mutacion a la que se le olvide `X-CSRF-Token` responde 403 tambien. Sin
+      // esta linea, la prueba pasaria sin haber ejercitado el permiso.
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('tampoco carga ventas: la cifra del mes no es suya', async () => {
-      expect((await cargarVentas([], bodeguero)).status).toBe(PROHIBIDO);
+      const respuesta = await cargarVentas([], bodeguero);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     /**
@@ -523,7 +606,7 @@ describe('vistas analiticas', () => {
         (
           await request(servidor())
             .post(`/conteos/${countId}/confirmacion`)
-            .set('Cookie', admin)
+            .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
             .send()
         ).status,
       ).toBe(SIN_CONTENIDO);
@@ -531,14 +614,14 @@ describe('vistas analiticas', () => {
         (
           await request(servidor())
             .post(`/conteos/${countId}/cierre-de-periodo`)
-            .set('Cookie', admin)
+            .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
             .send()
         ).status,
       ).toBe(SIN_CONTENIDO);
 
       const respuesta = await request(servidor())
         .post('/analitica/ventas')
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({ locationId: local, anio: ANIO, mes: 4, ventas: [] });
 
       expect(respuesta.status).toBe(CONFLICTO);

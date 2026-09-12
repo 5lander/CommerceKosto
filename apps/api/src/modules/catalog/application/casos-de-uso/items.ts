@@ -19,6 +19,7 @@ import type { ItemGroupId, ItemId } from '../../../../shared/domain/identity/ide
 import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
+import { exigirUnidad } from '../../domain/catalogo-de-unidades';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { LimiteDelPlanError } from '../../../iam/domain/errores';
 import {
@@ -58,23 +59,33 @@ export interface DatosDeAltaDeItem {
 export class CrearItem {
   public constructor(private readonly deps: DependenciasDeCatalogo) {}
 
+  /**
+   * LA UNIDAD TIENE QUE EXISTIR, no solo estar bien escrita (P16-A2, INC-012).
+   * `unidadDeUso()` valida la FORMA y deja pasar `"l"`, que llegaba al `INSERT`
+   * y moría en `item_unit_of_use_fkey` con un **500**. El lote lo comprobaba
+   * desde P14b; el alta suelta, no. Cuesta una lectura de diez filas sin
+   * tenant, y solo en el alta.
+   */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeAltaDeItem): Promise<ItemId> {
     exigirItemValido(datos);
+
+    const unidad = exigirUnidad(
+      await this.deps.repositorio.unidades(),
+      unidadDeUso(datos.unidadDeUso),
+    );
 
     const resultado = await this.deps.repositorio.crearItem({
       companyId: sesion.companyId,
       nombre: datos.nombre.trim(),
       tipo: datos.tipo,
-      unidadDeUso: unidadDeUso(datos.unidadDeUso),
+      unidadDeUso: unidad.codigo,
       rendimiento: datos.rendimiento,
       grupoId: datos.grupoId,
       confianzaDePrecio: datos.confianzaDePrecio,
       llevaStock: datos.llevaStock,
     });
 
-    if (resultado.clase === 'nombre_en_uso') {
-      throw new ConflictoDeCatalogoError('Ya existe un ítem con ese nombre.');
-    }
+    if (resultado.clase === 'nombre_en_uso') throw new ItemRepetidoError();
     // El plan, no el permiso: por eso es `LimiteDelPlanError` (409) y no un 403.
     // Quien lo recibe tiene que ampliar el plan, no revisar roles.
     if (resultado.clase === 'limite') {
@@ -136,7 +147,7 @@ export class ActualizarItem {
       llevaStock: datos.llevaStock,
     });
 
-    await this.deps.repositorio.actualizarItem({
+    const resultado = await this.deps.repositorio.actualizarItem({
       companyId: sesion.companyId,
       itemId: datos.itemId,
       nombre: datos.nombre.trim(),
@@ -146,6 +157,12 @@ export class ActualizarItem {
       estado: datos.estado,
       llevaStock: datos.llevaStock,
     });
+
+    // El `buscarItem` de arriba ya descartó el caso normal; esto es la carrera
+    // —alguien lo archivó entre medias— y el choque de nombres, que hasta
+    // P16-A2 subía sin traducir y salía como 500 (INC-012).
+    if (resultado === 'no_encontrado') throw new ItemNoEncontradoError();
+    if (resultado === 'nombre_en_uso') throw new ItemRepetidoError();
 
     await this.deps.auditoria.record({
       eventType: datos.estado === 'INACTIVE' ? 'catalog.item.archived' : 'catalog.item.updated',
@@ -249,6 +266,13 @@ export class ActualizarGrupo {
       eventType: 'catalog.group.updated',
       detail: { grupoId: datos.grupoId, ivaTarifa: ivaTarifa ?? 'null' },
     });
+  }
+}
+
+/** El mismo 409 para crear y para renombrar, como en artículos y grupos. */
+class ItemRepetidoError extends ConflictoDeCatalogoError {
+  public constructor() {
+    super('Ya existe un ítem con ese nombre.');
   }
 }
 

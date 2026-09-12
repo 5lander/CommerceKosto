@@ -32,7 +32,6 @@ import { llamar } from '../../lib/api';
 import { useSucursal } from '../../lib/sesion';
 import { TEXTOS } from '../../textos/es';
 
-const NO_ENCONTRADO = 404;
 const PRIMER_MES = 1;
 const ULTIMO_MES = 12;
 
@@ -68,20 +67,18 @@ function mesAnterior({ anio, mes }: Mes): Mes {
 }
 
 /**
- * Lee las ventas de un mes. Un 404 es «ese mes no tiene nada», que para esta
- * pantalla no es un error: es la lista vacía.
+ * Lee las ventas de un mes.
+ *
+ * **SIN `catch` DE 404, Y ESO ES UN ARREGLO** (P16-A2). Había uno que tragaba
+ * *cualquier* 404 y lo convertía en lista vacía; era código muerto —esta
+ * carga devuelve `[]` para un mes sin fila de período, nunca 404— y además
+ * escondía enlaces rotos. El 404 de «mes sin abrir» existe, pero es de las
+ * **seis vistas** de analítica y llega con `code: 'PERIODO_SIN_DATOS'`
+ * (D-16.2); quien lo necesite lo distingue por ahí, no por el estado.
  */
 async function ventasDe(sucursal: string, periodo: Mes): Promise<readonly Venta[]> {
   const consulta = `locationId=${sucursal}&anio=${String(periodo.anio)}&mes=${String(periodo.mes)}`;
-
-  try {
-    return await llamar<readonly Venta[]>({ ruta: `/analitica/ventas?${consulta}` });
-  } catch (fallo) {
-    const vacio =
-      typeof fallo === 'object' && fallo !== null && 'estado' in fallo && fallo.estado === NO_ENCONTRADO;
-    if (vacio) return [];
-    throw fallo;
-  }
+  return llamar<readonly Venta[]>({ ruta: `/analitica/ventas?${consulta}` });
 }
 
 export default function Ventas(): ReactNode {

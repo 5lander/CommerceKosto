@@ -89,9 +89,19 @@ interface Estado {
   vista: Vista;
   motivo: string;
   error: string | null;
+  /**
+   * El token anti-CSRF de la sesión del operador (ADR-021).
+   *
+   * **VIVE EN MEMORIA Y NO EN `localStorage`**, así que una recarga lo pierde y
+   * hay que volver a entrar. Es aceptable aquí y no lo sería en la app cliente:
+   * el back office es una sola pestaña, de una sesión de ocho horas, que se
+   * abre para hacer una cosa. Guardarlo en disco solo añadiría un sitio donde
+   * un XSS pudiera encontrarlo.
+   */
+  csrf: string | null;
 }
 
-const estado: Estado = { vista: { nombre: 'entrar' }, motivo: '', error: null };
+const estado: Estado = { vista: { nombre: 'entrar' }, motivo: '', error: null, csrf: null };
 
 // --- La API -----------------------------------------------------------------
 
@@ -115,6 +125,9 @@ async function llamar<T>(ruta: string, opciones: RequestInit = {}): Promise<T> {
   const cabeceras = new Headers(opciones.headers);
   cabeceras.set('X-Motivo', estado.motivo);
   if (opciones.body !== undefined) cabeceras.set('Content-Type', 'application/json');
+  // El token anti-CSRF en TODA mutación. La cabecera es el punto: un sitio
+  // cruzado puede provocar una petición, pero no puede ponerle una cabecera.
+  if (estado.csrf !== null) cabeceras.set('X-CSRF-Token', estado.csrf);
 
   const respuesta = await fetch(ruta, { ...opciones, headers: cabeceras, credentials: 'same-origin' });
 
@@ -184,10 +197,11 @@ function vistaEntrar(): HTMLElement {
     evento.preventDefault();
     boton.disabled = true;
     void conError(async () => {
-      await llamar('/sesion', {
+      const abierta = await llamar<{ readonly csrf: string }>('/sesion', {
         method: 'POST',
         body: JSON.stringify({ email: correo.value, contrasena: clave.value }),
       });
+      estado.csrf = abierta.csrf;
       estado.vista = { nombre: 'cartera' };
     }).finally(() => {
       boton.disabled = false;
@@ -240,6 +254,7 @@ function cabecera(): HTMLElement {
       await llamar('/salir', { method: 'POST' });
       estado.vista = { nombre: 'entrar' };
       estado.motivo = '';
+      estado.csrf = null;
     });
   });
 

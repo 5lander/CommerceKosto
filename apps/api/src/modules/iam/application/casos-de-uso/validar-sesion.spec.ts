@@ -42,6 +42,7 @@ function sesion(alcance: AlcanceDeUsuario): SesionActiva {
     permisos: [],
     alcance,
     ubicacionesDeCompany: [MIA, OTRA_MIA],
+    csrfToken: 'no-lo-mira-esta-prueba',
   };
 }
 

@@ -5,7 +5,7 @@
 | **Síntoma** | Una petición con datos incoherentes devuelve **500 `INTERNAL_ERROR`** en vez de 400. En el log hay un `23514` (check_violation) o un `P0001` (raise de trigger) del driver de PostgreSQL |
 | **Área** | arquitectura · base de datos |
 | **Paquete** | P5 (las dos reglas eran de P3 y P4) |
-| **Recurrencias** | 2, las dos en el mismo paquete |
+| **Recurrencias** | **3** — dos en el paquete de origen y la tercera en **P16-A2**: la clave foránea de unidad y los índices únicos de nombre del catálogo |
 | **Estado** | ✅ resuelto |
 
 ---
@@ -68,11 +68,31 @@ if (item.tipo === 'PRODUCIDO' && datos.purchaseArticleId !== null) { ... }
 
 **La restricción de la base NO se toca.** Sigue siendo la garantía; la guarda es la explicación. Quitar el `CHECK` para «arreglar» el 500 sería exactamente el error inverso.
 
+## Tercera recurrencia — P16-A2, y lo que obliga
+
+El mismo fallo con **otras dos restricciones**, que no son ni un `CHECK` ni un trigger y por eso M11 no las vigilaba:
+
+| Restricción | Petición razonable que daba 500 |
+|---|---|
+| clave foránea `item_unit_of_use_fkey` | `POST /catalogo/items` con `unidadDeUso: "l"` — bien formada y **inexistente**: el litro es `lt` |
+| índices únicos `item_company_id_name_key` · `purchase_article_company_id_name_key` | renombrar un ítem a un nombre ocupado · **reimportar el mismo archivo de `ARTICULOS`** · la carrera entre la lectura de nombres de dos lotes |
+
+Traducidas en P16-A2: **400** con las diez unidades válidas enumeradas, y **409** con el nombre que sobra dentro. La base sigue siendo la garantía; el dominio explica.
+
+**Y con la tercera recurrencia, CLAUDE.md §8.3 obliga a hacer la prevención que no se hizo.** La revisión de la etapa la señaló con precisión: el 409 de reimportar `ARTICULOS` y el rescate de la carrera **no tenían ni una prueba**, ni unitaria ni de integración, pese a que `guardas-de-dominio.md` marca esos índices como 🔴 y su propia sección «Cómo se mantiene» exige, por cada 🔴, «la guarda de dominio **Y** la prueba de que devuelve 4xx». Una guarda sin prueba es media guarda: funciona hoy y vuelve al 500 en el próximo refactor sin que ningún check se entere — que es exactamente cómo empezó esta incidencia.
+
 ## Prevención
 
 **Automatizada — la que de verdad cierra el caso.** `audit:migrations` gana la comprobación **M11**: toda migración que añada un `CHECK` o una función de trigger que haga `RAISE EXCEPTION` tiene que declarar, en un comentario `-- GUARDA:` junto a la restricción, dónde está su guarda de dominio. Es una línea por restricción y falla el build si falta; no comprueba que la guarda sea correcta —eso no es automatizable— pero sí que alguien se hizo la pregunta.
 
 **Manual, en la checklist.** `docs/AUDITORIA.md` gana **D14**: «toda restricción o trigger nuevo tiene su guarda de dominio, con mensaje, y una prueba que comprueba que sale como 4xx y no como 500».
+
+**Lo añadido por la TERCERA recurrencia (P16-A2, corrección de la etapa «Lecturas»):**
+
+1. **Las pruebas que faltaban, que son la prevención concreta de esta cara.** `test/integracion/importacion.spec.ts` reimporta el mismo `ARTICULOS` —409 `CONFLICTO` con el nombre dentro, y **cero filas escritas**—, y `shared/infrastructure/persistence/rescate-de-choque.spec.ts` cubre las tres ramas del rescate de la carrera con la base apagada, incluida la que relanza el error original cuando la relectura no encuentra nada. Las tres se verificaron **en rojo** desactivando la traducción: vuelven a enseñar el `P2002` crudo.
+2. **La regla se extiende a lo que M11 no ve.** `docs/sistema/guardas-de-dominio.md` pide desde ahora que cada fila 🔴 **nombre el archivo de prueba** que comprueba su 4xx, y no solo la guarda. M11 solo puede exigir el `-- GUARDA:` de un `CHECK` o un `RAISE`; una clave foránea o un índice único no tienen dónde ponerlo, y esa es justo la grieta por la que entró esta tercera recurrencia.
+
+**Lo que NO se hizo, y por qué se anota en vez de fingirlo:** automatizar «toda fila 🔴 cita una prueba que existe» exigiría reescribir las **45** filas 🔴 del documento, que es un paquete en sí mismo y no cabe en una corrección de revisión. Queda propuesto para P16-B; mientras tanto la regla es manual y las filas nuevas ya la cumplen.
 
 ## Dónde volverá a aparecer
 

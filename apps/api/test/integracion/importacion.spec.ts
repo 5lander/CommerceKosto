@@ -29,6 +29,7 @@ import {
   type SesionActiva,
 } from '../../src/modules/iam/application/casos-de-uso/validar-sesion';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
+import { ConflictoDeCatalogoError } from '../../src/modules/catalog/domain/errores';
 import { ImportarArchivo } from '../../src/modules/imports/application/casos-de-uso/importar';
 import type { TipoDeImportacion } from '../../src/modules/imports/domain/analisis';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
@@ -128,6 +129,14 @@ describe('importación', () => {
   async function contarItems(companyId: string): Promise<number> {
     const { rows } = await duena.query<{ n: string }>(
       'SELECT count(*)::text AS n FROM item WHERE company_id = $1',
+      [companyId],
+    );
+    return Number(rows[0]?.n ?? '0');
+  }
+
+  async function contarArticulos(companyId: string): Promise<number> {
+    const { rows } = await duena.query<{ n: string }>(
+      'SELECT count(*)::text AS n FROM purchase_article WHERE company_id = $1',
       [companyId],
     );
     return Number(rows[0]?.n ?? '0');
@@ -300,6 +309,72 @@ describe('importación', () => {
       await expect(
         importar(una, 'RECETAS', `producto,item,cantidad,base\n${comboA},${comboB},1,EP`),
       ).rejects.toThrow(/no puede contener otro combo/u);
+    }, 120_000);
+  });
+
+  /**
+   * REIMPORTAR EL MISMO ARCHIVO DE ARTICULOS.
+   *
+   * Es lo que hace cualquiera que corrige una fila y vuelve a subir el archivo
+   * entero, y hasta P16-A2 era un **500 determinista**: el lote de artículos no
+   * miraba los nombres y el `P2002` de `purchase_article_company_id_name_key`
+   * subía sin traducir (INC-012, tercera cara). Sin estas pruebas nada impide
+   * que el próximo refactor lo devuelva al 500: `guardas-de-dominio.md` marca
+   * ese índice como 🔴, y un 🔴 sin su prueba de 4xx es media guarda.
+   */
+  describe('reimportar ARTÍCULOS es 409, no 500 — INC-012', () => {
+    const CABECERA = 'item,nombre,presentacion,unidad de presentacion,iva';
+
+    let item = '';
+    let articulo = '';
+    let csv = '';
+
+    beforeAll(async () => {
+      item = `Harina ${sufijo}`;
+      articulo = `Harina Ya 2kg ${sufijo}`;
+      csv = `${CABECERA}\n${item},${articulo},2,kg,0.15`;
+
+      await importar(una, 'ITEMS', `nombre,tipo,unidad de uso,rendimiento\n${item},COMPRADO,g,1`);
+      expect(await importar(una, 'ARTICULOS', csv)).toBe(1);
+    }, 120_000);
+
+    it('el mismo archivo otra vez es CONFLICTO y nombra el artículo repetido', async () => {
+      const fallo: unknown = await importar(una, 'ARTICULOS', csv).then(
+        () => null,
+        (error: unknown) => error,
+      );
+
+      expect(fallo).toBeInstanceOf(ConflictoDeCatalogoError);
+      expect(fallo).toMatchObject({ codigo: 'CONFLICTO' });
+      expect(fallo).toMatchObject({ message: expect.stringContaining(articulo) as unknown });
+    }, 120_000);
+
+    /** Todo el lote o nada, también cuando lo que para el lote es el 409. */
+    it('y no deja ni una fila escrita', async () => {
+      const antes = await contarArticulos(una.companyId);
+
+      await expect(importar(una, 'ARTICULOS', csv)).rejects.toThrow(ConflictoDeCatalogoError);
+
+      expect(await contarArticulos(una.companyId)).toBe(antes);
+    }, 120_000);
+
+    /**
+     * EL CHOQUE IGNORA LAS MAYÚSCULAS, y el índice único de la base no.
+     * `clavePorNombre` es más estricto que `(company_id, name)` a propósito
+     * —dos filas que solo se distinguen por la caja son la misma cosa escrita
+     * dos veces—, así que esta fila se para aquí aunque la base la habría
+     * aceptado. Por eso el mensaje lo dice: el nombre que enseña es el del
+     * archivo y no está, tal cual, en el catálogo.
+     */
+    it('el mismo nombre con OTRA caja también se para, y el mensaje lo explica', async () => {
+      const antes = await contarArticulos(una.companyId);
+      const gritado = `${CABECERA}\n${item},${articulo.toUpperCase()},2,kg,0.15`;
+
+      await expect(importar(una, 'ARTICULOS', gritado)).rejects.toThrow(
+        /sin distinguir mayúsculas/u,
+      );
+
+      expect(await contarArticulos(una.companyId)).toBe(antes);
     }, 120_000);
   });
 });

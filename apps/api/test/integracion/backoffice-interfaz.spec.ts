@@ -29,9 +29,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { BackofficeModule } from '../../src/modules/backoffice/backoffice.module';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const SIN_SESION = 401;
+const PROHIBIDO = 403;
+const SIN_CONTENIDO = 204;
 
 const CONTRASENA = 'siete cebollas moradas';
 
@@ -80,7 +83,7 @@ describe('la interfaz del back office', () => {
   async function entrar(): Promise<string> {
     const respuesta = await request(servidor()).post('/sesion').send({ email: operador, contrasena: CONTRASENA });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   it('los tres recursos son públicos: sin ellos no hay dónde escribir la contraseña', async () => {
@@ -139,7 +142,7 @@ describe('la interfaz del back office', () => {
     );
     const cookie = await entrar();
 
-    const respuesta = await request(servidor()).get('/correo/salud').set('Cookie', cookie);
+    const respuesta = await request(servidor()).get('/correo/salud').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
     expect(respuesta.status).toBe(OK);
     const salud = respuesta.body as { pendientesAntiguos: unknown; fallidos: unknown; ultimoEnvio: unknown };
@@ -160,9 +163,42 @@ describe('la interfaz del back office', () => {
     const cookie = await entrar();
     const antes = await duena.query<{ n: string }>(`SELECT count(*)::text AS n FROM backoffice_access_log`);
 
-    await request(servidor()).get('/correo/salud').set('Cookie', cookie);
+    await request(servidor()).get('/correo/salud').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
     const despues = await duena.query<{ n: string }>(`SELECT count(*)::text AS n FROM backoffice_access_log`);
     expect(despues.rows[0]?.n).toBe(antes.rows[0]?.n);
+  });
+
+  /**
+   * EL BACK OFFICE TAMBIÉN LLEVA TOKEN ANTI-CSRF (ADR-021).
+   *
+   * Hoy sus mutaciones son `fetch` con `Content-Type: application/json` desde
+   * su propia página, y eso ya las protege: un sitio cruzado no puede emitir
+   * esa petición sin un preflight que `cors: false` rechaza. Pero esa defensa
+   * es una propiedad del despliegue de hoy —el día que estas rutas sirvan un
+   * `<form method="post">`, que no necesita preflight, desaparece sin que
+   * ningún check avise—. El token no depende de eso.
+   */
+  it('una mutación del back office sin la cabecera es 403 CSRF_INVALIDO', async () => {
+    const cookie = await entrar();
+
+    const respuesta = await request(servidor()).post('/salir').set('Cookie', cookie);
+
+    expect(respuesta.status).toBe(PROHIBIDO);
+    expect(respuesta.body).toMatchObject({ code: 'CSRF_INVALIDO' });
+  });
+
+  it('con su token, la misma mutación pasa; y el token no viaja en la cookie', async () => {
+    const login = await request(servidor()).post('/sesion').send({ email: operador, contrasena: CONTRASENA });
+    const cookie = cookieConCsrf(login);
+    const csrf = (login.body as { readonly csrf: string }).csrf;
+
+    for (const puesta of login.headers['set-cookie'] ?? []) {
+      expect(puesta).not.toContain(csrf);
+    }
+
+    const respuesta = await request(servidor()).post('/salir').set('Cookie', cookie).set('X-CSRF-Token', csrf);
+
+    expect(respuesta.status).toBe(SIN_CONTENIDO);
   });
 });

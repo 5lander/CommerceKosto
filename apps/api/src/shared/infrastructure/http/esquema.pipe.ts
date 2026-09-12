@@ -14,15 +14,23 @@
  *
  * Y UNA SEGUNDA, ANADIDA EN P15: rechaza los CARACTERES DE CONTROL antes de
  * validar. Ver `exigirSinCaracteresDeControl`.
+ *
+ * Y UNA TERCERA, DE LA REVISION DE P16-A2: el mensaje de un problema NO es el
+ * eco de la peticion. Ver `textoDelProblema`, que es donde `.strict()` deja de
+ * devolver las claves sobrantes tal y como llegaron.
  */
 
 import { Injectable, type PipeTransform } from '@nestjs/common';
-import type { ZodType } from 'zod';
+import type { ZodError, ZodType } from 'zod';
 
 import { EntradaInvalidaError } from '../../domain/errors/entrada-invalida';
+import { valorParaMensaje } from '../../domain/errors/valor-en-mensaje';
 
 /** Cuantos problemas se enumeran. Mas alla es ruido para quien integra. */
 const PROBLEMAS_A_MOSTRAR = 5;
+
+/** Cuantas claves sobrantes se nombran antes de resumir con el numero. */
+const CLAVES_A_MOSTRAR = 3;
 
 /** Cuanto se baja en un objeto anidado antes de dejar de mirar. */
 const PROFUNDIDAD_MAXIMA = 8;
@@ -116,6 +124,31 @@ function exigirSinCaracteresDeControl(valor: unknown, profundidad = 0): void {
   }
 }
 
+/** Un problema de Zod, tal y como sale de `safeParse`. */
+type Problema = ZodError['issues'][number];
+
+/**
+ * EL TEXTO DE UN PROBLEMA, CON UN CASO PROPIO: LAS CLAVES QUE SOBRAN.
+ *
+ * El mensaje que Zod escribe para `unrecognized_keys` lleva dentro los NOMBRES
+ * de las claves sobrantes, verbatim y sin recorte. Como ese texto sale al
+ * cliente dentro del 400, un `?<clave de 300 caracteres>=1` volvia entero en el
+ * cuerpo de la respuesta: el error convertido en eco de la peticion, que es
+ * justo lo que `valorParaMensaje` existe para evitar en la otra puerta de este
+ * mismo borde (los mensajes de dominio, P16-A2).
+ *
+ * Asi que las claves pasan por el mismo filtro —recorte y sin caracteres de
+ * control— y solo se nombran las primeras; el numero dice cuantas eran. El
+ * texto va en espanol, como el resto del mensaje que las envuelve.
+ */
+function textoDelProblema(problema: Problema): string {
+  if (problema.code !== 'unrecognized_keys') {
+    return problema.message;
+  }
+  const nombradas = problema.keys.slice(0, CLAVES_A_MOSTRAR).map(valorParaMensaje).join(', ');
+  return `sobran parametros (${String(problema.keys.length)}): ${nombradas}`;
+}
+
 @Injectable()
 export class EsquemaPipe<T> implements PipeTransform<unknown, T> {
   public constructor(private readonly esquema: ZodType<T>) {}
@@ -130,7 +163,7 @@ export class EsquemaPipe<T> implements PipeTransform<unknown, T> {
 
     const problemas = resultado.error.issues
       .slice(0, PROBLEMAS_A_MOSTRAR)
-      .map((issue) => `${issue.path.join('.') || '(cuerpo)'}: ${issue.message}`);
+      .map((issue) => `${issue.path.join('.') || '(cuerpo)'}: ${textoDelProblema(issue)}`);
 
     throw new EntradaInvalidaError(problemas);
   }

@@ -12,10 +12,12 @@
  * de uso se puede construir a mano en una prueba con seis dobles y sin
  * contenedor de por medio.
  *
- * LOS DOS GUARDS SON GLOBALES, Y EL ORDEN IMPORTA. `SesionGuard` primero
- * —resuelve quien pregunta—, `PermisosGuard` despues —decide si puede—. Que
- * sean globales es lo que hace que la autorizacion sea deny-by-default: una
- * ruta nueva esta protegida sin que nadie tenga que acordarse de protegerla.
+ * LOS TRES GUARDS SON GLOBALES, Y EL ORDEN IMPORTA. `SesionGuard` primero
+ * —resuelve quien pregunta—, `CsrfGuard` despues —comprueba que la mutacion
+ * la origino de verdad la pagina de la aplicacion, P16-A2— y `PermisosGuard`
+ * al final —decide si puede—. Que sean globales es lo que hace que la
+ * autorizacion sea deny-by-default: una ruta nueva esta protegida, y desde
+ * P16-A2 tambien exige token si muta, sin que nadie tenga que acordarse.
  */
 
 import { Module } from '@nestjs/common';
@@ -50,6 +52,7 @@ import { EnlacesDeLaApp } from './infrastructure/enlaces-de-la-app';
 import { GeneradorDeTokensCriptografico } from './infrastructure/generador-de-tokens';
 import { AuthController } from './infrastructure/http/auth.controller';
 import { ContrasenaController } from './infrastructure/http/contrasena.controller';
+import { CsrfGuard } from './infrastructure/http/csrf.guard';
 import { InvitacionesDeUsuario } from './infrastructure/http/invitaciones-de-usuario';
 import { PermisosGuard } from './infrastructure/http/permisos.guard';
 import { Restablecimiento } from './infrastructure/http/restablecimiento';
@@ -127,6 +130,7 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
     },
 
     { provide: APP_GUARD, useClass: SesionGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermisosGuard },
   ],
   // `ListarUbicaciones` se exporta desde P9: el consolidado necesita saber

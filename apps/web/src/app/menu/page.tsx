@@ -16,10 +16,10 @@
  * denominador, así que quien divida por el total obtendrá otro número — y
  * tendrá razón. Por eso los dos se enseñan por separado.
  *
- * **SE PIDEN DOS RECURSOS Y SE UNEN POR `productId`.** El DTO de menu
- * engineering no trae el nombre del producto, y unir por clave no es lógica de
- * negocio: no se calcula nada, se busca. Queda anotado que lo limpio sería que
- * la API publicara el nombre.
+ * **UN SOLO RECURSO.** Hasta P16-A2 se pedían dos —el menú y `GET /costeo`—
+ * y se unían por `productId`, porque el DTO no traía el nombre del producto:
+ * costear la carta entera para pintar una columna de texto. La API lo publica
+ * ahora en `nombre`, así que la segunda llamada y el `Map` se van.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -36,6 +36,7 @@ type Cuadrante = keyof typeof TEXTOS.menu.cuadrantes;
 
 interface ProductoDelMenu {
   readonly productId: string;
+  readonly nombre: string;
   readonly unidades: string;
   readonly indicePopularidad: string | null;
   readonly margenContribucion: string | null;
@@ -50,10 +51,6 @@ interface Menu {
   readonly metodoMcPromedio: string;
   readonly unidadesTotales: string;
   readonly productosActivos: number;
-}
-
-interface Carta {
-  readonly productos: readonly { readonly productId: string; readonly nombre: string }[];
 }
 
 /** El orden en que se leen: primero lo que sostiene el negocio. */
@@ -74,7 +71,6 @@ function mesActual(): { readonly anio: number; readonly mes: number } {
 export default function MenuEngineering(): ReactNode {
   const { sucursal } = useSucursal();
   const [menu, setMenu] = useState<Menu | null>(null);
-  const [nombres, setNombres] = useState<ReadonlyMap<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   const cargar = useCallback(async (): Promise<void> => {
@@ -86,13 +82,7 @@ export default function MenuEngineering(): ReactNode {
     const periodo = `locationId=${sucursal}&anio=${String(anio)}&mes=${String(mes)}`;
 
     try {
-      const [vista, carta] = await Promise.all([
-        llamar<Menu>({ ruta: `/analitica/menu-engineering?${periodo}` }),
-        llamar<Carta>({ ruta: `/costeo?locationId=${sucursal}` }),
-      ]);
-
-      setNombres(new Map(carta.productos.map((p) => [p.productId, p.nombre])));
-      setMenu(vista);
+      setMenu(await llamar<Menu>({ ruta: `/analitica/menu-engineering?${periodo}` }));
     } catch (fallo) {
       setError(fallo instanceof Error ? fallo.message : TEXTOS.comun.cargando);
     }
@@ -124,7 +114,7 @@ export default function MenuEngineering(): ReactNode {
       {menu !== null && conVentas.length > 0 && (
         <div className="pila">
           <Referencia menu={menu} />
-          <Matriz menu={menu} nombres={nombres} />
+          <Matriz menu={menu} />
         </div>
       )}
     </Marco>
@@ -163,13 +153,7 @@ function Referencia({ menu }: { readonly menu: Menu }): ReactNode {
   );
 }
 
-function Matriz({
-  menu,
-  nombres,
-}: {
-  readonly menu: Menu;
-  readonly nombres: ReadonlyMap<string, string>;
-}): ReactNode {
+function Matriz({ menu }: { readonly menu: Menu }): ReactNode {
   return (
     <div className="pila">
       {ORDEN.map((cuadrante) => {
@@ -177,7 +161,7 @@ function Matriz({
         if (productos.length === 0) return null;
 
         return (
-          <Cuadrante key={cuadrante} cuadrante={cuadrante} productos={productos} nombres={nombres} />
+          <Cuadrante key={cuadrante} cuadrante={cuadrante} productos={productos} />
         );
       })}
     </div>
@@ -187,11 +171,9 @@ function Matriz({
 function Cuadrante({
   cuadrante,
   productos,
-  nombres,
 }: {
   readonly cuadrante: Cuadrante;
   readonly productos: readonly ProductoDelMenu[];
-  readonly nombres: ReadonlyMap<string, string>;
 }): ReactNode {
   return (
     <section
@@ -216,7 +198,7 @@ function Cuadrante({
         <tbody>
           {productos.map((producto) => (
             <tr key={producto.productId}>
-              <td>{nombres.get(producto.productId) ?? producto.productId}</td>
+              <td>{producto.nombre === '' ? producto.productId : producto.nombre}</td>
               <td className="numero">{producto.unidades}</td>
               <td className="numero">
                 {producto.margenContribucion === null

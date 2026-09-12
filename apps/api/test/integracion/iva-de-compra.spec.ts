@@ -39,6 +39,7 @@ import { ImportarArchivo } from '../../src/modules/imports/application/casos-de-
 import { SugerirPreciosEnLote } from '../../src/modules/pricing/application/casos-de-uso/lotes';
 import type { LocationId } from '../../src/shared/domain/identity/identificadores';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -157,11 +158,11 @@ describe('IVA de compra en dos niveles', () => {
       .send({ email, contrasena: CONTRASENA });
 
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function crear(ruta: string, cuerpo: Cuerpo, quien = cookie): Promise<string> {
-    const respuesta = await request(servidor()).post(ruta).set('Cookie', quien).send(cuerpo);
+    const respuesta = await request(servidor()).post(ruta).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien)).send(cuerpo);
     expect(respuesta.status).toBe(CREADO);
     return (respuesta.body as { id: string }).id;
   }
@@ -198,7 +199,7 @@ describe('IVA de compra en dos niveles', () => {
   function comprar(cuerpo: Cuerpo, quien = cookie) {
     return request(servidor())
       .post('/inventario/movimientos')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({
         locationId: bodega,
         tipo: 'COMPRA',
@@ -224,10 +225,10 @@ describe('IVA de compra en dos niveles', () => {
   }
 
   async function ajustarRecuperable(recuperable: boolean): Promise<void> {
-    const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+    const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
     const respuesta = await request(servidor())
       .put('/ajustes')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ ...actuales, ivaCompraRecuperable: recuperable });
     expect(respuesta.status).toBe(SIN_CONTENIDO);
   }
@@ -450,7 +451,7 @@ describe('IVA de compra en dos niveles', () => {
 
       const correccion = await request(servidor())
         .post(`/inventario/movimientos/${compra.id}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: 'factura duplicada' });
       expect(correccion.status).toBe(CREADO);
 
@@ -500,7 +501,7 @@ describe('IVA de compra en dos niveles', () => {
       const libro = await request(servidor())
         .get('/inventario/movimientos')
         .query({ locationId: bodega, itemId: item })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       expect(libro.status).toBe(OK);
 
       const movimientos = (libro.body as { movimientos: readonly Record<string, unknown>[] })
@@ -540,8 +541,9 @@ describe('IVA de compra en dos niveles', () => {
       const respuesta = await request(servidor())
         .get('/inventario/movimientos')
         .query({ locationId: bodega })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -550,7 +552,7 @@ describe('IVA de compra en dos niveles', () => {
       const item = await crearItem(null);
       const respuesta = await request(servidor())
         .post('/catalogo/articulos')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send(cuerpoDeArticulo(item, undefined));
 
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
@@ -564,14 +566,14 @@ describe('IVA de compra en dos niveles', () => {
 
       const cambio = await request(servidor())
         .put(`/catalogo/articulos/${articulo}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ nombre, marca: 'Ya', proveedor: null, ivaTarifa: '0', estado: 'ACTIVE' });
       expect(cambio.status).toBe(SIN_CONTENIDO);
 
       const lista = await request(servidor())
         .get('/catalogo/articulos')
         .query({ itemId: item })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       expect(lista.body).toEqual([
         expect.objectContaining({ id: articulo, nombre, marca: 'Ya', ivaTarifa: '0' }),
       ]);
@@ -588,28 +590,28 @@ describe('IVA de compra en dos niveles', () => {
       const articulo = await crearArticulo(item);
       const otro = await crearArticulo(item);
       const nombreDelOtro = (
-        (await request(servidor()).get('/catalogo/articulos').query({ itemId: item }).set('Cookie', cookie))
+        (await request(servidor()).get('/catalogo/articulos').query({ itemId: item }).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)))
           .body as readonly { id: string; nombre: string }[]
       ).find((a) => a.id === otro)?.nombre;
       const base = { marca: null, proveedor: null, ivaTarifa: QUINCE, estado: 'ACTIVE' };
 
       const invalido = await request(servidor())
         .put(`/catalogo/articulos/${articulo}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...base, nombre: 'x', ivaTarifa: '15' });
       expect(invalido.status).toBe(ENTRADA_INVALIDA);
       expect((invalido.body as Error400).code).toBe('ENTRADA_INVALIDA');
 
       const ajeno = await request(servidor())
         .put(`/catalogo/articulos/${articulo}`)
-        .set('Cookie', cookieOtra)
+        .set('Cookie', cookieOtra).set('X-CSRF-Token', csrfDe(cookieOtra))
         .send({ ...base, nombre: 'x' });
       expect(ajeno.status).toBe(NO_ENCONTRADO);
       expect((ajeno.body as Error400).code).toBe('RECURSO_NO_ENCONTRADO');
 
       const repetido = await request(servidor())
         .put(`/catalogo/articulos/${articulo}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...base, nombre: nombreDelOtro });
       expect(repetido.status).toBe(CONFLICTO);
       expect((repetido.body as Error400).code).toBe('CONFLICTO');
@@ -621,23 +623,23 @@ describe('IVA de compra en dos niveles', () => {
 
       const puesta = await request(servidor())
         .put(`/catalogo/grupos/${grupo}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ nombre, ivaTarifa: QUINCE });
       expect(puesta.status).toBe(SIN_CONTENIDO);
 
-      const lista = (await request(servidor()).get('/catalogo/grupos').set('Cookie', cookie))
+      const lista = (await request(servidor()).get('/catalogo/grupos').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)))
         .body as readonly { id: string; nombre: string; ivaTarifa: string | null }[];
       expect(lista.find((g) => g.id === grupo)).toEqual({ id: grupo, nombre, ivaTarifa: '0.15' });
 
       const quitada = await request(servidor())
         .put(`/catalogo/grupos/${grupo}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ nombre, ivaTarifa: null });
       expect(quitada.status).toBe(SIN_CONTENIDO);
 
       const ajeno = await request(servidor())
         .put(`/catalogo/grupos/${grupo}`)
-        .set('Cookie', cookieOtra)
+        .set('Cookie', cookieOtra).set('X-CSRF-Token', csrfDe(cookieOtra))
         .send({ nombre, ivaTarifa: null });
       expect(ajeno.status).toBe(NO_ENCONTRADO);
     });
@@ -658,7 +660,7 @@ describe('IVA de compra en dos niveles', () => {
 
     async function ivaDelHistorial(itemId: string): Promise<string | undefined> {
       const historial = (
-        await request(servidor()).get('/precios').query({ itemId }).set('Cookie', cookie)
+        await request(servidor()).get('/precios').query({ itemId }).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       ).body as readonly { ivaCompra: string }[];
       return historial[0]?.ivaCompra;
     }
@@ -680,7 +682,7 @@ describe('IVA de compra en dos niveles', () => {
       const preparacion = await crearItem(null, 'PRODUCIDO');
       const respuesta = await request(servidor())
         .post('/precios')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send(precioDePreparacion(preparacion, QUINCE));
 
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
@@ -740,7 +742,7 @@ describe('IVA de compra en dos niveles', () => {
       });
 
       const historial = (
-        await request(servidor()).get('/precios').query({ itemId: item }).set('Cookie', cookie)
+        await request(servidor()).get('/precios').query({ itemId: item }).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       ).body as readonly { ivaCompra: string }[];
       expect(historial[0]?.ivaCompra).toBe('0.08');
     });

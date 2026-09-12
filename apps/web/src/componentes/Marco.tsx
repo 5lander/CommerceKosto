@@ -20,6 +20,7 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 
 import { llamar } from '../lib/api';
+import { guardarCsrf } from '../lib/csrf';
 import { useSucursal } from '../lib/sesion';
 import { TEXTOS } from '../textos/es';
 import { Isotipo } from './ui/Marca';
@@ -70,6 +71,7 @@ export function Marco({
       // el servidor no contestó, dejar al usuario dentro de una sesión que él
       // cree cerrada es peor que cerrarla solo en este navegador.
       olvidar();
+      guardarCsrf(null);
       router.replace('/entrar');
     }
   }

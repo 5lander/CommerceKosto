@@ -1,10 +1,11 @@
 import DecimalJsGlobal from 'decimal.js';
 import { describe, expect, it } from 'vitest';
 
-import { DIVISION, PRESENTACION, escalaDe, type Escala } from './escalas';
+import { DIVISION, MAXIMA, PRESENTACION, escalaDe, type Escala } from './escalas';
 import {
   D,
   DivisionPorCeroError,
+  EscalaExcedidaError,
   ValorDecimalInvalidoError,
   aCadenaFija,
   desdeCadena,
@@ -49,6 +50,27 @@ describe('parseo de cadenas decimales', () => {
   it('nunca produce notacion exponencial al formatear', () => {
     expect(desdeCadena('0.000000000001', 'prueba').toFixed()).not.toContain('e');
     expect(new D('1000000000000000000').toFixed()).not.toContain('e');
+  });
+
+  /**
+   * P16-A2: la guarda que separa «lo escribiste mal» de «el motor se paso».
+   *
+   * Una cadena con mas decimales de los que el sistema conserva llegaba antes
+   * hasta el constructor y saltaba con `EscalaExcedidaError`, que es un `Error`
+   * a secas: **500 `INTERNAL_ERROR`** por un dato que alguien tecleo. Ahora se
+   * rechaza en la puerta, con el error de ENTRADA que si sabe explicarlo — y
+   * `EscalaExcedidaError` se queda para lo que de verdad es: un desbordamiento
+   * a mitad de calculo, que sigue siendo 500 y sigue yendo al log con su traza.
+   */
+  it('rechaza mas decimales de los que el sistema conserva, y como ENTRADA no como desbordamiento', () => {
+    const excesivo = `0.${'1'.repeat(MAXIMA + 1)}`;
+
+    expect(() => desdeCadena(excesivo, 'prueba')).toThrow(ValorDecimalInvalidoError);
+    expect(() => desdeCadena(excesivo, 'prueba')).not.toThrow(EscalaExcedidaError);
+  });
+
+  it('el limite exacto pasa: son MAS decimales lo que se rechaza, no el maximo', () => {
+    expect(desdeCadena(`0.${'1'.repeat(MAXIMA)}`, 'prueba').decimalPlaces()).toBe(MAXIMA);
   });
 });
 

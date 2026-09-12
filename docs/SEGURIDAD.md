@@ -103,6 +103,44 @@ Contar y anotar el golpe son **una sola transacción por clave** bajo `pg_adviso
 - Los webhooks no usan cookies: su protección es la firma (§6)
 - Verificación de `Origin`/`Referer` en mutaciones como capa extra
 
+**Cómo quedó implementado en P16-A2 (U4, ADR-021), y en qué se aparta de las tres líneas de arriba.**
+El patrón elegido es **synchronizer**, no double-submit: el token vive en la fila de la sesión
+(`session.csrf_token` y `backoffice_session.csrf_token`), en claro, y el servidor lo compara con la
+cabecera. Una segunda cookie legible habría metido el token en el canal del que defiende, y habría
+dependido de que nadie pueda escribir cookies del sitio — que es justo lo que un subdominio
+comprometido sí puede.
+
+| Pieza | Cómo quedó |
+|---|---|
+| Generación | Segundo token de 256 bits del mismo CSPRNG que el de sesión, **no derivado** de él. Nace con la sesión y muere con ella; no rota dentro de la sesión |
+| Entrega | En el **cuerpo** de `POST /auth/login` y de `GET /auth/sesion`. Nunca en una cookie |
+| Exigencia | Cabecera **`X-CSRF-Token`** en `POST`, `PUT`, `PATCH` y `DELETE` de los **dos procesos** (app cliente y back office, cada uno con su guard y su tabla) |
+| Comprobación | `CsrfGuard` global, **entre** el de sesión y el de permisos. `timingSafeEqual` sobre los SHA-256 de los dos lados: hashear iguala la longitud, que si no sería un oráculo del tamaño del token |
+| Fallo | **403 `CSRF_INVALIDO`**, distinguible de `PERMISO_DENEGADO`: la reacción del cliente es opuesta |
+| Sesiones anteriores a la migración | Sin token ⇒ **401 `SESION_INVALIDA`**, no un 403 al mutar. El despliegue cierra las sesiones abiertas |
+| Logs | `X-CSRF-Token` entra en `redact` junto a `authorization`, `cookie` y `set-cookie`; `logger.options.spec.ts` clava la lista (C14) |
+
+**Fuera del guard, y por qué:** las lecturas (`GET`/`HEAD`/`OPTIONS`) —un CSRF provoca un efecto y el
+sitio cruzado no lee la respuesta— y las cuatro rutas `@Publico()`, donde no hay sesión que
+suplantar y cuyo problema real es el abuso, que cubre el límite de tasa (§2.1). **El login es la
+excepción que sí necesitaba respuesta**: una petición cruzada allí no *usa* una credencial, la
+**crea** (login CSRF / fijación), y `SameSite` gobierna el envío de la cookie, no su almacenamiento.
+Lo que lo cierra es que **la API analiza solo `application/json`** (`bootstrap.ts`:
+`bodyParser: false` + `useBodyParser('json')`), que es lo único que un `<form>` cruzado no puede
+emitir. `POST /auth/logout` **no** queda fuera.
+
+**Lo que NO se implementó, dicho aquí y no solo en el ADR: la verificación de `Origin`/`Referer`**
+—la tercera línea de esta sección, la «capa extra»— (D-16.69). Cuatro razones, por orden de peso:
+duplicaría la lista blanca de CORS y derivaría de ella; en desarrollo y en las pruebas esa lista
+está **vacía** (`cors: false`), así que la comprobación necesitaría un «si está vacía, pasa» que
+**falla abierto**, que es la forma de condicional que este documento rechaza en todas partes; el
+back office no tiene lista que consultar (`cors: false` y un puerto de loopback variable), de modo
+que la capa extra solo cubriría la mitad menos expuesta; y `supertest` no manda `Origin`, así que
+exigirla rompería las 32 suites y aceptar su ausencia dejaría el hueco abierto. **Señal para
+reabrirlo:** un cliente que no sea `apps/web` —una app móvil, una integración— o el back office
+publicado fuera de loopback. Hasta entonces, la fila «CSRF» del mapa de §12 se cumple en sus dos
+primeros términos y no en el tercero.
+
 ### 4.3 SSRF
 - El backend **no hace peticiones a URLs provistas por usuarios**. Los enlaces a proveedores o documentos de compra que registre el usuario se guardan y se muestran como texto/enlace — **jamás se fetchean del lado servidor**
 - Las únicas llamadas salientes son a servicios conocidos (correo transaccional y almacenamiento de archivos) con URLs de configuración, no de entrada
@@ -279,7 +317,7 @@ Nota sobre `webhook.signature.invalid`: se reactiva el día que exista un webhoo
 | Enumeración de usuarios | Respuestas idénticas + tiempo constante |
 | Session hijacking/fixation | Cookies HttpOnly/Secure/Strict + rotación + revocación + detección de reuso |
 | XSS | Escapado por defecto + CSP con nonce + HttpOnly |
-| CSRF | SameSite=Strict + token CSRF + verificación de Origin |
+| CSRF | SameSite=Strict + token CSRF *(synchronizer, P16-A2)* + **la verificación de Origin NO está implementada** (§4.2, D-16.69) — en su lugar, la API solo analiza `application/json`, que cierra el login CSRF |
 | SSRF | Sin fetch de URLs de usuario + lista blanca de destinos |
 | IDOR / escalada | `company_id` (y `location_id`) en la consulta + RLS + tests por endpoint |
 | Mass assignment | Esquemas `.strict()` con campos explícitos |

@@ -39,6 +39,7 @@ import {
 import { Quantity } from '../../src/shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../src/shared/domain/unidad/unidad-de-uso';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -101,7 +102,7 @@ describe('inventario', () => {
       .post('/auth/login')
       .send({ email, contrasena: CONTRASENA });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function crearItem(datos: {
@@ -111,7 +112,7 @@ describe('inventario', () => {
   }): Promise<string> {
     const respuesta = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `Insumo ${randomUUID().slice(0, 8)}`,
         tipo: datos.tipo,
@@ -131,7 +132,7 @@ describe('inventario', () => {
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         itemId,
         nombre: `Presentacion ${randomUUID().slice(0, 8)}`,
@@ -178,13 +179,13 @@ describe('inventario', () => {
   async function confirmarPrecio(cuerpo: Cuerpo): Promise<void> {
     const sugerido = await request(servidor())
       .post('/precios')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ origen: 'MANUAL', nota: null, ...cuerpo });
     expect(sugerido.status).toBe(CREADO);
 
     const decision = await request(servidor())
       .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
   }
@@ -198,7 +199,7 @@ describe('inventario', () => {
   function registrar(cuerpo: Cuerpo, quien = cookie) {
     return request(servidor())
       .post('/inventario/movimientos')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({
         costoTotal: null,
         purchaseArticleId: null,
@@ -230,7 +231,7 @@ describe('inventario', () => {
     const respuesta = await request(servidor())
       .get('/inventario/saldos')
       .query({ locationId })
-      .set('Cookie', quien);
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
     expect(respuesta.status).toBe(OK);
     return respuesta.body as readonly SaldoDto[];
   }
@@ -400,7 +401,7 @@ describe('inventario', () => {
 
       const correccion = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: 'me equivoqué de bodega' });
       expect(correccion.status).toBe(CREADO);
 
@@ -409,7 +410,7 @@ describe('inventario', () => {
       const libro = await request(servidor())
         .get('/inventario/movimientos')
         .query({ locationId: bodegaCentral, itemId: item })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       const movimientos = (libro.body as { movimientos: MovimientoDto[] }).movimientos;
 
       // LAS DOS FILAS SIGUEN AHÍ. Es la diferencia entre corregir y borrar.
@@ -427,7 +428,7 @@ describe('inventario', () => {
 
       await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
 
       const { rows } = await duena.query<{ suma: string }>(
@@ -444,13 +445,13 @@ describe('inventario', () => {
 
       const primera = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
       expect(primera.status).toBe(CREADO);
 
       const segunda = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
       expect(segunda.status).toBe(CONFLICTO);
     });
@@ -461,12 +462,12 @@ describe('inventario', () => {
 
       const primera = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
 
       const segunda = await request(servidor())
         .post(`/inventario/movimientos/${(primera.body as { id: string }).id}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
       expect(segunda.status).toBe(CONFLICTO);
     });
@@ -477,11 +478,11 @@ describe('inventario', () => {
 
       const editar = await request(servidor())
         .put(`/inventario/movimientos/${compra}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ cantidad: '999' });
       const borrar = await request(servidor())
         .delete(`/inventario/movimientos/${compra}`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(editar.status).toBe(404);
       expect(borrar.status).toBe(404);
@@ -495,7 +496,7 @@ describe('inventario', () => {
 
       const transferencia = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           origen: bodegaCentral,
           destino: local,
@@ -520,7 +521,7 @@ describe('inventario', () => {
       const item = await itemConPrecio('2.00');
       const respuesta = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           origen: bodegaCentral,
           destino: bodegaCentral,
@@ -602,7 +603,7 @@ describe('inventario', () => {
 
       const produccion = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -640,7 +641,7 @@ describe('inventario', () => {
 
       const produccion = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -671,7 +672,7 @@ describe('inventario', () => {
 
       await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -693,7 +694,7 @@ describe('inventario', () => {
       const comprado = await itemConPrecio('0.50', 'kg');
       const respuesta = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: comprado,
@@ -715,7 +716,7 @@ describe('inventario', () => {
 
       const respuesta = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -770,22 +771,24 @@ describe('inventario', () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: bodegaCentral })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('NO puede leer el libro de movimientos', async () => {
       const respuesta = await request(servidor())
         .get('/inventario/movimientos')
         .query({ locationId: bodegaCentral })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('NO puede registrar producción: fija el costo estándar de una preparación', async () => {
       const respuesta = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookieBodega)
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega))
         .send({
           locationId: bodegaCentral,
           itemId: randomUUID(),
@@ -795,6 +798,7 @@ describe('inventario', () => {
           note: null,
         });
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -803,20 +807,20 @@ describe('inventario', () => {
     async function productoConReceta(lineas: readonly Cuerpo[]): Promise<string> {
       const producto = await request(servidor())
         .post('/productos')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ nombre: `Plato ${randomUUID().slice(0, 8)}`, tipo: 'SIMPLE', categoria: null });
       expect(producto.status).toBe(CREADO);
       const id = (producto.body as { id: string }).id;
 
       const activacion = await request(servidor())
         .put(`/productos/${id}/ubicaciones`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ locationId: local, activo: true, pvp: '3.00', rendimientoPorciones: '1' });
       expect(activacion.status).toBe(SIN_CONTENIDO);
 
       const receta = await request(servidor())
         .put('/recetas')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           destino: { clase: 'producto', productId: id },
           locationId: local,
@@ -831,7 +835,7 @@ describe('inventario', () => {
     async function recetaDeItem(itemId: string, lineas: readonly Cuerpo[]): Promise<void> {
       const receta = await request(servidor())
         .put('/recetas')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           destino: { clase: 'item', itemId },
           locationId: local,
@@ -845,7 +849,7 @@ describe('inventario', () => {
     async function vender(productId: string, unidades: string): Promise<void> {
       const respuesta = await request(servidor())
         .post('/inventario/consumos')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: local,
           ventas: [{ productId, unidades }],
@@ -905,7 +909,7 @@ describe('inventario', () => {
 
       const cambio = await request(servidor())
         .put(`/catalogo/items/${salsa}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           nombre: `Salsa ${randomUUID().slice(0, 8)}`,
           rendimiento: '1',
@@ -996,15 +1000,16 @@ describe('inventario', () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: bodegaCentral })
-        .set('Cookie', cookieGerente);
+        .set('Cookie', cookieGerente).set('X-CSRF-Token', csrfDe(cookieGerente));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('sí lee el de la suya', async () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: local })
-        .set('Cookie', cookieGerente);
+        .set('Cookie', cookieGerente).set('X-CSRF-Token', csrfDe(cookieGerente));
       expect(respuesta.status).toBe(OK);
     });
 
@@ -1014,7 +1019,7 @@ describe('inventario', () => {
 
       const respuesta = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', cookieGerente)
+        .set('Cookie', cookieGerente).set('X-CSRF-Token', csrfDe(cookieGerente))
         .send({
           origen: local,
           destino: bodegaCentral,
@@ -1024,6 +1029,7 @@ describe('inventario', () => {
           note: null,
         });
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 });

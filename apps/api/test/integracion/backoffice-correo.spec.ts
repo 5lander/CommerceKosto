@@ -34,6 +34,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const ACEPTADO = 202;
@@ -80,7 +81,7 @@ describe('el back office y el correo transaccional', () => {
   async function entrar(email: string): Promise<string> {
     const respuesta = await request(servidor()).post('/auth/login').send({ email, contrasena: CONTRASENA });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /** Los tokens en claro que hay en vuelo para un destinatario, leidos con la duena. */
@@ -146,12 +147,12 @@ describe('el back office y el correo transaccional', () => {
     const cookie = await entrar(admin);
     const nuevo = `rastro.${randomUUID().slice(0, 8)}@snacklab.ec`;
 
-    expect((await request(servidor()).post('/usuarios').set('Cookie', cookie).send({ email: nuevo })).status).toBe(
+    expect((await request(servidor()).post('/usuarios').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send({ email: nuevo })).status).toBe(
       ACEPTADO,
     );
     const invitado = await unaFila(`SELECT id FROM app_user WHERE email = $1`, [nuevo]);
     expect(
-      (await request(servidor()).post(`/usuarios/${invitado}/reenvio-de-invitacion`).set('Cookie', cookie)).status,
+      (await request(servidor()).post(`/usuarios/${invitado}/reenvio-de-invitacion`).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).status,
     ).toBe(ACEPTADO);
     expect((await request(servidor()).post('/auth/password/olvido').send({ email: ana })).status).toBe(ACEPTADO);
 
