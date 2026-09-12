@@ -1278,6 +1278,11 @@ model Period {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// P16-C (D-16.121, ADR-023): la versión de la CARGA DEL MES. La suben solo
+  /// las dos cargas por reemplazo —ventas y costos fijos—, nunca un movimiento,
+  /// el cierre ni la reapertura.
+  version Int @default(1)
+
   company      Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   location     Location     @relation(fields: [locationId, companyId], references: [id, companyId], onDelete: Restrict)
   estado       PeriodStatus @relation(fields: [status], references: [code])

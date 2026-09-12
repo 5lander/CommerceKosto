@@ -34,10 +34,25 @@ fallos** que llevaban días puestos con la auditoría en verde (INC-018, INC-019
 INC-020). Ninguno lo habría encontrado leer el código.
 
 ```sh
-# La pila de produccion, en local, con un dominio de mentira
-DOMINIO=localhost CORREO_TLS=tu@correo.ec \
+# La pila de produccion, en local, con un dominio de mentira.
+# PROXY_DE_CONFIANZA es la IP fija de Caddy en el compose (INC-022), y
+# MAIL_ADAPTER=consola escribe los correos en el log en vez de enviarlos.
+DOMINIO=localhost CORREO_TLS=tu@correo.ec APP_URL=https://localhost \
+PROXY_DE_CONFIANZA=172.28.0.10 MAIL_ADAPTER=consola \
   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+
+> **Si falta una, `docker compose` se para con «falta …» antes de construir nada.** Pasó en P16-C:
+> P16-A1 añadió `APP_URL`, `PROXY_DE_CONFIANZA` y `MAIL_ADAPTER` y este comando se quedó sin ellas
+> (INC-017, recurrencia 2). Desde entonces la regla `ensayo-local-con-las-variables-obligatorias` de
+> `audit:forbidden` compara este paso con las `${VAR:?…}` de `docker-compose.prod.yml`.
+
+> **Y con la pila de desarrollo levantada, primero `docker compose down`.** El override de producción
+> fija la subred (Caddy tiene IP fija), así que `compose` tiene que recrear la red: para `api` y `db`,
+> intenta borrarla y falla con «network costeo-saas_default has active endpoints» porque `caddy`, `web`
+> y `pgbouncer` siguen conectados. La base de desarrollo queda **parada** y el comando termina en error
+> sin haber levantado nada (P16-C). Se recupera con `docker compose up -d db`; los datos están en el
+> volumen.
 
 Y después, los pasos 5, 6 y 7 de abajo con **datos sintéticos**. Nunca con datos
 del cliente: `CLAUDE.md` §7 lo prohíbe y aquí no hace falta.

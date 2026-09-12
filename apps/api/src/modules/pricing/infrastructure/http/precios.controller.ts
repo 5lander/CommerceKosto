@@ -20,6 +20,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from 
 import { itemId, purchaseArticleId, referencePriceId } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import type { PaginaDePendientes } from '../../application/casos-de-uso/pendientes';
@@ -125,7 +126,7 @@ export class PreciosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   public async decidir(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
     @Body(new EsquemaPipe(CUERPO_DE_DECISION)) cuerpo: CuerpoDeDecision,
   ): Promise<void> {
     await this.resolucion.resolver.ejecutar(sesion, referencePriceId(id), cuerpo.decision);
@@ -142,7 +143,7 @@ export class PreciosController {
   @Requiere('pricing.read')
   public costo(
     @SesionActual() sesion: SesionActiva,
-    @Param('itemId') item: string,
+    @Param('itemId', IdentificadorDeRuta) item: string,
     @Query(new EsquemaPipe(CONSULTA_DE_FECHA)) consulta: ConsultaDeFecha,
   ): Promise<CostoVigente> {
     return this.resolucion.costo.ejecutar(

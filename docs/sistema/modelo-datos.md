@@ -1,7 +1,7 @@
 # Modelo de datos
 
 > Se completa en cada paquete que cree tablas, **en el mismo commit**, con el diagrama de entidades actualizado.
-> Estado: **P16-B**. El documento cubre de P0 a P16-B; la cabecera decía «P2» desde entonces y era falsa — corregido al cerrar P16-A2 (AUDITORIA.md H13).
+> Estado: **P16-C**. El documento cubre de P0 a P16-C; la cabecera decía «P2» desde entonces y era falsa — corregido al cerrar P16-A2 (AUDITORIA.md H13).
 
 ## Reglas transversales
 
@@ -947,6 +947,31 @@ producto, `recipe_propagation(company_id, product_id, propagated_at DESC)`. Los 
 
 ---
 
+## Lo que cambia P16-C — la versión de la carga del mes
+
+**Ninguna tabla nueva.** Una columna y una semilla. Migración `20260912205903_p16c_version_del_periodo`.
+
+```mermaid
+erDiagram
+    period {
+        integer version "P16-C. NOT NULL DEFAULT 1, CHECK >= 1. La de la CARGA DEL MES: ventas y costos fijos"
+    }
+```
+
+| Decisión | Por qué |
+|---|---|
+| **La suben solo las dos cargas por reemplazo** (D-16.121) | La versión dice cuántas veces se guardó la carga del mes. Un movimiento crea el período pero no deja obsoleta ninguna rejilla, y el cierre y la reapertura tampoco: un mes cerrado ya rechaza la carga por su cuenta (`PeriodoCerradoError`) |
+| **Ventas y costos fijos comparten el testigo** | Son las dos mitades de lo que se teclea cada mes. El precio es un 409 espurio si dos personas cargan las dos cosas del mismo mes a la vez, la misma deuda que D-16.20 con la misma señal |
+| **La escribe el repositorio de ANALÍTICA, no el de períodos** | La versión tiene que subir en la misma transacción que borra y reescribe las ventas, o entre las dos sentencias cabe otra carga. Es la única columna de `period` que toca `analytics`, y su puerto lo dice |
+| **Un mes sin fila se lee con `1`** (D-16.122) | Es la que tendrá la fila al crearse, así que el cuerpo no necesita un `null` con significado propio |
+| **`location.updated` en `audit_event_type`**, sin borrarla en el `down` | `PUT /ubicaciones/:id` (D-16.127). M10 / INC-011: un `audit_log` que la referencie haría el `down` irreversible sobre una base con datos |
+
+**Ningún índice nuevo.** La escritura condicionada va por el único `period(id, company_id)`; la lista de
+usuarios lee `app_user(company_id, status)`, sus roles por `user_role(company_id, user_id)` y el último
+correo de invitación por `email_outbox(user_id, created_at DESC)`, que P16-A1 creó para esta lectura.
+
+---
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -963,6 +988,7 @@ producto, `recipe_propagation(company_id, product_id, propagated_at DESC)`. Los 
 | P10 | `import_job`, `import_job_status` | ✅ |
 | **P16-A1** | `email_outbox`, `password_reset_token`, `rate_limit_hit` (ADR-025, ADR-026) + las dos funciones definer que escriben. Y sin tabla nueva en la otra mitad: `purchase_article.iva_tarifa`, `item_group.iva_tarifa` y los cuatro campos del desglose en `inventory_movement`, con sus cuatro `CHECK` (ADR-024) | ✅ |
 | **P16-A2** | **Ninguna tabla nueva.** `session.csrf_token` y `backoffice_session.csrf_token` (nullable, con `CHECK` de longitud) y `session_lookup` rehecha para devolver la columna (ADR-021) | ✅ |
+| **P16-C** | **Ninguna tabla nueva.** `period.version` con su `CHECK` (D-16.121) y la semilla `location.updated` | ✅ |
 | **P16-B** | **Ninguna tabla nueva.** `product.version` e `item.version` con su `CHECK` (ADR-023); **se retira** `company_settings.iva_compra` con su `CHECK` y su semilla (D-16.109); `reference_price(company_id, status)` pasa a `(company_id, status, id)` | ✅ |
 
 **`import_row` no existe, y es una decisión.** El plan la listaba; el análisis vive en un `jsonb`

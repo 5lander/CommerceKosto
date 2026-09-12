@@ -865,3 +865,8 @@ Lo que el diagrama no enseña y decide el diseño:
   un 409 en vez de pisarlas.
 - **El 409 no trae el número.** Con él dentro, lo fácil sería reenviar con él —pisar al otro con un paso
   más—. Lo que el cliente necesita es releer el estado entero.
+- **La carga del mes también (desde P16-C).** Las unidades vendidas y los costos fijos se guardan por
+  reemplazo, y comparten el testigo `period.version` (D-16.121): la condición va en el `WHERE` del
+  `UPDATE period` y en la misma transacción que borra y reescribe las filas. La suben solo esas dos
+  cargas —ni un movimiento, ni el cierre, ni la reapertura—, y un mes sin fila se lee con `1`, la versión
+  que tendrá al crearse.

@@ -4,6 +4,55 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-C — La carga del mes con testigo, la rejilla que borraba lo que no se tocaba, y lo que la pantalla de usuarios necesitaba · 2026-09-12
+
+> Cuarto y último paquete de API de la pasada P16 → P20. Un commit, **una migración reversible**
+> (`20260912205903_p16c_version_del_periodo`), ningún ADR nuevo —`period.version` es la decisión 5 de
+> ADR-023—, una recurrencia (INC-017 a 2) con su regla automatizada, y **ocho guardianes**.
+
+**La carga del mes, con testigo (D-16.121…D-16.123).** `period.version`, y las dos cargas por reemplazo
+—unidades vendidas y costos fijos— la exigen: la condición va en el `WHERE` del `UPDATE period`, en la
+misma transacción que borra y reescribe las filas, y responden **200 `{ version }`**; si otra carga del
+mismo mes llegó antes, **409 `CONFLICTO_DE_VERSION`** y no se borra nada. Las dos comparten la versión, y
+solo ellas la suben: un movimiento abre el mes sin dejar obsoleta ninguna rejilla, y un mes sin fila se
+lee con `1`. Las lecturas pasan a `{ version, ventas }` y `{ version, costos }`. **Y la pantalla `/ventas`
+tenía un fallo de pérdida de datos**: mandaba solo las filas cambiadas a un endpoint que reemplaza el mes
+entero, así que guardar tres casillas borraba las demás ventas del mes. Ahora manda la versión y todas
+las filas con valor, incluidas las de productos que ya no están activos.
+
+**Lo que las pantallas 17, 19, 28 y 32 necesitaban.** `GET /inventario/movimientos/:id` —la fila del
+libro que la corrección enseña, con alcance por su ubicación— y `?tipo=` en el libro. El consolidado
+toma `estadoDelPeriodo` del **estado real del período**: hasta ahora lo deducía de si había conteo, y un
+mes reabierto que conservaba su conteo salía `CERRADO`. **`GET /usuarios`** con roles, estado, caducidad
+de la invitación y el **último** correo de invitación (`{ estado, error? }`), por alcance —un gerente solo
+ve a quien tiene rol en su local— y sin `datos`, que el rol de la aplicación ni siquiera puede leer.
+**`GET /roles`** con qué roles piden ubicación. **`PUT /ubicaciones/:id`** para nombre y tipo, con el
+nombre repetido traducido a 409 en vez del 500 del índice.
+
+**Un solo contrato para un id mal formado.** La deuda de P16-A2 decía «`ParseUUIDPipe` en los `@Param`»,
+y aplicarlo tal cual habría cambiado el contrato: ese pipe responde `BAD_REQUEST`, y la API documenta
+`ENTRADA_INVALIDA`. `IdentificadorDeRuta` lanza el error del dominio y cubre los **24** parámetros de la
+aplicación, incluido el que ya usaba el de Nest.
+
+**Lo que se destapó por el camino.** El comando del ensayo local del runbook —el paso que existe porque
+encontró INC-018, 019 y 020— **no arrancaba desde P16-A1**: le faltaban `APP_URL`, `PROXY_DE_CONFIANZA` y
+`MAIL_ADAPTER`. INC-017, recurrencia 2, y la regla `ensayo-local-con-las-variables-obligatorias` compara
+desde ahora el paso 0 con las variables obligatorias del compose. Con las variables puestas, el override
+de producción recreó la red y dejó **parada la base de desarrollo**: se recuperó y el runbook lo advierte.
+Por eso **la prueba de `DELETE /usuarios/roles` a través de Caddy no se ejecutó** —exigía parar la pila
+local en uso— y queda dicha para el ensayo previo al piloto. El mensaje del 409 decía «este receta»: ahora
+cada agregado lleva su artículo.
+
+**Números.** Unitarias: **891** (eran 889). Integración: **541 casos, 536 en verde y 5 saltadas con
+motivo** en 33 archivos (eran 515 + 5). `audit:forbidden` **47 reglas sobre 483 archivos**;
+`audit:arch` **390 módulos, 1751 dependencias**; **18** migraciones reversibles; **0 clones**;
+`migrate:verify` 4/4 y el `down` probado sobre la base sembrada. Bundle: **126,9 KiB** de piso y 138,7 la
+pantalla mayor. `npm run bench`, compilando antes: carta **100,3 ms** / 400, inventario **160,3** / 300, receta **81,5** / 150 y **el consolidado en 913,1 contra 800**, sin regresión (919,4 en P16-B). **Lo que queda dicho:** la hoja de conteo sigue siendo un reemplazo total
+sin versión (duda para el usuario); ventas y costos fijos pueden darse un 409 espurio; `PUT /ubicaciones`
+no archiva; y la prueba a través de Caddy está pendiente.
+
+---
+
 ## P16-B — Dos personas ya no se pisan, los ceros dejan de ser 500, y el bench mide lo que dice medir · 2026-09-12
 
 > Tercer paquete de código de la pasada P16 → P20. Un commit, **una migración reversible**

@@ -23,6 +23,7 @@ import { locationId, productId } from '../../../../shared/domain/identity/identi
 import { Money } from '../../../../shared/domain/money/tipos-monetarios';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { CostearCarta, CostearUnProducto } from '../../application/casos-de-uso/costear';
@@ -71,7 +72,7 @@ export class CosteoController {
   @Requiere('costing.read')
   public async deUnProducto(
     @SesionActual() sesion: SesionActiva,
-    @Param('productId') id: string,
+    @Param('productId', IdentificadorDeRuta) id: string,
     @Query(new EsquemaPipe(CONSULTA_DE_COSTEO_DE_PRODUCTO)) consulta: ConsultaDeCosteoDeProducto,
   ): Promise<ProductoSimuladoDto> {
     const pvpSimulado = consulta.pvp === undefined ? null : Money.fromDecimalString(consulta.pvp);

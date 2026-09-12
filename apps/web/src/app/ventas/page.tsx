@@ -20,6 +20,10 @@
  * **NO HAY GUARDADO AUTOMÁTICO.** Se guarda al pulsar, y el botón dice cuántas
  * filas cambiaron. Un guardado silencioso en una pantalla de captura hace
  * imposible saber si lo último que se escribió llegó.
+ *
+ * **SE GUARDA SOBRE LA VERSIÓN QUE SE LEYÓ** (P16-C, D-16.121). Si otra persona
+ * guardó la carga de este mes mientras tanto, la API responde 409 y el mensaje
+ * pide recargar: guardar encima borraría lo suyo sin que nadie se enterara.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -41,6 +45,12 @@ const SOLO_DIGITOS = /^\d*$/u;
 interface Venta {
   readonly productId: string;
   readonly unidades: string;
+}
+
+/** `version` es la de la carga del mes: la que el guardado manda de vuelta (D-16.123). */
+interface VentasDelMes {
+  readonly version: number;
+  readonly ventas: readonly Venta[];
 }
 
 interface Carta {
@@ -76,9 +86,9 @@ function mesAnterior({ anio, mes }: Mes): Mes {
  * **seis vistas** de analítica y llega con `code: 'PERIODO_SIN_DATOS'`
  * (D-16.2); quien lo necesite lo distingue por ahí, no por el estado.
  */
-async function ventasDe(sucursal: string, periodo: Mes): Promise<readonly Venta[]> {
+async function ventasDe(sucursal: string, periodo: Mes): Promise<VentasDelMes> {
   const consulta = `locationId=${sucursal}&anio=${String(periodo.anio)}&mes=${String(periodo.mes)}`;
-  return llamar<readonly Venta[]>({ ruta: `/analitica/ventas?${consulta}` });
+  return llamar<VentasDelMes>({ ruta: `/analitica/ventas?${consulta}` });
 }
 
 export default function Ventas(): ReactNode {
@@ -94,6 +104,7 @@ export default function Ventas(): ReactNode {
   const [anteriores, setAnteriores] = useState<ReadonlyMap<string, string>>(new Map());
   const [valores, setValores] = useState<ReadonlyMap<string, string>>(new Map());
   const [guardados, setGuardados] = useState<ReadonlyMap<string, string>>(new Map());
+  const [version, setVersion] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [confirmado, setConfirmado] = useState(false);
@@ -112,10 +123,11 @@ export default function Ventas(): ReactNode {
         ventasDe(sucursal, mesAnterior(periodo)),
       ]);
 
-      const actuales = new Map(mes.map((v) => [v.productId, v.unidades]));
-      setAnteriores(new Map(previo.map((v) => [v.productId, v.unidades])));
+      const actuales = new Map(mes.ventas.map((v) => [v.productId, v.unidades]));
+      setAnteriores(new Map(previo.ventas.map((v) => [v.productId, v.unidades])));
       setValores(actuales);
       setGuardados(actuales);
+      setVersion(mes.version);
       setCarta(cartaLeida);
     } catch (fallo) {
       setError(fallo instanceof Error ? fallo.message : TEXTOS.comun.cargando);
@@ -153,24 +165,26 @@ export default function Ventas(): ReactNode {
   }
 
   async function guardar(): Promise<void> {
-    if (sucursal === null || cambiadas.length === 0) return;
+    if (sucursal === null || version === null || cambiadas.length === 0) return;
     setGuardando(true);
     setError(null);
 
-    // SOLO LO QUE CAMBIO. La carga es por reemplazo del lote, así que mandar la
-    // rejilla entera reescribiría filas que nadie tocó — y con ellas su
-    // `updated_at`, que es lo que después responde «¿quién cambió esto?».
-    const ventas = cambiadas.map((p) => ({
-      productId: p.productId,
-      unidades: valores.get(p.productId) ?? '0',
-    }));
+    // TODAS LAS FILAS CON VALOR, no solo las que cambiaron (P16-C, D-16.1). La
+    // carga REEMPLAZA el mes entero: hasta P16-C esta pantalla mandaba solo lo
+    // cambiado, y guardar tres casillas borraba las ventas de todas las demás.
+    // `valores` trae también las de productos que ya no están activos, así que
+    // sus ventas del mes se conservan aunque no se vean en la rejilla.
+    const ventas = [...valores]
+      .filter(([, unidades]) => unidades !== '')
+      .map(([productId, unidades]) => ({ productId, unidades }));
 
     try {
-      await llamar({
+      const guardada = await llamar<{ readonly version: number }>({
         ruta: '/analitica/ventas',
         metodo: 'POST',
-        cuerpo: { locationId: sucursal, anio: periodo.anio, mes: periodo.mes, ventas },
+        cuerpo: { locationId: sucursal, anio: periodo.anio, mes: periodo.mes, version, ventas },
       });
+      setVersion(guardada.version);
       setGuardados(new Map(valores));
       setConfirmado(true);
     } catch (fallo) {

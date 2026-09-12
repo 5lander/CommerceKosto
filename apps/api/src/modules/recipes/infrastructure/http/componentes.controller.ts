@@ -11,6 +11,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Put } from '@nestjs
 import { productId } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import {
@@ -30,7 +31,7 @@ export class ComponentesController {
 
   @Get(':id/componentes')
   @Requiere('product.read')
-  public lista(@SesionActual() sesion: SesionActiva, @Param('id') id: string): Promise<ComponentesDelCombo> {
+  public lista(@SesionActual() sesion: SesionActiva, @Param('id', IdentificadorDeRuta) id: string): Promise<ComponentesDelCombo> {
     return this.leer.ejecutar(sesion, productId(id));
   }
 
@@ -40,7 +41,7 @@ export class ComponentesController {
   @HttpCode(HttpStatus.OK)
   public async guardar(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
     @Body(new EsquemaPipe(CUERPO_DE_COMPONENTES)) cuerpo: CuerpoDeComponentes,
   ): Promise<VersionDeProducto> {
     const version = await this.reemplazar.ejecutar(sesion, {

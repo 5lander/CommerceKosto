@@ -33,7 +33,12 @@ import {
   SolicitarRestablecimiento,
 } from './application/casos-de-uso/restablecer-contrasena';
 import { ValidarSesion } from './application/casos-de-uso/validar-sesion';
-import { CrearUbicacion, ListarUbicaciones } from './application/casos-de-uso/ubicaciones';
+import { ListarRoles, ListarUsuarios } from './application/casos-de-uso/lecturas-de-organizacion';
+import {
+  ActualizarUbicacion,
+  CrearUbicacion,
+  ListarUbicaciones,
+} from './application/casos-de-uso/ubicaciones';
 import {
   AceptarInvitacion,
   AsignarRol,
@@ -57,6 +62,7 @@ import { InvitacionesDeUsuario } from './infrastructure/http/invitaciones-de-usu
 import { PermisosGuard } from './infrastructure/http/permisos.guard';
 import { Restablecimiento } from './infrastructure/http/restablecimiento';
 import { SesionGuard } from './infrastructure/http/sesion.guard';
+import { LecturasDeOrganizacionController } from './infrastructure/http/lecturas-de-organizacion.controller';
 import { UbicacionesController } from './infrastructure/http/ubicaciones.controller';
 import { RolesDeUsuario } from './infrastructure/http/roles-de-usuario';
 import { UsuariosController } from './infrastructure/http/usuarios.controller';
@@ -64,7 +70,13 @@ import { PrismaAutenticacionRepositorio } from './infrastructure/prisma-autentic
 import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizacion.repositorio';
 
 @Module({
-  controllers: [AuthController, ContrasenaController, UbicacionesController, UsuariosController],
+  controllers: [
+    AuthController,
+    ContrasenaController,
+    UbicacionesController,
+    UsuariosController,
+    LecturasDeOrganizacionController,
+  ],
   providers: [
     { provide: HASHER_DE_CONTRASENAS, useClass: Argon2Hasher },
     { provide: GENERADOR_DE_TOKENS, useClass: GeneradorDeTokensCriptografico },
@@ -111,6 +123,21 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
       provide: ListarUbicaciones,
       inject: [DependenciasDeIam],
       useFactory: (deps: DependenciasDeIam): ListarUbicaciones => new ListarUbicaciones(deps),
+    },
+    {
+      provide: ActualizarUbicacion,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): ActualizarUbicacion => new ActualizarUbicacion(deps),
+    },
+    {
+      provide: ListarUsuarios,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): ListarUsuarios => new ListarUsuarios(deps),
+    },
+    {
+      provide: ListarRoles,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): ListarRoles => new ListarRoles(deps),
     },
     {
       provide: InvitacionesDeUsuario,

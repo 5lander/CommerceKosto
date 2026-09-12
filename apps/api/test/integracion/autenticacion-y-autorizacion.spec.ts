@@ -593,6 +593,178 @@ describe('autenticacion y autorizacion', () => {
    * ruta publica— porque el fallo tipico de un CSRF mal hecho no es que
    * rechace: es que ACEPTE cualquier cosa que venga.
    */
+  describe('las lecturas de la pantalla de usuarios y editar una ubicacion (P16-C)', () => {
+    /** Las claves exactas de `GET /usuarios`: un campo nuevo tiene que decidirse, no colarse (D-16.98). */
+    const CLAVES_DE_USUARIO = ['correoInvitacion', 'email', 'estado', 'id', 'invitacionCaducaEn', 'roles'];
+
+    async function usuarios(cookie: string) {
+      return request(servidor()).get('/usuarios').set('Cookie', cookie);
+    }
+
+    it('ADMIN lista a los usuarios de SU company, con sus roles, y ninguno de la otra (R1)', async () => {
+      const respuesta = await usuarios(await entrar(correoDe('uno-admin')));
+
+      expect(respuesta.status).toBe(OK);
+      const lista = respuesta.body as { id: string; email: string; roles: { rol: string; locationId: string | null }[] }[];
+      const ids = lista.map((u) => u.id);
+      expect(ids).toEqual(expect.arrayContaining([uno.owner, uno.admin, uno.gerente]));
+      expect(ids).not.toContain(otra.admin);
+      expect(Object.keys(lista[0] ?? {}).sort()).toEqual(CLAVES_DE_USUARIO);
+      // `toContainEqual` y no `toEqual`: otras pruebas de la suite le asignan roles de más.
+      expect(lista.find((u) => u.id === uno.gerente)?.roles).toContainEqual({ rol: 'GERENTE_LOCAL', locationId: uno.locationA });
+    });
+
+    /**
+     * Con un gerente PROPIO, de la bodega: el sembrado de la suite acumula roles
+     * de otras pruebas (un `LECTURA` de company, entre ellos) y su alcance deja de
+     * ser de ubicaciones.
+     */
+    it('🔴 un GERENTE_LOCAL solo ve a quien tiene un rol en SU ubicacion, y solo esas asignaciones', async () => {
+      const gerenteDeBodega = await unaFila(
+        `INSERT INTO app_user (company_id, email, password_hash, status)
+         SELECT company_id, $1, password_hash, 'ACTIVE' FROM app_user WHERE id = $2 RETURNING id`,
+        [correoDe('uno-gerente-bodega'), uno.admin],
+      );
+      await duena.query(
+        `INSERT INTO user_role (company_id, user_id, role_code, location_id, has_location)
+         VALUES ($1, $2, 'GERENTE_LOCAL', $3, true)`,
+        [uno.companyId, gerenteDeBodega, uno.locationB],
+      );
+
+      const respuesta = await usuarios(await entrar(correoDe('uno-gerente-bodega')));
+
+      expect(respuesta.status).toBe(OK);
+      const lista = respuesta.body as { id: string; roles: { locationId: string | null }[] }[];
+      const ids = lista.map((u) => u.id);
+      expect(ids).toContain(gerenteDeBodega);
+      expect(ids).not.toContain(uno.owner);
+      expect(ids).not.toContain(uno.admin);
+      expect(ids).not.toContain(uno.gerente);
+      expect(new Set(lista.flatMap((u) => u.roles.map((r) => r.locationId)))).toEqual(new Set([uno.locationB]));
+    });
+
+    it('🔴 BODEGA no lista usuarios (no tiene user.read)', async () => {
+      const bodega = await unaFila(
+        `INSERT INTO app_user (company_id, email, password_hash, status)
+         SELECT company_id, $1, password_hash, 'ACTIVE' FROM app_user WHERE id = $2 RETURNING id`,
+        [correoDe('uno-bodega'), uno.admin],
+      );
+      await duena.query(
+        `INSERT INTO user_role (company_id, user_id, role_code, location_id, has_location)
+         VALUES ($1, $2, 'BODEGA', $3, true)`,
+        [uno.companyId, bodega, uno.locationB],
+      );
+
+      const respuesta = await usuarios(await entrar(correoDe('uno-bodega')));
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+    });
+
+    it('🔴 un invitado trae su caducidad y el estado de su ultimo correo, con el error, y NUNCA sus datos ni su token', async () => {
+      const invitado = await unaFila(
+        `INSERT INTO app_user (company_id, email, status, invitation_token_hash, invitation_expires_at)
+         VALUES ($1, $2, 'INVITED', $3, now() + interval '7 days') RETURNING id`,
+        [uno.companyId, correoDe('uno-invitado'), `hash-${randomUUID()}`],
+      );
+      // Dos correos: el primero se entregó y el segundo —el reenvío— falló. Manda el último.
+      await duena.query(
+        `INSERT INTO email_outbox (company_id, user_id, destinatario, plantilla, datos, estado, sent_at, created_at)
+         VALUES ($1, $2, $3, 'INVITACION', '{"enlace":"https://app/activacion?token=secreto-viejo"}', 'ENVIADO', now(), now() - interval '1 hour')`,
+        [uno.companyId, invitado, correoDe('uno-invitado')],
+      );
+      await duena.query(
+        `INSERT INTO email_outbox (company_id, user_id, destinatario, plantilla, datos, estado, intentos, error)
+         VALUES ($1, $2, $3, 'INVITACION', '{"enlace":"https://app/activacion?token=secreto-en-vuelo"}', 'FALLIDO', 5, 'Resend respondio 422 al enviar el correo.')`,
+        [uno.companyId, invitado, correoDe('uno-invitado')],
+      );
+
+      const respuesta = await usuarios(await entrar(correoDe('uno-admin')));
+      const suyo = (respuesta.body as { id: string; estado: string; invitacionCaducaEn: string | null; correoInvitacion: unknown }[])
+        .find((u) => u.id === invitado);
+
+      expect(suyo?.estado).toBe('INVITED');
+      expect(suyo?.invitacionCaducaEn).not.toBeNull();
+      expect(suyo?.correoInvitacion).toEqual({ estado: 'FALLIDO', error: 'Resend respondio 422 al enviar el correo.' });
+      const crudo = JSON.stringify(respuesta.body);
+      expect(crudo).not.toContain('token=');
+      expect(crudo).not.toContain('secreto');
+      expect(crudo).not.toContain('datos');
+    });
+
+    it('un usuario activo no trae correo de invitacion ni caducidad', async () => {
+      const respuesta = await usuarios(await entrar(correoDe('uno-admin')));
+      const admin = (respuesta.body as { id: string; invitacionCaducaEn: unknown; correoInvitacion: unknown }[]).find((u) => u.id === uno.admin);
+
+      expect(admin?.invitacionCaducaEn).toBeNull();
+      expect(admin?.correoInvitacion).toBeNull();
+    });
+
+    it('GET /roles trae el catalogo: cuales piden ubicacion y con que permisos', async () => {
+      const respuesta = await request(servidor()).get('/roles').set('Cookie', await entrar(correoDe('uno-admin')));
+
+      expect(respuesta.status).toBe(OK);
+      const roles = respuesta.body as { codigo: string; requiereUbicacion: boolean; permisos: string[] }[];
+      expect(roles.map((r) => r.codigo)).toEqual(['ADMIN', 'BODEGA', 'GERENTE_LOCAL', 'LECTURA', 'OWNER']);
+      expect(roles.find((r) => r.codigo === 'GERENTE_LOCAL')?.requiereUbicacion).toBe(true);
+      const bodega = roles.find((r) => r.codigo === 'BODEGA')?.permisos ?? [];
+      expect(bodega).toContain('inventory.write');
+      expect(bodega).not.toContain('inventory.read');
+    });
+
+    it('ADMIN renombra una ubicacion: 200 con la ubicacion como queda', async () => {
+      const cookie = await entrar(correoDe('uno-admin'));
+      const nombre = `uno bodega norte ${randomUUID().slice(0, 6)}`;
+
+      const respuesta = await request(servidor())
+        .put(`/ubicaciones/${uno.locationB}`)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ nombre, tipo: 'AMBOS' });
+
+      expect(respuesta.status).toBe(OK);
+      expect(respuesta.body).toEqual({ id: uno.locationB, nombre, tipo: 'AMBOS', estado: 'ACTIVE' });
+    });
+
+    it('🔴 un nombre que ya usa otra ubicacion de la company es 409 con el nombre, no un 500 del indice unico', async () => {
+      const cookie = await entrar(correoDe('uno-admin'));
+
+      const respuesta = await request(servidor())
+        .put(`/ubicaciones/${uno.locationB}`)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ nombre: 'uno centro', tipo: 'BODEGA' });
+
+      expect(respuesta.status).toBe(CONFLICTO);
+      expect(respuesta.body).toMatchObject({ code: 'CONFLICTO' });
+      expect((respuesta.body as { message: string }).message).toContain('uno centro');
+    });
+
+    /**
+     * 403 Y NO 404 para la de otra company: es lo que responde TODA ruta por
+     * ubicación desde P15 (`exigirUbicacionEnAlcance` mira primero las ubicaciones
+     * de la company de la sesión). Un 404 solo aquí sería un segundo contrato.
+     */
+    it('🔴 la ubicacion de OTRA company es 403 y no la toca; un GERENTE_LOCAL no edita ni la suya', async () => {
+      const admin = await entrar(correoDe('uno-admin'));
+      const gerente = await entrar(correoDe('uno-gerente'));
+
+      const ajena = await request(servidor())
+        .put(`/ubicaciones/${otra.locationA}`)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
+        .send({ nombre: 'secuestrada', tipo: 'LOCAL' });
+      const suya = await request(servidor())
+        .put(`/ubicaciones/${uno.locationA}`)
+        .set('Cookie', gerente).set('X-CSRF-Token', csrfDe(gerente))
+        .send({ nombre: 'mi local', tipo: 'LOCAL' });
+
+      expect(ajena.status).toBe(PROHIBIDO);
+      expect(ajena.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+      const { rows } = await duena.query<{ name: string }>('SELECT name FROM location WHERE id = $1', [otra.locationA]);
+      expect(rows[0]?.name).not.toBe('secuestrada');
+      expect(suya.status).toBe(PROHIBIDO);
+      expect(suya.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+    });
+  });
+
   describe('token anti-CSRF', () => {
     /** Una mutacion cualquiera, de las que el ADMIN puede hacer. */
     function crearUbicacion(cookie: string): request.Test {

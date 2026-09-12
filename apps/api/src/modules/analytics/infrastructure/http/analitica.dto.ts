@@ -65,6 +65,8 @@ export const CONSULTA_DEL_MES_DE_COMPANY = z.object({ ...MES_COACCIONADO }).stri
 export const CUERPO_DE_VENTAS = z
   .object({
     ...MES_DE_UBICACION,
+    /** La versión de la carga del mes que se leyó (D-16.121). Si otra carga llegó antes, 409. */
+    version: z.int().min(1),
     ventas: z
       .array(z.object({ productId: z.uuid(), unidades: enteroNoNegativo }).strict())
       .max(MAXIMO_DE_VENTAS),
@@ -74,6 +76,8 @@ export const CUERPO_DE_VENTAS = z
 export const CUERPO_DE_COSTOS = z
   .object({
     ...MES_DE_UBICACION,
+    /** La versión de la carga del mes que se leyó (D-16.121). Si otra carga llegó antes, 409. */
+    version: z.int().min(1),
     costos: z
       .array(
         z
@@ -193,6 +197,25 @@ export interface CostoDto {
   readonly concepto: string;
   readonly clasificacion: string;
   readonly importe: string;
+}
+
+/**
+ * Las dos lecturas de la carga del mes llevan la versión con la que se guardará
+ * (D-16.123). Un mes sin fila de período se lee con `1` (D-16.122).
+ */
+export interface VentasDelMesDto {
+  readonly version: number;
+  readonly ventas: readonly VentaDto[];
+}
+
+export interface CostosDelMesDto {
+  readonly version: number;
+  readonly costos: readonly CostoDto[];
+}
+
+/** Lo que responde una carga: la versión nueva, para seguir guardando sin releer. */
+export interface VersionDelMesDto {
+  readonly version: number;
 }
 
 export interface ProductoDelMenuDto {

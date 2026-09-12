@@ -243,6 +243,33 @@ function sangriaDe(linea) {
   return linea.length - linea.trimStart().length;
 }
 
+
+/** Los dos archivos que la regla del ensayo local compara (INC-017, recurrencia 2). */
+const COMPOSE_DE_PRODUCCION = 'docker-compose.prod.yml';
+const RUNBOOK_DE_PUESTA_EN_MARCHA = 'docs/runbooks/puesta-en-marcha.md';
+
+/**
+ * Las variables que el compose de produccion exige con `${VAR:?mensaje}`: las que
+ * hacen fallar `docker compose` ANTES de construir nada si faltan.
+ * @param {string} compose
+ * @returns {string[]}
+ */
+function variablesObligatorias(compose) {
+  return [...new Set([...compose.matchAll(/\$\{([A-Z][A-Z0-9_]*):\?/gu)].map((m) => String(m[1])))];
+}
+
+/**
+ * El texto del «Paso 0» del runbook, hasta el siguiente `## `. `null` si no esta.
+ * @param {string} runbook
+ * @returns {string | null}
+ */
+function pasoCeroDelRunbook(runbook) {
+  const inicio = runbook.indexOf('## Paso 0');
+  if (inicio === -1) return null;
+  const fin = runbook.indexOf('\n## ', inicio + 1);
+  return runbook.slice(inicio, fin === -1 ? undefined : fin);
+}
+
 export const repoRules = [
   {
     id: '403-de-integracion-sin-su-code',
@@ -638,6 +665,37 @@ export const repoRules = [
             extracto: `overrides pide ${nombre}@${version}, el lock instala ${copia.clave} en ${copia.version}`,
           })),
       );
+    },
+  },
+  {
+    id: 'ensayo-local-con-las-variables-obligatorias',
+    descripcion:
+      'Una variable obligatoria (`${VAR:?...}`) de docker-compose.prod.yml que el comando del ensayo local del runbook no pone',
+    porQue:
+      'El paso 0 de `puesta-en-marcha.md` es el ensayo que destapo INC-018, INC-019 e INC-020, y su comando es lo ' +
+      'primero que se copia. P16-A1 anadio APP_URL, PROXY_DE_CONFIANZA y MAIL_ADAPTER al compose y el comando ' +
+      'se quedo sin ellas: `docker compose` falla antes de construir nada con «falta APP_URL», y quien lo ejecuta ' +
+      'lo deja para otro dia. Un runbook que no arranca es INC-017 con otro formato.',
+    referencia: 'docs/incidencias/INC-017 (recurrencia 2) · docs/runbooks/puesta-en-marcha.md',
+    desde: 'P16-C',
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      // Con que cambie UNO de los dos, se comparan los dos: en el pre-commit solo llega el indice.
+      if (!archivos.includes(COMPOSE_DE_PRODUCCION) && !archivos.includes(RUNBOOK_DE_PUESTA_EN_MARCHA)) return [];
+      const paso = pasoCeroDelRunbook(leer(RUNBOOK_DE_PUESTA_EN_MARCHA));
+      if (paso === null) {
+        return [{ ruta: RUNBOOK_DE_PUESTA_EN_MARCHA, linea: 0, extracto: 'no tiene «## Paso 0», el ensayo local' }];
+      }
+      return variablesObligatorias(leer(COMPOSE_DE_PRODUCCION))
+        .filter((variable) => !paso.includes(`${variable}=`))
+        .map((variable) => ({
+          ruta: RUNBOOK_DE_PUESTA_EN_MARCHA,
+          linea: 0,
+          extracto: `el ensayo local no pone ${variable}, y ${COMPOSE_DE_PRODUCCION} la exige`,
+        }));
     },
   },
 ];

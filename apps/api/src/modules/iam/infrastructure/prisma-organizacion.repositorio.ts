@@ -31,14 +31,19 @@ import { escribirEnOutbox } from '../../../shared/infrastructure/persistence/out
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
+  AsignacionListada,
+  CorreoDeInvitacion,
   InvitacionPendiente,
   RepositorioDeOrganizacion,
   ResultadoDeCreacion,
   ResultadoDeInvitacion,
+  ResultadoDeActualizacionDeUbicacion,
   ResultadoDeReinvitacion,
+  RolDelCatalogo,
   TipoDeUbicacion,
   Ubicacion,
   UsuarioInvitado,
+  UsuarioListado,
 } from '../application/ports/repositorio-de-organizacion.port';
 
 const ESTADO_ACTIVO = 'ACTIVE';
@@ -49,6 +54,9 @@ const ROL_OWNER = 'OWNER';
 const CODIGO_DE_DUPLICADO = 'P2002';
 
 const MOTIVO_INVITACION = 'aceptar invitacion: ocurre sin sesion, asi que no hay tenant';
+
+/** La plantilla de `email_outbox` cuyo estado enseña `GET /usuarios` (D-16.27(b)). */
+const PLANTILLA_DE_INVITACION = 'INVITACION';
 
 const FILA_DE_LIMITE = z.array(z.object({ max_locations: z.number().int() }));
 
@@ -237,6 +245,83 @@ export class PrismaOrganizacionRepositorio implements RepositorioDeOrganizacion 
     });
   }
 
+  public async listarUsuarios(entrada: {
+    readonly companyId: CompanyId;
+    readonly ubicaciones: readonly LocationId[] | 'todas';
+  }): Promise<readonly UsuarioListado[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const deLasUbicaciones = entrada.ubicaciones === 'todas' ? {} : { locationId: { in: [...entrada.ubicaciones] } };
+      const filas = await tx.appUser.findMany({
+        where: {
+          companyId: entrada.companyId,
+          ...(entrada.ubicaciones === 'todas' ? {} : { roles: { some: deLasUbicaciones } }),
+        },
+        select: {
+          id: true,
+          email: true,
+          status: true,
+          invitationExpiresAt: true,
+          roles: { where: deLasUbicaciones, select: { roleCode: true, locationId: true }, orderBy: { roleCode: 'asc' } },
+        },
+        orderBy: { email: 'asc' },
+      });
+
+      const correos = await ultimosCorreosDeInvitacion(
+        tx,
+        entrada.companyId,
+        filas.filter((f) => f.status === ESTADO_INVITADO).map((f) => f.id),
+      );
+
+      return filas.map((f) => ({
+        id: aUserId(f.id),
+        email: f.email,
+        estado: f.status,
+        roles: f.roles.map((r): AsignacionListada => ({
+          rol: r.roleCode,
+          locationId: r.locationId === null ? null : aLocationId(r.locationId),
+        })),
+        invitacionCaducaEn: f.invitationExpiresAt,
+        correoInvitacion: correos.get(f.id) ?? null,
+      }));
+    });
+  }
+
+  public async listarRoles(companyId: CompanyId): Promise<readonly RolDelCatalogo[]> {
+    return this.transaccion.run(companyId, async (tx) => {
+      const filas = await tx.role.findMany({
+        select: { code: true, requiresLocation: true, permisos: { select: { permissionCode: true } } },
+        orderBy: { code: 'asc' },
+      });
+      return filas.map((f) => ({
+        codigo: f.code,
+        requiereUbicacion: f.requiresLocation,
+        permisos: f.permisos.map((p) => p.permissionCode).sort(),
+      }));
+    });
+  }
+
+  public async actualizarUbicacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly nombre: string;
+    readonly tipo: TipoDeUbicacion;
+  }): Promise<ResultadoDeActualizacionDeUbicacion> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      try {
+        // `updateMany` con el tenant en el WHERE: cero filas es «no existe en tu
+        // company», sin `RETURNING` y sin excepción (INC-010).
+        const { count } = await tx.location.updateMany({
+          where: { id: entrada.locationId, companyId: entrada.companyId },
+          data: { name: entrada.nombre, type: entrada.tipo },
+        });
+        return count === 0 ? 'no_encontrada' : 'actualizada';
+      } catch (error) {
+        if (esDuplicado(error)) return 'nombre_en_uso';
+        throw error;
+      }
+    });
+  }
+
   public async esOwner(entrada: {
     readonly companyId: CompanyId;
     readonly userId: UserId;
@@ -331,4 +416,31 @@ export class PrismaOrganizacionRepositorio implements RepositorioDeOrganizacion 
 
     return fila.max_locations;
   }
+}
+
+/**
+ * El último correo `INVITACION` de cada usuario, en UNA consulta para todos.
+ *
+ * `distinct` sobre `userId` con el orden descendente por fecha deja la fila más
+ * reciente de cada uno; el índice `(user_id, created_at DESC)` de P16-A1 es el
+ * de esta lectura. **El `select` nombra las columnas**, y no puede nombrar
+ * `datos`: `costeo_app` no tiene `SELECT` sobre ella (ADR-025).
+ */
+async function ultimosCorreosDeInvitacion(
+  tx: ClienteDeTransaccion,
+  companyId: CompanyId,
+  userIds: readonly string[],
+): Promise<ReadonlyMap<string, CorreoDeInvitacion>> {
+  if (userIds.length === 0) return new Map();
+
+  const filas = await tx.emailOutbox.findMany({
+    where: { companyId, userId: { in: [...userIds] }, plantilla: PLANTILLA_DE_INVITACION },
+    select: { userId: true, estado: true, error: true },
+    orderBy: [{ userId: 'asc' }, { createdAt: 'desc' }],
+    distinct: ['userId'],
+  });
+
+  return new Map(
+    filas.flatMap((f) => (f.userId === null ? [] : [[f.userId, { estado: f.estado, error: f.error }] as const])),
+  );
 }

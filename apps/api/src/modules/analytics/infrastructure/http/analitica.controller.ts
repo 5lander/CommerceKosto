@@ -59,7 +59,7 @@ import {
   type ConsolidadoDto,
   type ConsultaDelMes,
   type ConsultaDelMesDeCompany,
-  type CostoDto,
+  type CostosDelMesDto,
   type CuerpoDeCostos,
   type CuerpoDeVentas,
   type FilaDeReposicionDto,
@@ -68,7 +68,8 @@ import {
   type MenuDto,
   type PuntoDeEquilibrioDto,
   type ResumenDto,
-  type VentaDto,
+  type VentasDelMesDto,
+  type VersionDelMesDto,
 } from './analitica.dto';
 import {
   comoComparativaDeCompraDto,
@@ -134,23 +135,26 @@ export class CargaController {
    *
    * Es lo que hace posible la grilla de CLAUDE.md §10: «una grilla editable con
    * el período anterior precargado, no un formulario por producto». Reemplaza
-   * la carga entera del mes.
+   * la carga entera del mes, **sobre la versión que se leyó** (D-16.121): si otra
+   * carga del mismo mes llegó antes, 409 y no se borra nada.
    */
   @Post('ventas')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @Requiere('sales.write')
   public async registrarVentas(
     @SesionActual() sesion: SesionActiva,
     @Body(new EsquemaPipe(CUERPO_DE_VENTAS)) cuerpo: CuerpoDeVentas,
-  ): Promise<void> {
-    await this.cargas.ventas.ejecutar(sesion, {
+  ): Promise<VersionDelMesDto> {
+    const version = await this.cargas.ventas.ejecutar(sesion, {
       locationId: aLocationId(cuerpo.locationId),
       anio: cuerpo.anio,
       mes: cuerpo.mes,
+      version: cuerpo.version,
       ventas: cuerpo.ventas.map((venta) =>
         comoVenta({ productId: aProductId(venta.productId), unidades: venta.unidades }),
       ),
     });
+    return { version };
   }
 
   @Get('ventas')
@@ -158,29 +162,34 @@ export class CargaController {
   public async ventas(
     @SesionActual() sesion: SesionActiva,
     @Query(new EsquemaPipe(CONSULTA_DEL_MES)) consulta: ConsultaDelMes,
-  ): Promise<readonly VentaDto[]> {
-    const ventas = await this.cargas.leerVentas.ejecutar(sesion, mesDe(consulta));
-    return ventas.map((venta) => ({
-      productId: venta.productId,
-      nombre: venta.nombre,
-      unidades: venta.unidades,
-    }));
+  ): Promise<VentasDelMesDto> {
+    const leidas = await this.cargas.leerVentas.ejecutar(sesion, mesDe(consulta));
+    return {
+      version: leidas.version,
+      ventas: leidas.ventas.map((venta) => ({
+        productId: venta.productId,
+        nombre: venta.nombre,
+        unidades: venta.unidades,
+      })),
+    };
   }
 
-  /** T6: los costos del mes, con su clasificación explícita (SPEC §17). */
+  /** T6: los costos del mes, con su clasificación explícita (SPEC §17). Misma versión que las ventas. */
   @Post('costos-fijos')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @Requiere('cost.write')
   public async registrarCostos(
     @SesionActual() sesion: SesionActiva,
     @Body(new EsquemaPipe(CUERPO_DE_COSTOS)) cuerpo: CuerpoDeCostos,
-  ): Promise<void> {
-    await this.cargas.costos.ejecutar(sesion, {
+  ): Promise<VersionDelMesDto> {
+    const version = await this.cargas.costos.ejecutar(sesion, {
       locationId: aLocationId(cuerpo.locationId),
       anio: cuerpo.anio,
       mes: cuerpo.mes,
+      version: cuerpo.version,
       costos: cuerpo.costos.map(comoCosto),
     });
+    return { version };
   }
 
   @Get('costos-fijos')
@@ -188,7 +197,7 @@ export class CargaController {
   public async costos(
     @SesionActual() sesion: SesionActiva,
     @Query(new EsquemaPipe(CONSULTA_DEL_MES)) consulta: ConsultaDelMes,
-  ): Promise<readonly CostoDto[]> {
+  ): Promise<CostosDelMesDto> {
     return this.cargas.leerCostos.ejecutar(sesion, mesDe(consulta));
   }
 }

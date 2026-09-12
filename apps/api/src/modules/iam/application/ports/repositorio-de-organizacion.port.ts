@@ -62,6 +62,40 @@ export interface UsuarioInvitado {
   readonly email: string;
 }
 
+/** Una asignación de rol tal como se lista: el rol y, si es de ubicación, cuál. */
+export interface AsignacionListada {
+  readonly rol: string;
+  readonly locationId: LocationId | null;
+}
+
+/**
+ * El último correo de invitación de un usuario (D-16.27(b)): su estado y su
+ * error. **Nunca `datos`**, que lleva el enlace con el token mientras el correo
+ * está en vuelo — y que `costeo_app` ni siquiera puede leer (GRANT por columnas).
+ */
+export interface CorreoDeInvitacion {
+  readonly estado: string;
+  readonly error: string | null;
+}
+
+export interface UsuarioListado {
+  readonly id: UserId;
+  readonly email: string;
+  readonly estado: string;
+  readonly roles: readonly AsignacionListada[];
+  readonly invitacionCaducaEn: Date | null;
+  /** `null` si nunca se encoló uno (invitados antes de P16-A1). */
+  readonly correoInvitacion: CorreoDeInvitacion | null;
+}
+
+export interface RolDelCatalogo {
+  readonly codigo: string;
+  readonly requiereUbicacion: boolean;
+  readonly permisos: readonly string[];
+}
+
+export type ResultadoDeActualizacionDeUbicacion = 'actualizada' | 'no_encontrada' | 'nombre_en_uso';
+
 /** `no_pendiente`: activo entre la lectura y la escritura, o nunca fue invitado. */
 export type ResultadoDeReinvitacion = 'reinvitado' | 'no_pendiente';
 
@@ -120,6 +154,27 @@ export interface RepositorioDeOrganizacion {
 
   /** `null` si el usuario no existe en esa company. */
   esOwner(entrada: { readonly companyId: CompanyId; readonly userId: UserId }): Promise<boolean | null>;
+
+  /**
+   * Los usuarios de la company con sus roles y el último correo de invitación.
+   *
+   * @param ubicaciones `'todas'` con alcance de company; si no, solo quien tiene
+   *   un rol en alguna de ellas, y solo esas asignaciones (D-16.126).
+   */
+  listarUsuarios(entrada: {
+    readonly companyId: CompanyId;
+    readonly ubicaciones: readonly LocationId[] | 'todas';
+  }): Promise<readonly UsuarioListado[]>;
+
+  /** El catálogo de roles con sus permisos. Es global: sin datos de ninguna company. */
+  listarRoles(companyId: CompanyId): Promise<readonly RolDelCatalogo[]>;
+
+  actualizarUbicacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly locationId: LocationId;
+    readonly nombre: string;
+    readonly tipo: TipoDeUbicacion;
+  }): Promise<ResultadoDeActualizacionDeUbicacion>;
 
   asignarRol(entrada: {
     readonly companyId: CompanyId;

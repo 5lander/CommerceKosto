@@ -17,6 +17,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put } from '@
 import { locationId, productId } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import {
@@ -79,7 +80,7 @@ export class ProductosController {
   @HttpCode(HttpStatus.OK)
   public async enUbicacion(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
     @Body(new EsquemaPipe(CUERPO_DE_UBICACION)) cuerpo: CuerpoDeUbicacion,
   ): Promise<VersionDeProducto> {
     const version = await this.configurar.ejecutar(sesion, {

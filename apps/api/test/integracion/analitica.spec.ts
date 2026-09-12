@@ -29,13 +29,23 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { esperarBloqueadas } from '../soporte/bloqueos';
 import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
 const SIN_CONTENIDO = 204;
 const PROHIBIDO = 403;
+const PETICION_INVALIDA = 400;
 const CONFLICTO = 409;
+
+/** Meses sin tocar por el resto de la suite, uno por prueba de la carga versionada (P16-C). */
+const MAYO = 5;
+const JUNIO = 6;
+const JULIO = 7;
+const AGOSTO = 8;
+/** Cuántas cargas esperan a la vez la fila bloqueada del período (ver `productos.spec.ts`). */
+const EN_ESPERA = 5;
 
 const CLAVE = 'once naranjas dulces';
 const VIGENCIA = '2026-01-01T00:00:00.000Z';
@@ -207,18 +217,34 @@ describe('vistas analiticas', () => {
     return productId;
   }
 
-  function cargarVentas(ventas: readonly Cuerpo[], quien = admin, donde = local) {
+  /**
+   * La versión de la carga del mes, leída siempre como ADMIN (D-16.121): varias
+   * pruebas cargan el mismo mes de la misma ubicación, y la de `BODEGA` no puede
+   * leerla —justo lo que se prueba ahí es que no carga—.
+   */
+  async function versionDelMes(donde: string): Promise<number> {
+    const leida = await request(servidor())
+      .get('/analitica/ventas')
+      .query({ locationId: donde, anio: ANIO, mes: MARZO })
+      .set('Cookie', admin);
+    expect(leida.status).toBe(OK);
+    return (leida.body as { version: number }).version;
+  }
+
+  async function cargarVentas(ventas: readonly Cuerpo[], quien = admin, donde = local) {
+    const version = await versionDelMes(donde);
     return request(servidor())
       .post('/analitica/ventas')
       .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
-      .send({ locationId: donde, anio: ANIO, mes: MARZO, ventas });
+      .send({ locationId: donde, anio: ANIO, mes: MARZO, version, ventas });
   }
 
-  function cargarCostos(costos: readonly Cuerpo[]) {
+  async function cargarCostos(costos: readonly Cuerpo[]) {
+    const version = await versionDelMes(local);
     return request(servidor())
       .post('/analitica/costos-fijos')
       .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
-      .send({ locationId: local, anio: ANIO, mes: MARZO, costos });
+      .send({ locationId: local, anio: ANIO, mes: MARZO, version, costos });
   }
 
   function vista(nombre: string, quien = admin, donde = local) {
@@ -320,9 +346,7 @@ describe('vistas analiticas', () => {
         pvp: '10.00',
         rendimiento: '1',
       });
-      expect((await cargarVentas([{ productId: plato, unidades: '100' }])).status).toBe(
-        SIN_CONTENIDO,
-      );
+      expect((await cargarVentas([{ productId: plato, unidades: '100' }])).status).toBe(OK);
 
       const real = await foodCost();
 
@@ -429,7 +453,7 @@ describe('vistas analiticas', () => {
         .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin));
 
       expect(respuesta.status).toBe(OK);
-      const ventas = respuesta.body as readonly VentaDto[];
+      const { ventas } = respuesta.body as { ventas: readonly VentaDto[] };
       expect(ventas.length).toBeGreaterThan(0);
       for (const venta of ventas) {
         expect(venta.nombre).toMatch(/^Plato /u);
@@ -472,7 +496,7 @@ describe('vistas analiticas', () => {
             { concepto: 'Comision tarjeta', clasificacion: 'VARIABLE', importe: '0.03' },
           ])
         ).status,
-      ).toBe(SIN_CONTENIDO);
+      ).toBe(OK);
 
       const respuesta = await vista('punto-de-equilibrio');
       expect(respuesta.status).toBe(OK);
@@ -598,6 +622,125 @@ describe('vistas analiticas', () => {
     });
   });
 
+  describe('🔴 concurrencia de la carga del mes (P16-C, D-16.121, ADR-023)', () => {
+    function leerCarga(ruta: 'ventas' | 'costos-fijos', mes: number) {
+      return request(servidor()).get(`/analitica/${ruta}`).query({ locationId: local, anio: ANIO, mes }).set('Cookie', admin);
+    }
+
+    function guardarVentas(mes: number, version: number, unidades: string) {
+      return request(servidor())
+        .post('/analitica/ventas')
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
+        .send({ locationId: local, anio: ANIO, mes, version, ventas: [{ productId: platoDeCarga, unidades }] });
+    }
+
+    function guardarCostos(mes: number, version: number, importe: string) {
+      return request(servidor())
+        .post('/analitica/costos-fijos')
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
+        .send({ locationId: local, anio: ANIO, mes, version, costos: [{ concepto: 'Arriendo', clasificacion: 'OTRO_FIJO', importe }] });
+    }
+
+    let platoDeCarga: string;
+
+    beforeAll(async () => {
+      const item = await insumo('1.00');
+      platoDeCarga = await producto({ itemId: item, cantidad: '1', pvp: '5.00', rendimiento: '1' });
+    });
+
+    it('un mes sin abrir se lee con version 1, y guardar sobre ella lo crea y devuelve la 2 (D-16.122)', async () => {
+      const leida = await leerCarga('ventas', MAYO);
+      expect(leida.body).toEqual({ version: 1, ventas: [] });
+
+      const guardada = await guardarVentas(MAYO, 1, '12');
+
+      expect(guardada.status).toBe(OK);
+      expect(guardada.body).toEqual({ version: 2 });
+      expect((await leerCarga('ventas', MAYO)).body).toMatchObject({ version: 2 });
+    });
+
+    it('dos cargas con la misma version: la segunda 409, sin la version dentro, y las ventas son las de la primera', async () => {
+      const primera = await guardarVentas(JUNIO, 1, '10');
+      const segunda = await guardarVentas(JUNIO, 1, '99');
+
+      expect(primera.status).toBe(OK);
+      expect(segunda.status).toBe(CONFLICTO);
+      expect(segunda.body).toMatchObject({ code: 'CONFLICTO_DE_VERSION' });
+      expect(Object.keys(segunda.body as object).sort()).toEqual(['code', 'message']);
+      const { ventas } = (await leerCarga('ventas', JUNIO)).body as { ventas: { unidades: string }[] };
+      expect(ventas).toHaveLength(1);
+      expect(ventas[0]?.unidades).toMatch(/^10(\.0+)?$/u);
+    });
+
+    it('ventas y costos fijos comparten la version: la carga de uno deja obsoleto el formulario del otro', async () => {
+      const version = ((await leerCarga('costos-fijos', JULIO)).body as { version: number }).version;
+      expect((await guardarVentas(JULIO, version, '5')).status).toBe(OK);
+
+      const costos = await guardarCostos(JULIO, version, '800.00');
+
+      expect(costos.status).toBe(CONFLICTO);
+      expect(costos.body).toMatchObject({ code: 'CONFLICTO_DE_VERSION' });
+    });
+
+    it('un movimiento abre el mes y NO sube la version: la rejilla abierta antes sigue sirviendo', async () => {
+      const item = await insumo('2.00');
+      const compra = await request(servidor())
+        .post('/inventario/movimientos')
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
+        .send({
+          locationId: local, itemId: item, tipo: 'COMPRA', cantidad: '3', costoTotal: '6.00',
+          purchaseArticleId: null, ivaTarifa: '0', occurredAt: '2026-08-10T12:00:00.000Z', note: null,
+        });
+      expect(compra.status).toBe(CREADO);
+
+      expect((await leerCarga('ventas', AGOSTO)).body).toMatchObject({ version: 1 });
+      expect((await guardarVentas(AGOSTO, 1, '7')).status).toBe(OK);
+    });
+
+    it('la version es obligatoria: sin ella es 400, no una carga sin comprobar', async () => {
+      const respuesta = await request(servidor())
+        .post('/analitica/costos-fijos')
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
+        .send({ locationId: local, anio: ANIO, mes: MAYO, costos: [] });
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    /**
+     * La prueba que distingue la condición en el `WHERE` de un leer-comparar-
+     * escribir, con la carrera determinista de D-16.116: otra conexión bloquea la
+     * fila del período, las cinco cargas se paran y solo entonces se suelta.
+     */
+    it('cinco cargas paradas sobre la fila del periodo, con la misma version: una 200 y cuatro 409', async () => {
+      const creada = await guardarVentas(MAYO, ((await leerCarga('ventas', MAYO)).body as { version: number }).version, '1');
+      expect(creada.status).toBe(OK);
+      const version = (creada.body as { version: number }).version;
+      const cerrojo = new Client({ connectionString: URL_MIGRATOR });
+      await cerrojo.connect();
+
+      let estados: number[];
+      try {
+        await cerrojo.query('BEGIN');
+        await cerrojo.query(
+          'SELECT id FROM period WHERE location_id = $1 AND year = $2 AND month = $3 FOR UPDATE',
+          [local, ANIO, MAYO],
+        );
+        const enCurso = Promise.all(
+          Array.from({ length: EN_ESPERA }, (_, i) => guardarVentas(MAYO, version, String(i + 1)).then((r) => r.status)),
+        );
+        await esperarBloqueadas(cerrojo, EN_ESPERA);
+        await cerrojo.query('COMMIT');
+        estados = (await enCurso).sort((a, b) => a - b);
+      } finally {
+        await cerrojo.end();
+      }
+
+      expect(estados).toEqual([OK, ...Array.from({ length: EN_ESPERA - 1 }, () => CONFLICTO)]);
+      expect((await leerCarga('ventas', MAYO)).body).toMatchObject({ version: version + 1 });
+    });
+  });
+
   describe('el mes cerrado no admite datos nuevos (D6)', () => {
     it('cargar ventas en un periodo cerrado se rechaza con 409', async () => {
       const countId = await crear('/conteos', {
@@ -626,9 +769,11 @@ describe('vistas analiticas', () => {
       const respuesta = await request(servidor())
         .post('/analitica/ventas')
         .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
-        .send({ locationId: local, anio: ANIO, mes: 4, ventas: [] });
+        // El cierre no sube la versión (D-16.121): lo que para esto es el mes cerrado.
+        .send({ locationId: local, anio: ANIO, mes: 4, version: 1, ventas: [] });
 
       expect(respuesta.status).toBe(CONFLICTO);
+      expect(respuesta.body).toMatchObject({ code: 'CONFLICTO' });
       expect((respuesta.body as { message: string }).message).toContain('cerrado');
     });
   });

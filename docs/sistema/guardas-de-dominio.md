@@ -335,6 +335,20 @@ si la fila no existe, **404**; si existe con otra versión, `ConflictoDeVersionE
 
 ---
 
+## `20260912205903_p16c_version_del_periodo`
+
+La versión de la carga del mes (D-16.121, ADR-023) y el evento de editar una ubicación.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `period_version_positiva` | ⚪ | Solo la escribe el repositorio de analítica, como `version + 1` en la misma sentencia que comprueba la esperada. La `version` del cuerpo de `POST /analitica/ventas` y `/costos-fijos` se **compara**, no se guarda. Un cero solo lo pondría SQL a mano |
+
+**Como en P16-B, la coincidencia de la versión no es una restricción**: la comprueba el `WHERE` del
+`UPDATE`, y cero filas es un **409 `CONFLICTO_DE_VERSION`**, nunca un error de base sin traducir. El
+período siempre existe cuando se compara —`AsegurarPeriodo` lo crea antes—, así que aquí no hay 404.
+
+---
+
 ## Los tipos del borde — tres guardas sin `CHECK` detrás *(P16-A2)*
 
 **Esta sección rompe el molde del documento a propósito.** Todas las de arriba parten de una restricción de la base; estas tres no tienen ninguna. Y aun así son exactamente el mismo fallo, que es lo que las trae aquí: **una regla que se hace cumplir y no se explica sale como `INTERNAL_ERROR 500`**. Lo único que cambia es quién la hace cumplir — allí un `CHECK`, aquí el constructor de un tipo de dominio.

@@ -201,6 +201,7 @@ describe('la frontera HTTP', () => {
         locationId: local,
         anio: ANIO_SIN_NADA,
         mes: ENERO,
+        version: 1,
         costos: [
           {
             concepto: 'Arriendo',
@@ -248,7 +249,7 @@ describe('la frontera HTTP', () => {
       expect((respuesta.body as Error4xx).code).toBe('RECURSO_NO_ENCONTRADO');
     });
 
-    it('la carga de ventas de ese mismo mes NO es 404: es la lista vacia', async () => {
+    it('la carga de ventas de ese mismo mes NO es 404: es la lista vacia, con la version inicial', async () => {
       const respuesta = await leer('/analitica/ventas', {
         locationId: local,
         anio: ANIO_SIN_NADA,
@@ -256,7 +257,8 @@ describe('la frontera HTTP', () => {
       });
 
       expect(respuesta.status).toBe(OK);
-      expect(respuesta.body).toEqual([]);
+      // Un mes sin fila de período se lee con la versión que tendrá al crearse (D-16.122).
+      expect(respuesta.body).toEqual({ version: 1, ventas: [] });
     });
   });
 

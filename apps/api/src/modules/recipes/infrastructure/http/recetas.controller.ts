@@ -25,6 +25,7 @@ import {
 } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import type { Previsualizacion } from '../../application/casos-de-uso/propagacion';
@@ -155,7 +156,7 @@ export class RecetasController {
   @HttpCode(HttpStatus.NO_CONTENT)
   public async revertir(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
   ): Promise<void> {
     await this.propagacion.revertir.ejecutar(sesion, recipePropagationId(id));
   }

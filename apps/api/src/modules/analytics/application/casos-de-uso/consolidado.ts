@@ -247,7 +247,9 @@ function aporteDe(datos: ContextoDelPeriodo, ubicacion: UbicacionNombrada): Apor
   return {
     locationId: ubicacion.id,
     nombre: ubicacion.nombre,
-    estadoDelPeriodo: datos.conteo === null ? 'ABIERTO' : 'CERRADO',
+    // De `period.status`, no del conteo (D-16.124): un mes reabierto conserva su
+    // conteo confirmado y está ABIERTO.
+    estadoDelPeriodo: datos.estadoDelPeriodo,
     unidades: datos.unidadesTotales,
     ventaNeta: datos.ventaNetaMes,
     mcTotal: datos.mcMesTotal,

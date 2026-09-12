@@ -24,6 +24,7 @@ import { Count, Money, Quantity, Ratio } from '../../../../shared/domain/money/t
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ItemLeido } from '../../../catalog/application/ports/repositorio-de-catalogo.port';
 import type { PeriodoLeido } from '../../../periods/application/ports/repositorio-de-periodos.port';
+import type { EstadoDePeriodo } from '../../../periods/domain/cierre';
 import type {
   CosteoDelProducto,
   CostearCarta,
@@ -81,6 +82,12 @@ export interface ParametrosDelPeriodo {
 export interface ContextoDelPeriodo {
   readonly anio: number;
   readonly mes: number;
+  /**
+   * El estado del mes TAL COMO LO DICE `period.status` (P16-C, D-16.124). Hasta
+   * entonces el consolidado lo deducía de si había conteo confirmado, y un mes
+   * reabierto que conserva su conteo salía «CERRADO».
+   */
+  readonly estadoDelPeriodo: EstadoDePeriodo;
   readonly carta: readonly CosteoDelProducto[];
   readonly catalogo: ReadonlyMap<ItemId, ItemLeido>;
 
@@ -246,8 +253,12 @@ interface Derivado {
   readonly costosDeItems: { readonly porItem: ReadonlyMap<ItemId, { readonly costoNetoDeUso: Money }>; readonly sinPrecio: readonly ItemId[] };
 }
 
+/** Qué mes es y en qué estado está: lo que identifica al contexto, sin calcular nada. */
+function elMes(piezas: Piezas): Pick<ContextoDelPeriodo, 'anio' | 'mes' | 'estadoDelPeriodo'> {
+  return { anio: piezas.pedido.anio, mes: piezas.pedido.mes, estadoDelPeriodo: piezas.periodo.estado };
+}
+
 async function componer(piezas: Piezas): Promise<ContextoDelPeriodo> {
-  const { pedido } = piezas;
   const { consumo, agregados, conteo, anterior, costosDeItems } = await traerLoDerivado(piezas);
 
   const catalogo = new Map(piezas.items.map((item) => [item.id, item]));
@@ -260,8 +271,7 @@ async function componer(piezas: Piezas): Promise<ContextoDelPeriodo> {
   const porAgregado = new Map(agregados.map((agregado) => [agregado.itemId, agregado]));
 
   return {
-    anio: pedido.anio,
-    mes: pedido.mes,
+    ...elMes(piezas),
     carta: piezas.carta,
     catalogo,
     unidadesPorProducto: piezas.ventas,

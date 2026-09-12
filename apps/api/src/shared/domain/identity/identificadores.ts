@@ -104,6 +104,17 @@ function exigirUuid(tipo: string, valor: string): string {
   return valor.toLowerCase();
 }
 
+/**
+ * La misma comprobación, para quien todavía no sabe de qué tipo es el
+ * identificador: el pipe de los parámetros de ruta (P16-C). `nombre` es el del
+ * parámetro y solo va al mensaje.
+ *
+ * @throws {IdentificadorInvalidoError}
+ */
+export function identificadorDeEntrada(nombre: string, valor: string): string {
+  return exigirUuid(nombre, valor);
+}
+
 /** @throws {IdentificadorInvalidoError} */
 export function companyId(valor: string): CompanyId {
   return exigirUuid('CompanyId', valor) as CompanyId;

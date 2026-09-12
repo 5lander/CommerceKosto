@@ -46,6 +46,7 @@ const CREADO = 201;
 const SIN_CONTENIDO = 204;
 const ENTRADA_INVALIDA = 400;
 const PROHIBIDO = 403;
+const NO_ENCONTRADO = 404;
 const CONFLICTO = 409;
 
 const CONTRASENA = 'tres cebollas moradas';
@@ -1020,6 +1021,81 @@ describe('inventario', () => {
       } finally {
         await sinTenant.end();
       }
+    });
+  });
+
+  describe('un movimiento por su id y el libro por tipo (P16-C, D-16.125)', () => {
+    function leerMovimiento(id: string, quien = cookie) {
+      return request(servidor()).get(`/inventario/movimientos/${id}`).set('Cookie', quien);
+    }
+
+    it('trae exactamente la fila que el libro ya enseñaba, con su desglose', async () => {
+      const item = await itemConPrecio('2.00');
+      const id = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '4' });
+
+      const suelto = await leerMovimiento(id);
+      const pagina = await request(servidor()).get('/inventario/movimientos').query({ locationId: bodegaCentral, itemId: item }).set('Cookie', cookie);
+
+      expect(suelto.status).toBe(OK);
+      const fila = (pagina.body as { movimientos: { id: string }[] }).movimientos.find((m) => m.id === id);
+      expect(suelto.body).toEqual(fila);
+      expect(suelto.body).toMatchObject({ tipo: 'COMPRA', desglose: 'CONOCIDO' });
+    });
+
+    it('uno que no existe es 404, y un id que no es UUID es 400 antes de llegar al caso de uso', async () => {
+      const inventado = await leerMovimiento(randomUUID());
+      const malFormado = await leerMovimiento('no-es-un-uuid');
+
+      expect(inventado.status).toBe(NO_ENCONTRADO);
+      expect(inventado.body).toMatchObject({ code: 'RECURSO_NO_ENCONTRADO' });
+      expect(malFormado.status).toBe(ENTRADA_INVALIDA);
+      expect(malFormado.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    it('🔴 un GERENTE_LOCAL no lee un movimiento de otra ubicación, aunque tenga su id', async () => {
+      const item = await itemConPrecio('2.00');
+      const id = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '2' });
+
+      const respuesta = await leerMovimiento(id, cookieGerente);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+      expect(JSON.stringify(respuesta.body)).not.toContain(item);
+    });
+
+    it('🔴 §4.3 — BODEGA no lo lee: es una fila del libro, con su cantidad y su importe', async () => {
+      const item = await itemConPrecio('2.00');
+      const id = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '2' });
+
+      const respuesta = await leerMovimiento(id, cookieBodega);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+      const crudo = JSON.stringify(respuesta.body).toLowerCase();
+      for (const prohibido of PROHIBIDOS_PARA_BODEGA) {
+        expect(crudo).not.toContain(prohibido.toLowerCase());
+      }
+    });
+
+    it('?tipo=MERMA trae solo las mermas del ítem, y un tipo que no existe es 400', async () => {
+      const item = await itemConPrecio('2.00');
+      await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '10' });
+      const merma = await registrar({ locationId: bodegaCentral, itemId: item, tipo: 'MERMA', cantidad: '1' });
+      expect(merma.status).toBe(CREADO);
+
+      const filtrado = await request(servidor())
+        .get('/inventario/movimientos')
+        .query({ locationId: bodegaCentral, itemId: item, tipo: 'MERMA' })
+        .set('Cookie', cookie);
+      const inventado = await request(servidor())
+        .get('/inventario/movimientos')
+        .query({ locationId: bodegaCentral, tipo: 'ROBO' })
+        .set('Cookie', cookie);
+
+      expect(filtrado.status).toBe(OK);
+      const tipos = (filtrado.body as { movimientos: { id: string; tipo: string }[] }).movimientos.map((m) => m.tipo);
+      expect(tipos).toEqual(['MERMA']);
+      expect(inventado.status).toBe(ENTRADA_INVALIDA);
     });
   });
 

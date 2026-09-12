@@ -58,6 +58,8 @@ La prueba **falla si no hay pooler**, no se salta: una prueba de seguridad que s
 | **Desglose por línea del costeo (`costos.lineas`)** *(P16-B)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
 | **Ficha, ubicaciones y carta de un producto (con PVP)** *(P16-B)* | ✅ | ✅ | ✅ su ubicación | ❌ | ✅ |
 | **Escribir componentes de combo** *(P16-B)* | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Listar usuarios y el estado de su invitación** *(P16-C)* | ✅ | ✅ | ✅ quien tenga rol en su ubicación | ❌ | ✅ |
+| **Editar una ubicación** *(P16-C)* | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Propagar recetas | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Suscripción y eliminar company | ✅ | ❌ | ❌ | ❌ | ❌ |
 

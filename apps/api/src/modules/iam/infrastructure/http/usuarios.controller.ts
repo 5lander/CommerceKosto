@@ -34,7 +34,6 @@ import {
   HttpStatus,
   Inject,
   Param,
-  ParseUUIDPipe,
   Post,
   Req,
 } from '@nestjs/common';
@@ -43,6 +42,7 @@ import type { IncomingMessage } from 'node:http';
 import { CONFIGURATION, type Configuration } from '../../../../shared/infrastructure/config/environment';
 import { Publico, Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import { ipDelCliente } from '../../../../shared/infrastructure/http/ip-del-cliente';
 import type { SesionActiva } from '../../application/casos-de-uso/validar-sesion';
 import { locationId, userId } from '../../../../shared/domain/identity/identificadores';
@@ -77,13 +77,13 @@ export class UsuariosController {
     await this.invitaciones.invitar.ejecutar(sesion, { email: cuerpo.email, ip: this.ipDe(peticion) });
   }
 
-  /** `ParseUUIDPipe` convierte un id mal formado en 400 antes de que `userId()` lo vea. */
+  /** `IdentificadorDeRuta` convierte un id mal formado en 400 `ENTRADA_INVALIDA` antes de que `userId()` lo vea. */
   @Post(':id/reenvio-de-invitacion')
   @Requiere('user.invite')
   @HttpCode(HttpStatus.ACCEPTED)
   public async reenviar(
     @SesionActual() sesion: SesionActiva,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
     @Req() peticion: IncomingMessage,
   ): Promise<void> {
     await this.invitaciones.reenviar.ejecutar(sesion, { objetivo: userId(id), ip: this.ipDe(peticion) });

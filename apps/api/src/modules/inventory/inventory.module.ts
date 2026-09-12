@@ -34,6 +34,7 @@ import {
 } from './application/casos-de-uso/conteos';
 import {
   ConsultarSaldos,
+  ConsultarMovimiento,
   CorregirMovimiento,
   ListarMovimientos,
   RegistrarMovimiento,
@@ -117,6 +118,11 @@ type Deps = DependenciasDeInventarioNest;
       inject: [DependenciasDeInventarioNest],
       useFactory: (d: Deps): ListarMovimientos => new ListarMovimientos(d),
     },
+    {
+      provide: ConsultarMovimiento,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): ConsultarMovimiento => new ConsultarMovimiento(d),
+    },
 
     {
       provide: ListarConteos,
@@ -184,9 +190,12 @@ type Deps = DependenciasDeInventarioNest;
     },
     {
       provide: LecturasDelLibro,
-      inject: [ConsultarSaldos, ListarMovimientos],
-      useFactory: (saldos: ConsultarSaldos, movimientos: ListarMovimientos): LecturasDelLibro =>
-        new LecturasDelLibro(saldos, movimientos),
+      inject: [ConsultarSaldos, ListarMovimientos, ConsultarMovimiento],
+      useFactory: (
+        saldos: ConsultarSaldos,
+        movimientos: ListarMovimientos,
+        movimiento: ConsultarMovimiento,
+      ): LecturasDelLibro => new LecturasDelLibro(saldos, movimientos, movimiento),
     },
     {
       provide: RegistrarMovimientosEnLote,

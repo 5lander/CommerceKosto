@@ -404,7 +404,8 @@ describe('correo transaccional y restablecimiento', () => {
         .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(PETICION_INVALIDA);
-      expect(respuesta.body).toMatchObject({ code: 'BAD_REQUEST' });
+      // P16-C (D-16.130): el mismo `code` que el resto de ids mal formados de la API.
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
     });
   });
 

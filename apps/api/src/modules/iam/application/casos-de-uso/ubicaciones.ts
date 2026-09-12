@@ -15,13 +15,18 @@
  */
 
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
-import { LimiteDelPlanError } from '../../domain/errores';
+import type { LocationId } from '../../../../shared/domain/identity/identificadores';
+import {
+  LimiteDelPlanError,
+  NombreDeUbicacionEnUsoError,
+  UbicacionNoEncontradaError,
+} from '../../domain/errores';
 import type {
   RepositorioDeOrganizacion,
   TipoDeUbicacion,
   Ubicacion,
 } from '../ports/repositorio-de-organizacion.port';
-import type { SesionActiva } from './validar-sesion';
+import { exigirUbicacionEnAlcance, type SesionActiva } from './validar-sesion';
 
 export interface DependenciasDeUbicaciones {
   readonly organizacion: RepositorioDeOrganizacion;
@@ -60,6 +65,47 @@ export class CrearUbicacion {
     });
 
     return { id: resultado.id, nombre: datos.nombre.trim(), tipo: datos.tipo, estado: 'ACTIVE' };
+  }
+}
+
+/**
+ * Editar una ubicación — P16-C, D-16.127. Nombre y tipo; sin estado (hoy
+ * `INACTIVE` no tiene ningún efecto en el sistema) y sin versión (D-16.13).
+ *
+ * El alcance se comprueba aunque `location.update` sea de roles de company: la
+ * regla de §4.4 no depende de qué roles tengan hoy el permiso.
+ */
+export class ActualizarUbicacion {
+  public constructor(private readonly deps: DependenciasDeUbicaciones) {}
+
+  /** @throws {UbicacionNoEncontradaError} @throws {NombreDeUbicacionEnUsoError} @throws {UbicacionFueraDeAlcanceError} */
+  public async ejecutar(sesion: SesionActiva, locationId: LocationId, datos: DatosDeUbicacion): Promise<Ubicacion> {
+    exigirUbicacionEnAlcance(sesion, locationId);
+    const nombre = datos.nombre.trim();
+
+    const resultado = await this.deps.organizacion.actualizarUbicacion({
+      companyId: sesion.companyId,
+      locationId,
+      nombre,
+      tipo: datos.tipo,
+    });
+    if (resultado === 'no_encontrada') throw new UbicacionNoEncontradaError();
+    if (resultado === 'nombre_en_uso') throw new NombreDeUbicacionEnUsoError(nombre);
+
+    await this.deps.auditoria.record({
+      eventType: 'location.updated',
+      outcome: 'success',
+      actorType: 'USER',
+      actorId: sesion.userId,
+      companyId: sesion.companyId,
+      ip: null,
+      userAgent: null,
+      detail: { locationId, tipo: datos.tipo },
+    });
+
+    const [actualizada] = await this.deps.organizacion.listarUbicaciones({ companyId: sesion.companyId, ids: [locationId] });
+    if (actualizada === undefined) throw new UbicacionNoEncontradaError();
+    return actualizada;
   }
 }
 

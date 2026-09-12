@@ -6,7 +6,7 @@
 | **Paquete** | P10 |
 | **Área** | build · despliegue |
 | **Tiempo perdido** | ~25 min (encontrarlo fue gratis; entender por qué, no) |
-| **Recurrencias** | **1** (P16-A1, 2026-09-10: `npm run bench`) |
+| **Recurrencias** | **2** (P16-A1, 2026-09-10: `npm run bench`; P16-C, 2026-09-12: el comando del ensayo local del runbook) |
 
 > **Lo interesante no es el fallo: es que sobreviviera diez paquetes.** Un comando del `package.json` que no arranca es fácil de arreglar. Que nadie se diera cuenta en P0…P9 dice algo del sistema de comprobaciones, y eso es lo que esta ficha viene a cerrar.
 
@@ -112,3 +112,49 @@ descubrirlo dos paquetes después. **La prevención sigue siendo la misma que di
 arriba: ejecutarlo.** Por eso el bench pasa a ser obligatorio en el paquete que
 toque el camino de lectura, que es lo que I8 ya pedía y P16-A1 fue el primero en
 cumplir.
+
+---
+
+## Recurrencia 2 — el ensayo local del runbook, roto desde P16-A1 · 2026-09-12 (P16-C)
+
+**Esta vez no era un script del `package.json` sino el comando que un runbook pide copiar**, y el
+síntoma es el mismo: algo que nadie ejecutaba ya no arrancaba.
+
+```
+$ DOMINIO=localhost CORREO_TLS=tu@correo.ec \
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+error while interpolating services.api.environment.APP_URL: required variable APP_URL is missing a value: falta APP_URL
+```
+
+**Causa raíz:** P16-A1 añadió al compose de producción tres variables obligatorias —`APP_URL` para
+los enlaces del correo, `PROXY_DE_CONFIANZA` para la IP tras Caddy (INC-022) y `MAIL_ADAPTER` para el
+despachador— y el paso 0 de `docs/runbooks/puesta-en-marcha.md` se quedó con las dos de P14b. El commit
+tocó el compose, `preparar.sh` y los dos runbooks —`puesta-en-marcha.md` incluido, 93 líneas—, pero
+no el paso 0: se añadieron el paso 3b (el remitente en Resend) y el 6b (el envío real), y nada enlaza el
+comando del ensayo con el compose.
+
+**Cómo se vio:** P16-C necesitaba la pila de producción para probar `DELETE /usuarios/roles` a través de
+Caddy, y se copió el comando del runbook. Es exactamente el paso que existe «porque encontró tres fallos»
+(INC-018, INC-019, INC-020), y llevaba dos paquetes sin poder ejecutarse.
+
+### La prevención, automatizada
+
+Regla **`ensayo-local-con-las-variables-obligatorias`** de `audit:forbidden` (`repo.rules.mjs`): lee las
+`${VAR:?…}` de `docker-compose.prod.yml` y exige que el «Paso 0» del runbook ponga cada una como
+`VAR=`. Si cambia cualquiera de los dos archivos, compara los dos.
+
+**Guardián:** la regla se escribió **antes** de arreglar el runbook, y su primera corrida fue el rojo:
+
+```
+audit:forbidden  FALLO — 3 infraccion(es)
+  [ensayo-local-con-las-variables-obligatorias]
+     docs/runbooks/puesta-en-marcha.md  el ensayo local no pone APP_URL, y docker-compose.prod.yml la exige
+     docs/runbooks/puesta-en-marcha.md  el ensayo local no pone PROXY_DE_CONFIANZA, y docker-compose.prod.yml la exige
+     docs/runbooks/puesta-en-marcha.md  el ensayo local no pone MAIL_ADAPTER, y docker-compose.prod.yml la exige
+```
+
+Con las tres en el comando: `OK — 47 reglas`.
+
+**Lo que sigue sin cubrir, igual que en la recurrencia 1:** que el comando **funcione**. La regla
+comprueba que las variables estén; no que la imagen construya ni que la pila arranque. Eso solo lo sabe
+quien lo ejecuta, y por eso el paso 0 no se salta.

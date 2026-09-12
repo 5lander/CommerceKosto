@@ -146,6 +146,8 @@ export interface ConsultaDelLibro {
   readonly companyId: CompanyId;
   readonly locationId: LocationId;
   readonly itemId: ItemId | null;
+  /** P16-C (D-16.125): el libro filtrado por tipo de la pantalla 17. `null` = todos. */
+  readonly tipo: TipoDeMovimiento | null;
   readonly desde: Date | null;
   readonly hasta: Date | null;
   readonly limite: number;

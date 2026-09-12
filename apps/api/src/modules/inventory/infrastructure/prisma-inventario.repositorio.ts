@@ -604,6 +604,7 @@ function filtroDelLibro(consulta: ConsultaDelLibro): Record<string, unknown> {
     companyId: consulta.companyId,
     locationId: consulta.locationId,
     ...(consulta.itemId === null ? {} : { itemId: consulta.itemId }),
+    ...(consulta.tipo === null ? {} : { type: consulta.tipo }),
     ...(rango === null ? {} : { occurredAt: rango }),
   };
 }

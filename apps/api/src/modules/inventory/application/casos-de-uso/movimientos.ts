@@ -295,6 +295,27 @@ export class ConsultarSaldos {
   }
 }
 
+/**
+ * Un movimiento del libro por su id — la pantalla de corrección (P16-C, D-16.125).
+ *
+ * LA PERTENENCIA A LA COMPANY la pone el `WHERE` del repositorio: uno de otra
+ * company es el mismo 404 que uno inventado. LA DE LA UBICACIÓN, el alcance: un
+ * gerente que pide un movimiento de otro local recibe 403, como en el resto de
+ * las lecturas por ubicación (CLAUDE.md §4.4).
+ */
+export class ConsultarMovimiento {
+  public constructor(private readonly deps: DependenciasDeInventario) {}
+
+  /** @throws {MovimientoNoEncontradoError} @throws {UbicacionFueraDeAlcanceError} */
+  public async ejecutar(sesion: SesionActiva, movementId: MovementId): Promise<MovimientoLeido> {
+    const movimiento = await this.deps.repositorio.buscarMovimiento({ companyId: sesion.companyId, movementId });
+    if (movimiento === null) throw new MovimientoNoEncontradoError();
+
+    exigirUbicacionEnAlcance(sesion, movimiento.locationId);
+    return movimiento;
+  }
+}
+
 export class ListarMovimientos {
   public constructor(private readonly deps: DependenciasDeInventario) {}
 

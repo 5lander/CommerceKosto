@@ -44,6 +44,7 @@ const CAMPOS = {
   closedBy: true,
   reopenedAt: true,
   reopenedBy: true,
+  version: true,
 } as const;
 
 /** Lo que las tres búsquedas pueden filtrar. Siempre con el tenant delante. */
@@ -70,6 +71,7 @@ interface FilaDePeriodo {
   readonly closedBy: string | null;
   readonly reopenedAt: Date | null;
   readonly reopenedBy: string | null;
+  readonly version: number;
 }
 
 function comoPeriodo(fila: FilaDePeriodo): PeriodoLeido {
@@ -85,6 +87,7 @@ function comoPeriodo(fila: FilaDePeriodo): PeriodoLeido {
     cerradoPor: fila.closedBy === null ? null : aUserId(fila.closedBy),
     reabiertoEn: fila.reopenedAt,
     reabiertoPor: fila.reopenedBy === null ? null : aUserId(fila.reopenedBy),
+    version: fila.version,
   };
 }
 

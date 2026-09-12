@@ -2,8 +2,8 @@
  * Otra persona escribió el mismo agregado entre que este formulario lo leyó y
  * lo guardó — concurrencia optimista, D-16.11, ADR-023.
  *
- * VIVE EN `shared` PORQUE LO LANZAN DOS MÓDULOS: `catalog` (el ítem) y `recipes`
- * (el producto y la receta). Es la misma regla rota con el mismo remedio, y dos
+ * VIVE EN `shared` PORQUE LO LANZAN TRES MÓDULOS: `catalog` (el ítem), `recipes`
+ * (el producto y la receta) y, desde P16-C, `analytics` (la carga del mes). Es la misma regla rota con el mismo remedio, y dos
  * clases con el mismo `codigo` y el mismo texto son justo lo que
  * `audit:duplication` persigue.
  *
@@ -22,15 +22,27 @@
 
 import { ErrorDeDominio, type CodigoDeDominio } from './error-de-dominio';
 
-/** Qué se estaba editando: decide la palabra del mensaje, nada más. */
-export type AgregadoVersionado = 'producto' | 'ítem' | 'receta';
+/** Qué se estaba editando: decide las palabras del mensaje, nada más. */
+export type AgregadoVersionado = 'producto' | 'ítem' | 'receta' | 'carga del mes';
+
+/**
+ * CON SU ARTÍCULO, Y POR ESO UN REGISTRO Y NO UNA INTERPOLACIÓN. Hasta P16-C el
+ * mensaje era «cambió este ${agregado}» y la receta salía como «este receta»; la
+ * carga del mes, que llega aquí, no cabe en «este …» de ninguna forma.
+ */
+const LO_QUE_CAMBIO: Readonly<Record<AgregadoVersionado, string>> = {
+  producto: 'este producto',
+  'ítem': 'este ítem',
+  receta: 'esta receta',
+  'carga del mes': 'la carga de este mes',
+};
 
 export class ConflictoDeVersionError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'CONFLICTO_DE_VERSION';
 
   public constructor(agregado: AgregadoVersionado) {
     super(
-      `Alguien más cambió este ${agregado} mientras lo editabas. ` +
+      `Alguien más cambió ${LO_QUE_CAMBIO[agregado]} mientras lo editabas. ` +
         'Recarga para ver lo que hay ahora y vuelve a aplicar tus cambios.',
       { agregado },
     );

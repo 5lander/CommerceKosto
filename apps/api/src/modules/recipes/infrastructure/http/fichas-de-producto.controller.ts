@@ -16,9 +16,10 @@
 
 import { Controller, Get, Param, Query } from '@nestjs/common';
 
-import { locationId, productId } from '../../../../shared/domain/identity/identificadores';
+import { locationId as aLocationId, productId as aProductId } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import {
@@ -45,14 +46,14 @@ export class FichasDeProductoController {
     @SesionActual() sesion: SesionActiva,
     @Query(new EsquemaPipe(CONSULTA_DE_CARTA)) consulta: ConsultaDeCarta,
   ): Promise<readonly ProductoDeLaCarta[]> {
-    return this.carta.ejecutar(sesion, locationId(consulta.locationId));
+    return this.carta.ejecutar(sesion, aLocationId(consulta.locationId));
   }
 
   /** La ficha, con la versión que las escrituras del producto piden de vuelta. */
   @Get(':id')
   @Requiere('product.read')
-  public leer(@SesionActual() sesion: SesionActiva, @Param('id') id: string): Promise<ProductoLeido> {
-    return this.ficha.ejecutar(sesion, productId(id));
+  public leer(@SesionActual() sesion: SesionActiva, @Param('id', IdentificadorDeRuta) id: string): Promise<ProductoLeido> {
+    return this.ficha.ejecutar(sesion, aProductId(id));
   }
 
   /** Dónde está configurado el producto, filtrado por el alcance de la sesión (D-16.113). */
@@ -60,8 +61,8 @@ export class FichasDeProductoController {
   @Requiere('product.read')
   public dondeEsta(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
   ): Promise<readonly ProductoEnUbicacion[]> {
-    return this.ubicaciones.ejecutar(sesion, productId(id));
+    return this.ubicaciones.ejecutar(sesion, aProductId(id));
   }
 }

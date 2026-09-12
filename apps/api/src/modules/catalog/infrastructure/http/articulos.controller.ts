@@ -30,6 +30,7 @@ import {
 } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { LeerFichaDeArticulo, type FichaDeArticulo } from '../../application/casos-de-uso/fichas';
@@ -83,7 +84,7 @@ export class ArticulosController {
   @Requiere('catalog.read')
   public leer(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
   ): Promise<FichaDeArticulo> {
     return this.ficha.ejecutar(sesion, purchaseArticleId(id));
   }
@@ -119,7 +120,7 @@ export class ArticulosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   public async actualizar(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
     @Body(new EsquemaPipe(CUERPO_DE_CAMBIO_DE_ARTICULO)) cuerpo: CuerpoDeCambioDeArticulo,
   ): Promise<void> {
     await this.articulos.actualizar.ejecutar(sesion, {
@@ -153,7 +154,7 @@ export class ArticulosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   public async actualizarGrupo(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
     @Body(new EsquemaPipe(CUERPO_DE_CAMBIO_DE_GRUPO)) cuerpo: CuerpoDeCambioDeGrupo,
   ): Promise<void> {
     await this.grupos.actualizar.ejecutar(sesion, { grupoId: itemGroupId(id), ...cuerpo });

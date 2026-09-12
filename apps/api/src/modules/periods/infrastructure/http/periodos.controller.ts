@@ -18,6 +18,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from 
 import { periodId as aPeriodId, locationId as aLocationId } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { ConsultarPeriodos, ReabrirPeriodo } from '../../application/casos-de-uso/periodos';
@@ -58,7 +59,7 @@ export class PeriodosController {
   @Requiere('period.reopen')
   public async reabrir(
     @SesionActual() sesion: SesionActiva,
-    @Param('periodId') periodId: string,
+    @Param('periodId', IdentificadorDeRuta) periodId: string,
     @Body(new EsquemaPipe(CUERPO_DE_REAPERTURA)) cuerpo: CuerpoDeReapertura,
   ): Promise<void> {
     await this.reapertura.ejecutar(sesion, {

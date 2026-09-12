@@ -128,6 +128,10 @@ export const CONSULTA_DEL_LIBRO = z
   .object({
     locationId: z.uuid(),
     itemId: z.uuid().optional(),
+    /** P16-C: los siete tipos del catálogo `inventory_movement_type`. */
+    tipo: z
+      .enum(['COMPRA', 'TRANSFERENCIA_SALIDA', 'TRANSFERENCIA_ENTRADA', 'PRODUCCION', 'MERMA', 'AJUSTE', 'CONSUMO_POR_VENTA'])
+      .optional(),
     desde: z.iso.datetime().optional(),
     hasta: z.iso.datetime().optional(),
     limite: z.coerce.number().int().min(1).max(MAXIMO_POR_PAGINA).default(POR_PAGINA_POR_DEFECTO),

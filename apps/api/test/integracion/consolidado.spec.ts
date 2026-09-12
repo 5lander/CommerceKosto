@@ -96,6 +96,7 @@ describe('consolidado de company', () => {
   let duena: Client;
   let admin: string;
   let gerente: string;
+  let duenaDelNegocio: string;
   let centro: string;
   let norte: string;
   let vacio: string;
@@ -199,11 +200,18 @@ describe('consolidado de company', () => {
   }
 
   async function cargarVentas(donde: string, ventas: readonly Cuerpo[]): Promise<void> {
+    // La carga va sobre la versión leída (D-16.121).
+    const leida = await request(servidor())
+      .get('/analitica/ventas')
+      .query({ locationId: donde, anio: ANIO, mes: MARZO })
+      .set('Cookie', admin);
+    const version = (leida.body as { version: number }).version;
+
     const respuesta = await request(servidor())
       .post('/analitica/ventas')
       .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
-      .send({ locationId: donde, anio: ANIO, mes: MARZO, ventas });
-    expect(respuesta.status).toBe(SIN_CONTENIDO);
+      .send({ locationId: donde, anio: ANIO, mes: MARZO, version, ventas });
+    expect(respuesta.status).toBe(OK);
   }
 
   async function comprar(datos: {
@@ -300,6 +308,8 @@ describe('consolidado de company', () => {
     const correos = {
       admin: `admin.${sufijo}@snacklab.ec`,
       gerente: `gerente.${sufijo}@snacklab.ec`,
+      // Solo el OWNER reabre un mes (D6): lo necesita la prueba de P16-C.
+      owner: `owner.${sufijo}@snacklab.ec`,
     };
     for (const correo of Object.values(correos)) {
       await duena.query(
@@ -319,8 +329,15 @@ describe('consolidado de company', () => {
       [company, centro, correos.gerente],
     );
 
+    await duena.query(
+      `INSERT INTO user_role (company_id, user_id, role_code, has_location)
+       SELECT $1, id, 'OWNER', false FROM app_user WHERE email = $2`,
+      [company, correos.owner],
+    );
+
     admin = await entrar(correos.admin);
     gerente = await entrar(correos.gerente);
+    duenaDelNegocio = await entrar(correos.owner);
 
     // EL MISMO producto en las dos ubicaciones, con PVP distinto a propósito:
     // es lo que la comparativa existe para enseñar.
@@ -496,6 +513,44 @@ describe('consolidado de company', () => {
       for (const ubicacion of total.ubicaciones) {
         expect(ajenas.has(ubicacion.nombre)).toBe(false);
       }
+    });
+  });
+
+  /**
+   * VA LA ÚLTIMA A PROPÓSITO: confirmar un conteo en el Centro cambia su consumo
+   * real y su inventario final, que las pruebas de arriba comparan con lo sembrado.
+   */
+  describe('🔴 el estado de cada ubicación sale del período, no del conteo (P16-C, D-16.124)', () => {
+    function mutar(ruta: string, quien: string, cuerpo: Cuerpo = {}) {
+      return request(servidor()).post(ruta).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien)).send(cuerpo);
+    }
+
+    function estadoDe(total: ConsolidadoDto, locationId: string): string | undefined {
+      return total.ubicaciones.find((u) => u.locationId === locationId)?.estadoDelPeriodo;
+    }
+
+    it('cerrado con su conteo es CERRADO; reabierto CONSERVA el conteo y vuelve a ser ABIERTO', async () => {
+      const countId = await crear('/conteos', { locationId: centro, anio: ANIO, mes: MARZO, note: null });
+      expect((await mutar(`/conteos/${countId}/confirmacion`, admin)).status).toBe(SIN_CONTENIDO);
+      expect((await mutar(`/conteos/${countId}/cierre-de-periodo`, admin)).status).toBe(SIN_CONTENIDO);
+
+      const cerrado = (await consolidado()).body as ConsolidadoDto;
+      expect(estadoDe(cerrado, centro)).toBe('CERRADO');
+      expect(estadoDe(cerrado, norte)).toBe('ABIERTO');
+      expect([cerrado.cerradas, cerrado.abiertas]).toEqual([1, 1]);
+
+      const periodos = await request(servidor()).get('/periodos').query({ locationId: centro }).set('Cookie', admin);
+      const marzo = (periodos.body as { id: string; anio: number; mes: number }[]).find((p) => p.anio === ANIO && p.mes === MARZO);
+      const reabierto = await mutar(`/periodos/${marzo?.id ?? ''}/reapertura`, duenaDelNegocio, { motivo: 'Faltó una factura de marzo' });
+      expect(reabierto.status).toBe(SIN_CONTENIDO);
+
+      // El conteo sigue confirmado: es exactamente el caso que la regla vieja leía al revés.
+      const { rows } = await duena.query<{ status: string }>('SELECT status FROM physical_count WHERE id = $1', [countId]);
+      expect(rows[0]?.status).toBe('CONFIRMADO');
+
+      const abierto = (await consolidado()).body as ConsolidadoDto;
+      expect(estadoDe(abierto, centro)).toBe('ABIERTO');
+      expect([abierto.cerradas, abierto.abiertas]).toEqual([0, 2]);
     });
   });
 });

@@ -47,9 +47,11 @@
 
 **Los dos 404 también se distinguen por el `code`, y esto importa en pantalla.** `RECURSO_NO_ENCONTRADO` es un error: el enlace está roto o el id no es tuyo. `PERIODO_SIN_DATOS` **no lo es**: es un estado normal del producto —el mes todavía no se ha trabajado— y lo que corresponde enseñar no es un aviso rojo sino «este mes está sin abrir» con el camino para abrirlo (cargar las ventas). Lo devuelven las **seis vistas** de analítica; `GET /analitica/ventas` y `GET /analitica/costos-fijos` **no**, porque para ellas un mes sin abrir es la lista vacía.
 
-**Un identificador mal formado es 400, no 500** *(P16-A2, INC-012)*. Un `:id` de ruta o un `?itemId=` que no sea un UUID, una `unidadDeUso` que no tenga la forma de un código corto en minúsculas (`kg`, `lt`, `unid`) y un decimal con más de 30 decimales devuelven `400 ENTRADA_INVALIDA` con un mensaje que dice qué corregir. Antes los tres salían como `INTERNAL_ERROR` y no decían nada.
+**Un identificador mal formado es 400, no 500** *(P16-A2, INC-012)*. Un `:id` de ruta o un `?itemId=` que no sea un UUID, una `unidadDeUso` que no tenga la forma de un código corto en minúsculas (`kg`, `lt`, `unid`) y un decimal con más de 30 decimales devuelven `400 ENTRADA_INVALIDA` con un mensaje que dice qué corregir. Antes los tres salían como `INTERNAL_ERROR` y no decían nada. **Desde P16-C todos los `:id` de ruta pasan por el mismo pipe** (D-16.130), así que la respuesta es la misma en cualquier ruta —incluida `POST /usuarios/:id/reenvio-de-invitacion`, que hasta entonces respondía `BAD_REQUEST`—.
 
 **Concurrencia optimista** *(P16-B, D-16.100, ADR-023)*. Cinco escrituras de reemplazo total piden de vuelta lo que se leyó: `PUT /catalogo/items/:id`, `PUT /productos/:id/ubicaciones`, `PUT /productos/:id/empaque` y `PUT /productos/:id/componentes` llevan `version` (la de la ficha); `PUT /recetas` lleva `basadaEn` (el `ultimaVersionId` de `GET /recetas`). Si alguien escribió entre medias, **409 `CONFLICTO_DE_VERSION`**, y el cuerpo es `{ code, message }` **sin la versión actual** (D-16.104): con el número dentro lo fácil sería reenviar con él, que es pisar al otro con un paso más. Las cuatro con `version` responden **200 `{ "version": n }`** en vez de 204, para que el formulario pueda seguir guardando sin releer. Sin `version` o sin `basadaEn` es 400, no una escritura sin comprobar. Un recurso que no existe sigue siendo 404, nunca 409.
+
+**Y desde P16-C, la carga del mes** (D-16.121): `POST /analitica/ventas` y `POST /analitica/costos-fijos` llevan la `version` que devolvió su `GET` y responden **200 `{ "version": n }`**. Las dos comparten la versión del período: guardar una deja obsoleto el formulario abierto de la otra, en ese mes y esa ubicación. Un mes que todavía no tiene fila se lee con `version: 1`.
 
 **Los números del cuerpo dicen qué aceptan** *(P16-B, INC-012)*. Un precio, un PVP, un rendimiento por lote, una presentación o una cantidad de combo de `"0"` o negativos son **400**; un importe de movimiento negativo, también. Hasta P16-B varios salían como 500 del `CHECK` de la base.
 
@@ -146,9 +148,38 @@ El correo lo entrega el despachador, no esta petición: un 202 dice «encolado»
 
 `tipo` ∈ `BODEGA` · `LOCAL` · `AMBOS`. **201** con la ubicación creada. **409** `LIMITE_DEL_PLAN` al llegar al máximo del plan — comprobado dentro de la misma transacción que inserta, así que dos pestañas abiertas no lo saltan.
 
+### `PUT /ubicaciones/:id` — `location.update` *(P16-C)*
+
+El mismo cuerpo que crear, `{ "nombre": "…", "tipo": "…" }`. **200** con la ubicación como queda: `{ id, nombre, tipo, estado }`. Solo `OWNER` y `ADMIN` tienen el permiso.
+
+**No edita el estado** (D-16.127): hoy `INACTIVE` no tiene ningún efecto en el sistema —una ubicación inactiva seguiría vendiendo y contando—, y un interruptor que no hace nada engaña. **No lleva versión** (D-16.13): la señal para añadirla es el primer cambio perdido.
+
+**409 `CONFLICTO`** con el nombre dentro si otra ubicación de la company ya lo usa. **403 `PERMISO_DENEGADO`** si la ubicación no está en tu alcance **o es de otra company** —como en toda ruta por ubicación desde P15—. Queda en `audit_log` como `location.updated`.
+
 ---
 
 ## Usuarios y roles
+
+### `GET /usuarios` — `user.read` *(P16-C)*
+
+```jsonc
+[
+  { "id": "…", "email": "nuevo@snacklab.ec", "estado": "INVITED",
+    "roles": [ { "rol": "GERENTE_LOCAL", "locationId": "…" } ],
+    "invitacionCaducaEn": "2026-09-19T15:02:11.000Z",
+    // El ÚLTIMO correo de invitación: PENDIENTE · ENVIADO · FALLIDO.
+    // `error`, solo si lo hay. `null` si ya activó o si nunca se encoló uno.
+    "correoInvitacion": { "estado": "FALLIDO", "error": "Resend respondio 422 al enviar el correo." } }
+]
+```
+
+Ordenados por correo. **Por alcance** (D-16.126): un rol de company ve a todos; un `GERENTE_LOCAL` ve solo a quien tiene un rol en **sus** ubicaciones, y solo esas asignaciones. `BODEGA` no tiene `user.read`: **403**.
+
+**`correoInvitacion` es para decidir si reenviar**, y por eso no trae nada más que el estado y el error: **nunca los datos del correo**, que llevan el enlace con el token mientras está en vuelo. No se filtran aquí: el rol de la aplicación no puede leer esa columna (ADR-025). Un `FALLIDO` es la señal para `POST /usuarios/:id/reenvio-de-invitacion`.
+
+### `GET /roles` — `user.read` *(P16-C)*
+
+`[{ "codigo": "GERENTE_LOCAL", "requiereUbicacion": true, "permisos": ["count.read", "…"] }]`, ordenado por código. Es el catálogo —el mismo para todas las companies— que la pantalla de usuarios necesita para saber qué roles piden ubicación al asignarlos.
 
 ### `POST /usuarios` — `user.invite`
 
@@ -162,7 +193,7 @@ El correo lo entrega el despachador, no esta petición: un 202 dice «encolado»
 
 Sin cuerpo. **202**: el invitado recibe un enlace **nuevo** y **el anterior deja de servir** (el token se sustituye; `app_user` tiene como mucho una invitación viva). Se encola otro correo, con la misma caducidad de siete días contada desde ahora.
 
-**404** `RECURSO_NO_ENCONTRADO` si el usuario no está **invitado en tu company**: ya activó, no existe, o existe en otra company — los tres iguales. **400** `BAD_REQUEST` si `:id` no es un UUID. Mismo permiso que invitar: es la misma acción, repetida. **429** `LIMITE_DE_SOLICITUDES` a partir del trigésimo primer reenvío por IP en una hora (los 404 también cuentan) o del cuarto al mismo invitado.
+**404** `RECURSO_NO_ENCONTRADO` si el usuario no está **invitado en tu company**: ya activó, no existe, o existe en otra company — los tres iguales. **400** `ENTRADA_INVALIDA` si `:id` no es un UUID *(P16-C; antes `BAD_REQUEST`, el único `:id` de la API que respondía distinto)*. Mismo permiso que invitar: es la misma acción, repetida. **429** `LIMITE_DE_SOLICITUDES` a partir del trigésimo primer reenvío por IP en una hora (los 404 también cuentan) o del cuarto al mismo invitado.
 
 ### `POST /usuarios/activacion` — público
 
@@ -714,6 +745,7 @@ El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
 |---|---|
 | `locationId` | obligatorio |
 | `itemId` | opcional |
+| `tipo` | opcional *(P16-C)*: `COMPRA` · `TRANSFERENCIA_SALIDA` · `TRANSFERENCIA_ENTRADA` · `PRODUCCION` · `MERMA` · `AJUSTE` · `CONSUMO_POR_VENTA`. Otro valor es 400 |
 | `desde` · `hasta` | ISO 8601, sobre `occurredAt` |
 | `limite` | 1–200, por defecto 50 |
 | `cursor` | opaco. Es el `siguiente` de la página anterior |
@@ -747,6 +779,10 @@ El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
   "siguiente": null
 }
 ```
+
+### `GET /inventario/movimientos/:id` — `inventory.read` *(P16-C)*
+
+Un movimiento, **con la misma forma que una fila del libro** —desglose incluido—: es lo que la pantalla de corrección enseña antes de anularlo. **404** si no existe en tu company; **403 `PERMISO_DENEGADO`** si es de una ubicación que no está en tu alcance; **400** si `:id` no es un UUID. `BODEGA` no lee el libro y tampoco esto (§4.3).
 
 ### `POST /inventario/movimientos` — `inventory.write`
 
@@ -1105,31 +1141,34 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
 }
 ```
 
-**`estadoDelPeriodo` no es decorativo.** El período es de una ubicación (ADR-010 §1), así que el total puede mezclar meses cerrados con meses todavía abiertos —cuyo número aún puede cambiar—, y quien lo lee tiene derecho a saberlo.
+**`estadoDelPeriodo` no es decorativo.** El período es de una ubicación (ADR-010 §1), así que el total puede mezclar meses cerrados con meses todavía abiertos —cuyo número aún puede cambiar—, y quien lo lee tiene derecho a saberlo. **Desde P16-C sale del estado real del período** (D-16.124), igual que `cerradas` y `abiertas`: hasta entonces se deducía de si había conteo confirmado, y un mes **reabierto** que conservaba su conteo salía `CERRADO`.
 
 ### `POST /analitica/ventas` — `sales.write`
 
 ```json
-{ "locationId": "…", "anio": 2026, "mes": 3,
+{ "locationId": "…", "anio": 2026, "mes": 3, "version": 4,
   "ventas": [ { "productId": "…", "unidades": "320" } ] }
 ```
 
-**204.** **Reemplaza la carga entera del mes**: lo que se manda es lo que queda. Es lo que hace posible la grilla de CLAUDE.md §10 —«una grilla editable con el período anterior precargado, no un formulario por producto»—, y lo que D9 pide: el caso de uso recibe un lote «sin importar si viene de digitación, importación o un sistema externo».
+**200 `{ "version": 5 }`** *(P16-C; antes 204)*. `version` es la del `GET` de ventas o de costos fijos —comparten la de la carga del mes—; si otra carga del mismo mes y la misma ubicación llegó antes, **409 `CONFLICTO_DE_VERSION`** y no se borra nada. **Reemplaza la carga entera del mes**: lo que se manda es lo que queda. Es lo que hace posible la grilla de CLAUDE.md §10 —«una grilla editable con el período anterior precargado, no un formulario por producto»—, y lo que D9 pide: el caso de uso recibe un lote «sin importar si viene de digitación, importación o un sistema externo».
 
 `unidades` es un **entero**: el dominio lo modela como `Count`, y la base lo hace cumplir con `units = trunc(units)`.
 
 | Código | Cuándo |
 |---|---|
 | `400` | El mismo producto dos veces en el lote |
-| `409` | El período está cerrado (D6): si la cifra de ventas de un mes sellado cambiara, su food cost real cambiaría con ella |
+| `409` `CONFLICTO` | El período está cerrado (D6): si la cifra de ventas de un mes sellado cambiara, su food cost real cambiaría con ella |
+| `409` `CONFLICTO_DE_VERSION` | Otra carga del mismo mes llegó después de tu lectura *(P16-C)* |
+
+**Manda todas las filas con valor, no solo las que cambiaron.** Es un reemplazo: una fila que no viaja deja de tener ventas ese mes. La pantalla de ventas mandaba solo las cambiadas hasta P16-C, y guardar tres casillas borraba las demás.
 
 ### `GET /analitica/ventas` — `sales.read`
 
 ```json
-[ { "productId": "…", "nombre": "Bolón de verde", "unidades": "320" } ]
+{ "version": 4, "ventas": [ { "productId": "…", "nombre": "Bolón de verde", "unidades": "320" } ] }
 ```
 
-**200 siempre, y `[]` si el mes no se ha abierto.** No devuelve `PERIODO_SIN_DATOS`: para una carga, un mes sin fila de período no tiene ventas, y la lista vacía es la verdad. Ese 404 es de las **seis vistas**, no de aquí.
+**Cambió de forma en P16-C** (antes, la lista suelta): `version` es la que el guardado pide de vuelta. **200 siempre, y `ventas: []` con `version: 1` si el mes no se ha abierto** (D-16.122). No devuelve `PERIODO_SIN_DATOS`: para una carga, un mes sin fila de período no tiene ventas, y la lista vacía es la verdad. Ese 404 es de las **seis vistas**, no de aquí.
 
 `nombre` desde P16-A2, con el mismo contrato que en menu engineering: vacío si el producto ya no está en la carta.
 
@@ -1143,7 +1182,7 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
     { "concepto": "Comision tarjeta", "clasificacion": "VARIABLE", "importe": "0.03" } ] }
 ```
 
-**204.** T6 del Excel, con el campo que SPEC §17 pide por su nombre.
+Con `"version"`, como las ventas: **200 `{ "version": n }`** y **409 `CONFLICTO_DE_VERSION`** si otra carga del mes llegó antes *(P16-C)*. `GET /analitica/costos-fijos` devuelve `{ "version": n, "costos": [ … ] }`. T6 del Excel, con el campo que SPEC §17 pide por su nombre.
 
 **`clasificacion` es un enum, no texto libre.** El Excel identifica la mano de obra por el prefijo `"Sueldos*"` y su propia nota dice que «es frágil»: un concepto llamado «Nómina» quedaría fuera del prime cost sin que nada avisara, y el prime cost decide si un local es viable.
 

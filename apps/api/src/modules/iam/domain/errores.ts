@@ -138,6 +138,24 @@ export class TokenDeRestablecimientoInvalidoError extends ErrorDeDominio {
  * necesito. Dejarla alli habria obligado a `inventory` a importar un error de
  * dominio de `recipes` para hablar de permisos, o a duplicar la funcion.
  */
+/** P16-C: `PUT /ubicaciones/:id` sobre una que no existe en la company — ajena o inventada, el mismo texto. */
+export class UbicacionNoEncontradaError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+
+  public constructor() {
+    super('Esa ubicacion no existe en tu company.');
+  }
+}
+
+/** P16-C: el indice `(company_id, name)` de `location`, traducido antes de que suba como 500 (INC-012). */
+export class NombreDeUbicacionEnUsoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor(nombre: string) {
+    super(`Ya hay una ubicacion llamada «${nombre}» en tu company. Elige otro nombre.`, { nombre });
+  }
+}
+
 export class UbicacionFueraDeAlcanceError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'PERMISO_DENEGADO';
 
