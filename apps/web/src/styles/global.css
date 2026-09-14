@@ -803,7 +803,18 @@ input[type='number'] {
  * mueve al teclear, se pierde el sitio.
  */
 .celda-editable {
-  width: 7rem;
+  width: 5rem;
+}
+
+/*
+ * En escritorio, más ancha. En un teléfono de 360 px la de 7rem hacía que la
+ * rejilla de ventas desbordara su marco y cortara la casilla y la cabecera
+ * «Unidades» (visto en la captura de la pantalla 3). 5rem caben seis cifras.
+ */
+@media (min-width: 60rem) {
+  .celda-editable {
+    width: 7rem;
+  }
 }
 
 /*

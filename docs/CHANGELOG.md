@@ -4,6 +4,17 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 3 — Ventas deja de costear la carta para saber qué hay · 2026-09-14
+
+> Cuarto commit de pantallas. Sin cambios en `apps/api`.
+
+**La rejilla de ventas lee la carta de `GET /productos/ubicaciones`** en vez de pedir `GET /costeo` —la
+carta entera costeada, el cálculo más caro de la API— para pintar una columna de nombres. Y **a 360 px
+ya cabe**: la casilla editable baja a 5rem en el teléfono. La versión de la carga del mes, la referencia
+del mes anterior y el guardado de todas las filas con valor ya estaban.
+
+---
+
 ## P16 · Pantalla 1b — Olvidé mi contraseña, y la respuesta vacía que la rompía · 2026-09-14
 
 > Tercer commit de pantallas. Una incidencia nueva (INC-025). Sin cambios en `apps/api`.

@@ -524,3 +524,33 @@ src/lib/csrf.ts:38:22 - error TS1294: This syntax is not allowed when 'erasableS
 - **Los mensajes de `iam/domain/errores.ts` van sin tildes** («no es valido o ya caduco») y llegan tal
   cual a la pantalla. Es texto de la API; se corrige en el próximo paquete que toque `iam`.
 - El largo mínimo (12) está en el cliente como **ayuda**, con su porqué: si la API lo cambia, manda su 400.
+
+---
+
+## Pantalla 3 — Ventas (arreglo) · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/ventas/page.tsx` | **La carta sale de `GET /productos/ubicaciones`** y no de `GET /costeo`: la rejilla costeaba la carta entera —recetas, precios, cascada— solo para saber qué productos hay y cómo se llaman. Los cuatro roles que leen ventas leen productos (comprobado en `role_permission`) |
+| `styles/global.css` | `.celda-editable` a **5rem** en el teléfono y 7rem desde `60rem` |
+
+Cierra dos pendientes del armazón: «`/ventas` sigue leyendo `/costeo` entero» y «a 360 px la tabla de
+ventas desplaza en horizontal».
+
+La versión de la carga del mes (D-16.1, D-16.121), la precarga del mes anterior como referencia y el
+guardado de todas las filas con valor **ya estaban** desde P16-C y el armazón; esta pantalla no los toca.
+
+### Cómo se verificó
+
+- **Log de la API** durante el recorrido: `/productos/ubicaciones` 7 veces, `/costeo` **ninguna**.
+- **Escritura en el navegador** (gerente, Local Centro): Enter baja de fila, las letras no entran,
+  «Guardar (1)» → «Guardado», tras recargar `97` y se puede seguir escribiendo (`977`), y octubre enseña
+  septiembre como mes anterior.
+- **Capturas** de ventas e inventario, tres roles × 1280 y 360: ninguna desborda, y a 360 px las casillas
+  y la cabecera «Unidades» caben en su marco (antes se cortaban).
+
+### Decisiones
+
+D-16.156 y D-16.157 en `ESTADO.md`.

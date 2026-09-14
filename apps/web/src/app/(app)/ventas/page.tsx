@@ -62,15 +62,12 @@ interface VentasDelMes {
   readonly ventas: readonly Venta[];
 }
 
+/** Lo que la rejilla usa de `GET /productos/ubicaciones`: la carta de la sucursal. */
 interface Producto {
   readonly productId: string;
   readonly nombre: string;
   readonly categoria: string | null;
   readonly activo: boolean;
-}
-
-interface Carta {
-  readonly productos: readonly Producto[];
 }
 
 /** Lo que la rejilla necesita, ya leído: con esto se monta y no vuelve a leer. */
@@ -93,6 +90,12 @@ function porProducto(ventas: readonly Venta[]): ReadonlyMap<string, string> {
 /**
  * La carta, las ventas del mes y las del anterior, en paralelo.
  *
+ * **LA CARTA SALE DE `GET /productos/ubicaciones`, NO DE `GET /costeo`** (pantalla
+ * 3). Hasta aquí esta rejilla costeaba la carta entera —recetas, precios,
+ * cascada— solo para saber qué productos hay y cómo se llaman: el cálculo más
+ * caro de la API para pintar una columna de texto. La lista por ubicación existe
+ * desde P16-B y trae justo eso.
+ *
  * **SIN `catch` DE 404, Y ESO ES UN ARREGLO** (P16-A2). Había uno que tragaba
  * *cualquier* 404 y lo convertía en lista vacía; era código muerto —esta carga
  * devuelve `[]` para un mes sin fila de período, nunca 404— y además escondía
@@ -107,12 +110,12 @@ function useVentasDelMes(sucursal: string | null, periodo: Mes): Lectura<DatosDe
 
     return async (): Promise<DatosDeVentas> => {
       const [carta, delMes, previo] = await Promise.all([
-        llamar<Carta>({ ruta: `/costeo?locationId=${sucursal}` }),
+        llamar<readonly Producto[]>({ ruta: `/productos/ubicaciones?locationId=${sucursal}` }),
         ventasDe(periodo),
         ventasDe(mesAnterior(periodo)),
       ]);
       return {
-        activos: carta.productos.filter((producto) => producto.activo),
+        activos: carta.filter((producto) => producto.activo),
         version: delMes.version,
         actuales: porProducto(delMes.ventas),
         anteriores: porProducto(previo.ventas),

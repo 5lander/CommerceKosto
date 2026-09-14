@@ -322,3 +322,39 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 3 — Ventas (arreglo) · 2026-09-14
+
+**Alcance del diff:** `app/(app)/ventas/page.tsx`, `styles/global.css`, `ESTADO.md`, `CHANGELOG` y
+`docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Una lectura más barata de la misma verdad; ningún cálculo en el cliente |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 513 archivos** (sin archivos nuevos) |
+| C · Seguridad | ✅ | `GET /productos/ubicaciones` lleva PVP y `BODEGA` no la recibe; `BODEGA` tampoco entra en ventas (capturado) |
+| F · Frontend | ✅ | Escritura y capturas en `CONSTRUCCION.md` |
+| G · Pruebas | ✅ | Salida abajo |
+| I9 · Bundle | ✅ | piso **126,9 KiB**; `/ventas` 143,3; la mayor `/inventario` **143,5** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 513 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+ Test Files  67 passed (67)
+      Tests  894 passed (894)
+ℹ tests 31
+ℹ pass 31
+ℹ fail 0
+ Test Files  33 passed (33)
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```
