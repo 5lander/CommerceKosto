@@ -63,6 +63,28 @@ export function consultaDelMes({ anio, mes }: Mes): string {
   return `anio=${String(anio)}&mes=${String(mes)}`;
 }
 
+const FORMATO_DEL_DIA = new Intl.DateTimeFormat('en-CA', {
+  timeZone: ZONA_DEL_NEGOCIO,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** Hoy en Ecuador, con la forma de un `<input type="date">`: `2026-09-14`. */
+export function diaDeHoy(): string {
+  return FORMATO_DEL_DIA.format(new Date());
+}
+
+/**
+ * Un día `2026-09-14` como instante de la API: **al mediodía UTC** (D-16.4), que
+ * cae en ese mismo día en toda América. A medianoche UTC, en Guayaquil sería el
+ * día anterior (INC-013). La forma la da el campo de fecha; el valor lo valida
+ * la API.
+ */
+export function instanteDelDia(dia: string): string {
+  return `${dia.trim()}T12:00:00.000Z`;
+}
+
 const FORMATO_DE_FECHA = new Intl.DateTimeFormat('es-EC', {
   timeZone: ZONA_DEL_NEGOCIO,
   day: 'numeric',

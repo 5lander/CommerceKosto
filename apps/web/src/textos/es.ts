@@ -95,6 +95,31 @@ export const TEXTOS = {
     verMas: 'Ver más',
     vacio: 'No hay precios esperando confirmación.',
     vacioAyuda: 'Cuando alguien sugiera un precio nuevo, aparecerá aquí para decidirlo.',
+    sugerir: 'Sugerir precio',
+  },
+
+  /** Pantalla 10: sugerir un precio de referencia. */
+  precioNuevo: {
+    titulo: 'Sugerir precio',
+    ayuda: 'Queda por confirmar: no cambia ningún costo hasta que alguien lo confirme.',
+    insumo: 'Insumo',
+    eligeInsumo: 'Elige un insumo',
+    sinInsumos: 'No hay insumos activos.',
+    sinInsumosAyuda: 'Da de alta el insumo antes de ponerle precio.',
+    vigente: 'Vigente hoy:',
+    sinVigente: 'Todavía no tiene ningún precio confirmado.',
+    presentacion: 'Presentación',
+    sinPresentaciones: 'Este insumo no tiene presentaciones de compra activas: un precio de compra necesita saber cuánto trae lo que se compra.',
+    crearPresentacion: 'Crear presentación',
+    precio: 'Precio de la presentación en la factura, con IVA',
+    iva: 'IVA de esta factura (%)',
+    ivaAyuda: 'Vacío: el de la presentación. Escribe 0 si esta compra fue exenta.',
+    costoEstandar: 'Costo estándar por',
+    costoEstandarAyuda: 'Una preparación se costea con su costo estándar, no con lo que costó cada lote (R10). No lleva IVA de compra.',
+    desde: 'Vigente desde',
+    nota: 'Nota',
+    crear: 'Sugerir precio',
+    creando: 'Enviando…',
   },
 
   /** Pantalla 8: las presentaciones de compra de un insumo. */

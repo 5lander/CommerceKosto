@@ -775,3 +775,49 @@ vuelve a ser `54.000000000000`, por `created_at` a igual `valid_from`), y el ace
 ### Decisiones
 
 D-16.173…D-16.175 en `ESTADO.md`.
+
+---
+
+## Pantalla 10 — Precio: sugerir · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/precios/nuevo/page.tsx` | `POST /precios` con `pricing.suggest`. Insumo (precargado con `?itemId=` desde la ficha), **el vigente de hoy a la vista**, y según el `tipo` de la ficha: **comprado** → presentación activa, precio de la factura con IVA y tarifa opcional (vacía = `null`, la de la presentación; `0` = exenta); **preparación** → costo estándar por unidad de uso, sin presentación ni IVA (R10). Vigencia desde (hoy en Ecuador, a `12:00Z`) y nota. `origen` siempre `MANUAL`. Al terminar, a la bandeja |
+| `app/(app)/precios/page.tsx`, `app/(app)/insumos/[id]/page.tsx` | «Sugerir precio» con `pricing.suggest` en la bandeja y en la ficha |
+| `lib/fechas.ts` | `diaDeHoy` (Ecuador, forma de `<input type="date">`) e `instanteDelDia` (al mediodía UTC), +3 pruebas |
+| `lib/campos.ts` | `textoOpcional`: tercera repetición de «vacío viaja como `null`»; la usan también el alta y la edición de artículos. +2 pruebas |
+| `styles/global.css` | `.campo select { min-width: 0 }` |
+| bandeja, ficha, formulario | los precios de referencia con `comoCostoDeUso` |
+
+### Lo que destapó la verificación
+
+1. **Un `<select>` con opciones largas desbordaba la página a 360 px** (387 px): como elemento de rejilla no
+   bajaba de su opción más larga. Con `min-width: 0` ocupa el ancho del campo. Medido otra vez: 360.
+2. **El costo estándar de una preparación salía `0.00`** en la bandeja y en el historial de la ficha
+   (pantalla 6): su precio es por unidad de uso —`0.0045`— y `comoImporte` lo redondeaba a dos decimales.
+   Con `comoCostoDeUso`, que con parte entera da el mismo formato, sale `0.0045`.
+
+### Cómo se verificó
+
+```
+desdeLaFicha    url /precios/nuevo?itemId=…  «Vigente hoy: 54.00 · desde 14 sept 2026»
+                campos [Insumo, Presentación, Precio … con IVA, IVA de esta factura (%), Vigente desde, Nota]
+                presentación «Arroz funda 5 kg … — 5 kg · IVA 0,0 %» · desde 2026-09-14 · volver a la ficha
+precioCero      400 «precio: debe ser un decimal mayor que cero» junto al botón, sin salir del formulario
+compra          «55,50», IVA vacío → bandeja «54.00 → 55.50 · IVA 0,0 %» (la de la presentación)
+preparación     campos [Insumo, Costo estándar por lt, Vigente desde, Nota], sin IVA → bandeja «0.0045 · IVA 0,0 %»
+exenta          aceite «29», IVA «0» frente al 15 % de su presentación → «IVA 0,0 %»
+sinPresentación aviso + «Crear presentación» → /insumos/…/articulos/nuevo; sin formulario
+en la API       validFrom 2026-09-14T12:00:00.000Z en todos
+gerente         «Sugerir precio» sí, botones de decisión 0, formulario sí
+bodega          «sin acceso» en /precios/nuevo; sin «Sugerir precio» en la ficha
+movil 360       { desborda: false, px: 360 } (formulario y alta de insumo)
+```
+
+**Lo sintético se deshizo**: todos los sugeridos con nota «pantalla 10» rechazados; bandeja vacía.
+
+### Decisiones
+
+D-16.176…D-16.179 en `ESTADO.md`.

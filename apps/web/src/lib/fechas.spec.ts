@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { comoFecha, consultaDelMes, mesAnterior, mesDeHoy, mesDeTexto } from './fechas.ts';
+import { comoFecha, consultaDelMes, diaDeHoy, instanteDelDia, mesAnterior, mesDeHoy, mesDeTexto } from './fechas.ts';
 
 describe('mesDeTexto', () => {
   it('lee un año y un mes con forma de año y mes', () => {
@@ -54,6 +54,20 @@ describe('comoFecha', () => {
 
   it('el mediodía UTC con el que se fechan las vigencias cae en su día', () => {
     assert.ok(comoFecha('2026-09-13T12:00:00.000Z').startsWith('13'));
+  });
+});
+
+describe('diaDeHoy e instanteDelDia', () => {
+  it('hoy tiene la forma de un campo de fecha', () => {
+    assert.match(diaDeHoy(), /^\d{4}-\d{2}-\d{2}$/u);
+  });
+
+  it('un día viaja al mediodía UTC, nunca a medianoche', () => {
+    assert.equal(instanteDelDia('2026-09-01'), '2026-09-01T12:00:00.000Z');
+  });
+
+  it('y ese instante se lee en el mismo día en Guayaquil', () => {
+    assert.ok(comoFecha(instanteDelDia('2026-09-01')).startsWith('1 '));
   });
 });
 

@@ -26,7 +26,7 @@ import { Pildora } from '../../../../componentes/ui/Pildora';
 import { Tabla } from '../../../../componentes/ui/Tabla';
 import { Vista } from '../../../../componentes/ui/Vista';
 import { Volver } from '../../../../componentes/ui/Volver';
-import { comoCostoDeUso, comoImporte, comoPorcentaje, sinCerosDeSobra } from '../../../../lib/decimales';
+import { comoCostoDeUso, comoPorcentaje, sinCerosDeSobra } from '../../../../lib/decimales';
 import { comoFecha } from '../../../../lib/fechas';
 import { usePermisos } from '../../../../lib/permisos';
 import { useEnvio } from '../../../../lib/useEnvio';
@@ -42,7 +42,7 @@ export default function FichaDelInsumo(): ReactNode {
     <Marco
       titulo={ficha?.nombre ?? TEXTOS.insumo.fichaTitulo}
       ayuda={ficha === undefined ? '' : resumenDe(ficha)}
-      acciones={<AccionesDeLaFicha id={id} puedeEditar={tiene('catalog.update')} />}
+      acciones={<AccionesDeLaFicha id={id} puedeEditar={tiene('catalog.update')} puedeSugerir={tiene('pricing.suggest')} />}
     >
       <Vista lectura={lectura} vacio="nunca">
         {(leido) => (
@@ -68,10 +68,23 @@ function resumenDe(ficha: FichaDeItem): string {
   return ficha.estado === 'INACTIVE' ? [...partes, TEXTOS.insumos.archivado].join(' · ') : partes.join(' · ');
 }
 
-function AccionesDeLaFicha({ id, puedeEditar }: { readonly id: string; readonly puedeEditar: boolean }): ReactNode {
+function AccionesDeLaFicha({
+  id,
+  puedeEditar,
+  puedeSugerir,
+}: {
+  readonly id: string;
+  readonly puedeEditar: boolean;
+  readonly puedeSugerir: boolean;
+}): ReactNode {
   return (
     <div className="linea">
       <Volver href="/insumos" />
+      {puedeSugerir && (
+        <Link href={`/precios/nuevo?itemId=${id}`} className="boton">
+          {TEXTOS.precios.sugerir}
+        </Link>
+      )}
       {puedeEditar && (
         <Link href={`/insumos/${id}/editar`} className="boton">
           {TEXTOS.insumo.editar}
@@ -249,7 +262,8 @@ function HistorialDePrecios({ precios }: { readonly precios: Precios }): ReactNo
           {precios.historial.map((precio) => (
             <tr key={precio.id}>
               <td>{comoFecha(precio.validFrom)}</td>
-              <td className="numero">{comoImporte(precio.precio)}</td>
+              {/* El precio de una preparación es costo por unidad de uso: a dos decimales sería 0.00. */}
+              <td className="numero">{comoCostoDeUso(precio.precio)}</td>
               <td>
                 {precio.vigente ? (
                   <Pildora tono="bien" texto={insumo.vigente} />

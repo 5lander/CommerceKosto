@@ -4,6 +4,20 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 10 — Sugerir un precio · 2026-09-14
+
+> Undécimo commit de pantallas. Sin cambios en `apps/api`.
+
+**Un precio nuevo, desde la ficha del insumo o desde la bandeja**, con el vigente de hoy a la vista. Para un
+insumo comprado: la presentación, el precio de la factura con IVA y, si esa factura no lleva la tarifa de
+siempre, la suya (`0` si fue exenta). Para una preparación: su costo estándar por unidad de uso, sin IVA.
+Nace por confirmar y la pantalla lleva a la bandeja.
+
+**Arreglado de paso:** el costo estándar de una preparación salía `0.00` en la bandeja y en el historial de
+la ficha; y un desplegable con opciones largas desbordaba la página en el teléfono.
+
+---
+
 ## P16 · Pantalla 9 — La bandeja de precios por confirmar · 2026-09-14
 
 > Décimo commit de pantallas. Sin cambios en `apps/api`.

@@ -30,6 +30,7 @@ import { Selector } from '../../../../../../componentes/ui/Selector';
 import { Vista } from '../../../../../../componentes/ui/Vista';
 import { Volver } from '../../../../../../componentes/ui/Volver';
 import { llamar } from '../../../../../../lib/api';
+import { textoOpcional } from '../../../../../../lib/campos';
 import { conPuntoDecimal, fraccionDePorcentaje, porcentajeDeFraccion } from '../../../../../../lib/decimales';
 import { useEnvio } from '../../../../../../lib/useEnvio';
 import { useCarga, type Lectura } from '../../../../../../lib/useLectura';
@@ -108,11 +109,6 @@ function vacioDe(ficha: FichaDeItem): Borrador {
   };
 }
 
-/** Un texto opcional vacío viaja como `null`, no como cadena vacía. */
-function opcional(texto: string): string | null {
-  return texto.trim() === '' ? null : texto.trim();
-}
-
 function useAltaDeArticulo(datos: ParaCrear) {
   const router = useRouter();
   const envio = useEnvio();
@@ -129,8 +125,8 @@ function useAltaDeArticulo(datos: ParaCrear) {
     const cuerpo = {
       itemId: datos.ficha.id,
       nombre: borrador.nombre.trim(),
-      marca: opcional(borrador.marca),
-      proveedor: opcional(borrador.proveedor),
+      marca: textoOpcional(borrador.marca),
+      proveedor: textoOpcional(borrador.proveedor),
       presentacion: conPuntoDecimal(borrador.presentacion),
       unidadDePresentacion: borrador.unidadDePresentacion,
       factorExplicito: conFactor ? conPuntoDecimal(borrador.factor) : null,

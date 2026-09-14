@@ -16,6 +16,10 @@
  * no pueden quedarse creyendo los dos que decidieron. Lo que salió bien sí vuelve
  * a leer la bandeja.
  *
+ * **LOS PRECIOS SE ENSEÑAN CON `comoCostoDeUso`, NO CON `comoImporte`.** El de una
+ * preparación es su costo estándar por unidad de uso (R10) —`0.0045` el gramo—, y
+ * a dos decimales saldría `0.00`. Con parte entera, el formato es el mismo.
+ *
  * **POR CURSOR, NUNCA POR PÁGINA NUMERADA** (CLAUDE.md §5): «Ver más» pide la
  * siguiente con el `siguiente` que devolvió la anterior.
  */
@@ -29,7 +33,7 @@ import { Error as Fallo } from '../../../componentes/ui/Estados';
 import { Tabla } from '../../../componentes/ui/Tabla';
 import { Vista } from '../../../componentes/ui/Vista';
 import { llamar } from '../../../lib/api';
-import { comoImporte, comoPorcentaje } from '../../../lib/decimales';
+import { comoCostoDeUso, comoPorcentaje } from '../../../lib/decimales';
 import { comoFecha } from '../../../lib/fechas';
 import { usePermisos } from '../../../lib/permisos';
 import { useEnvio } from '../../../lib/useEnvio';
@@ -59,7 +63,17 @@ export default function Precios(): ReactNode {
   const { precios } = TEXTOS;
 
   return (
-    <Marco titulo={precios.titulo} ayuda={precios.ayuda}>
+    <Marco
+      titulo={precios.titulo}
+      ayuda={precios.ayuda}
+      acciones={
+        tiene('pricing.suggest') && (
+          <Link href="/precios/nuevo" className="boton">
+            {precios.sugerir}
+          </Link>
+        )
+      }
+    >
       <Vista
         lectura={lectura}
         vacio={{ esVacio: (pagina) => pagina.pendientes.length === 0, titulo: precios.vacio, ayuda: precios.vacioAyuda }}
@@ -157,9 +171,9 @@ function FilaPendiente({
         </Link>
         <span className="bloque tenue">{detalle.filter(Boolean).join(' · ')}</span>
       </td>
-      <td className="numero tenue">{pendiente.precioVigente === null ? precios.sinVigente : comoImporte(pendiente.precioVigente)}</td>
+      <td className="numero tenue">{pendiente.precioVigente === null ? precios.sinVigente : comoCostoDeUso(pendiente.precioVigente)}</td>
       <td className="numero">
-        {comoImporte(pendiente.precio)}
+        {comoCostoDeUso(pendiente.precio)}
         <span className="bloque tenue">{`${precios.iva} ${comoPorcentaje(pendiente.ivaCompra)}`}</span>
       </td>
       {decide && (

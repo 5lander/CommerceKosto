@@ -25,6 +25,7 @@ import { Selector } from '../../../../../../../componentes/ui/Selector';
 import { Vista } from '../../../../../../../componentes/ui/Vista';
 import { Volver } from '../../../../../../../componentes/ui/Volver';
 import { llamar } from '../../../../../../../lib/api';
+import { textoOpcional } from '../../../../../../../lib/campos';
 import { fraccionDePorcentaje, porcentajeDeFraccion, sinCerosDeSobra } from '../../../../../../../lib/decimales';
 import { useEnvio } from '../../../../../../../lib/useEnvio';
 import { useLectura } from '../../../../../../../lib/useLectura';
@@ -65,8 +66,8 @@ function useEdicionDeArticulo(articulo: ArticuloConItem) {
   async function guardar(): Promise<void> {
     const cuerpo = {
       nombre: nombre.trim(),
-      marca: marca.trim() === '' ? null : marca.trim(),
-      proveedor: proveedor.trim() === '' ? null : proveedor.trim(),
+      marca: textoOpcional(marca),
+      proveedor: textoOpcional(proveedor),
       ivaTarifa: fraccionDePorcentaje(iva),
       estado: estado === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
     };

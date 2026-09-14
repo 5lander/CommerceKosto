@@ -566,3 +566,39 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 10 — Precio: sugerir · 2026-09-14
+
+**Alcance del diff:** `apps/web` (alta de precio, enlaces desde bandeja y ficha, `lib/fechas` y `lib/campos`
+con sus pruebas, `textoOpcional` en artículos, formato de precios, `.campo select`, textos), `ESTADO.md`,
+`CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | La precedencia de la tarifa, la regla comprado/preparación y el precio positivo los decide la API; la pantalla elige qué campos enseña por el `tipo` que devuelve |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 539 archivos** (+3); la fecha a `12:00Z` en `lib/fechas.ts`, no en la pantalla (`no-fecha-a-medianoche`) |
+| C · Seguridad | ✅ | Sin `pricing.suggest`, ni enlace ni formulario (bodega verificado); gerente sugiere y no decide |
+| G · Pruebas | ✅ | **46 del web** (+5) |
+| I · Duplicación | ✅ | `Found 0 clones`; «vacío viaja como `null`» vive una vez |
+| I9 · Bundle | ✅ | `/precios/nuevo` **146,3 KiB** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 539 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 527 skipped (546)
+      Tests  894 passed (894)
+ℹ tests 46
+ℹ pass 46
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

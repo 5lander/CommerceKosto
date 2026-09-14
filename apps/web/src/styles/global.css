@@ -735,6 +735,16 @@ input[type='number'] {
   gap: var(--f-menos2);
 }
 
+/*
+ * Un `<select>` mide lo que su opción más larga —«Arroz funda 5 kg — 5 kg · IVA
+ * 0,0 %»— y, como elemento de rejilla, no baja de ahí: a 360 px empujaba la
+ * página 27 px de lado. Con mínimo cero ocupa el ancho del campo y recorta la
+ * opción, que se lee entera al abrirlo.
+ */
+.campo select {
+  min-width: 0;
+}
+
 /* ==========================================================================
  * LISTAS
  * ========================================================================== */
