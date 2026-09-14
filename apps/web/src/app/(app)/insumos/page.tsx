@@ -16,6 +16,7 @@
  * la API, que es quien sabe qué está archivado.
  */
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -89,7 +90,17 @@ export default function Insumos(): ReactNode {
   const lectura = useCatalogo(incluirInactivos, conCostos);
 
   return (
-    <Marco titulo={TEXTOS.insumos.titulo} ayuda={conCostos ? TEXTOS.insumos.ayuda : TEXTOS.insumos.ayudaSinCosto}>
+    <Marco
+      titulo={TEXTOS.insumos.titulo}
+      ayuda={conCostos ? TEXTOS.insumos.ayuda : TEXTOS.insumos.ayudaSinCosto}
+      acciones={
+        tiene('catalog.create') && (
+          <Link href="/insumos/nuevo" className="boton" data-variante="primario">
+            {TEXTOS.insumo.nuevo}
+          </Link>
+        )
+      }
+    >
       <div className="pila">
         <Casilla texto={TEXTOS.insumos.incluirArchivados} marcada={incluirInactivos} cambiar={setIncluirInactivos} />
         <Vista

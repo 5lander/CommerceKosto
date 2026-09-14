@@ -392,3 +392,38 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 5 — Insumo: alta · 2026-09-14
+
+**Alcance del diff:** `apps/web` (`/insumos/nuevo`, `Formulario`, `Volver`, `fraccionDePorcentaje` y sus
+pruebas, botón en `/insumos`, textos, CSS), `ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de
+`apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Las reglas del ítem (rendimiento 0–1, `llevaStock` según tipo, unidad existente, nombre único) las aplica la API; la pantalla ofrece solo lo válido y enseña su 400/409 |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 520 archivos** (+3: `Formulario`, `Volver`, `insumos/nuevo/page.tsx`) |
+| C · Seguridad | ✅ | Sin `catalog.create`, ni botón ni formulario (verificado con el gerente); la frontera es el 403 de la API |
+| F · Frontend | ✅ | Error de la API junto al botón; botón bloqueado al enviar |
+| G · Pruebas | ✅ | **37 del web** (+3 de `fraccionDePorcentaje`), con guardián |
+| I9 · Bundle | ✅ | piso **126,9 KiB**; `/insumos/nuevo` 144,0; la mayor `/inventario` **144,3** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 520 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  894 passed (894)
+ℹ tests 37
+ℹ pass 37
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

@@ -240,6 +240,14 @@ p {
 }
 
 /*
+ * Un formulario de alta o edición: una columna de ancho de lectura, también en
+ * escritorio. Un campo de nombre de 70 caracteres de ancho no ayuda a nadie.
+ */
+.formulario {
+  max-width: 32rem;
+}
+
+/*
  * Los filtros de un listado: en fila cuando caben, uno debajo de otro en el
  * teléfono. Cada filtro con su etiqueta encima (`.campo`).
  */
@@ -612,7 +620,8 @@ p {
  * diluir: esta interfaz se usa de pie, con reflejo y las manos ocupadas.
  */
 
-button {
+button,
+.boton {
   font: inherit;
   display: inline-flex;
   align-items: center;
@@ -624,9 +633,11 @@ button {
   background: var(--color-superficie);
   color: var(--color-texto);
   cursor: pointer;
+  text-decoration: none;
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled),
+.boton:hover {
   border-color: var(--color-texto);
 }
 
@@ -636,13 +647,15 @@ button:hover:not(:disabled) {
  * botón» (p. 21). Cloud Dancer sobre Persimmon Profundo da 5,64:1, que es el
  * par que el propio manual calcula.
  */
-button[data-variante='primario'] {
+button[data-variante='primario'],
+.boton[data-variante='primario'] {
   background: var(--color-accion);
   border-color: var(--color-accion);
   color: var(--cloud-dancer);
 }
 
-button[data-variante='primario']:hover:not(:disabled) {
+button[data-variante='primario']:hover:not(:disabled),
+.boton[data-variante='primario']:hover {
   background: var(--persimmon);
   border-color: var(--persimmon);
 }

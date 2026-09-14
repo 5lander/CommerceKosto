@@ -4,6 +4,18 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 5 — Dar de alta un insumo desde la aplicación · 2026-09-14
+
+> Sexto commit de pantallas. Sin cambios en `apps/api`.
+
+**`/insumos/nuevo`.** Por primera vez un dueño puede dar de alta un insumo sin importar un CSV: nombre,
+tipo, unidad de uso elegida de la lista, rendimiento **en porcentaje** —«92,5» viaja como `0.925` exacto,
+corriendo la coma sobre el texto—, grupo y origen del precio; «¿se produce en lote?» aparece solo en una
+preparación. La ayuda avisa antes de guardar que el tipo y la unidad no se podrán cambiar. Un nombre
+repetido o un rendimiento imposible se explican con el mensaje de la API. Solo con `catalog.create`.
+
+---
+
 ## P16 · Pantalla 4 — Insumos: el catálogo con su costo por unidad de uso · 2026-09-14
 
 > Quinto commit de pantallas. Sin cambios en `apps/api`.

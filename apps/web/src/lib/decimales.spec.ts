@@ -12,7 +12,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { comoCostoDeUso, comoImporte, comoPorcentaje, enPuntos, redondear, sinCerosDeSobra } from './decimales.ts';
+import {
+  comoCostoDeUso,
+  comoImporte,
+  comoPorcentaje,
+  enPuntos,
+  fraccionDePorcentaje,
+  redondear,
+  sinCerosDeSobra,
+} from './decimales.ts';
 
 describe('redondear — medio hacia arriba, como el ROUND de Excel', () => {
   it('redondea y no trunca', () => {
@@ -89,6 +97,24 @@ describe('comoCostoDeUso — un costo por gramo no cabe en dos decimales', () =>
     assert.equal(comoCostoDeUso('0.500000000000'), '0.50');
     assert.equal(comoCostoDeUso('0.000000000000'), '0.00');
     assert.equal(comoCostoDeUso('0.99995'), '1.00');
+  });
+});
+
+describe('fraccionDePorcentaje — lo que escribe una persona a lo que espera la API', () => {
+  it('corre la coma dos posiciones sin dividir', () => {
+    assert.equal(fraccionDePorcentaje('85'), '0.85');
+    assert.equal(fraccionDePorcentaje('100'), '1.00');
+    assert.equal(fraccionDePorcentaje('7'), '0.07');
+  });
+
+  it('acepta la coma de es-EC y los decimales del porcentaje', () => {
+    assert.equal(fraccionDePorcentaje('85,5'), '0.855');
+    assert.equal(fraccionDePorcentaje('0,5'), '0.005');
+    assert.equal(fraccionDePorcentaje(' 90.25 '), '0.9025');
+  });
+
+  it('no valida el rango: eso lo dice la API', () => {
+    assert.equal(fraccionDePorcentaje('150'), '1.50');
   });
 });
 

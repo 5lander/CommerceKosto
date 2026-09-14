@@ -230,3 +230,24 @@ export function comoCostoDeUso(valor: string): string {
   if (!valor.replace(MENOS, '').startsWith('0')) return comoImporte(valor);
   return redondear(valor, DECIMALES_DE_COSTO_DE_USO).replace(CEROS_TRAS_EL_SEGUNDO_DECIMAL, '$1');
 }
+
+/** Cuántas cifras enteras se aseguran antes de correr la coma dos posiciones. */
+const CIFRAS_PARA_CORRER_LA_COMA = 3;
+
+/**
+ * `85` a `0.85`, `85,5` a `0.855`, `100` a `1.00`: un porcentaje escrito por una
+ * persona a la fracción que la API espera.
+ *
+ * **SE CORRE LA COMA SOBRE EL TEXTO, NO SE DIVIDE POR CIEN.** Dividir es punto
+ * flotante, y el rendimiento de un ítem divide su costo: un `0.8500000000000001`
+ * se colaría en cada plato que lo use. La coma de es-EC se acepta como punto.
+ * **No valida el rango**: un `150` sale `1.50` y la API lo rechaza con su motivo,
+ * que es donde vive la regla.
+ */
+export function fraccionDePorcentaje(porcentaje: string): string {
+  const [entera = '', decimal = ''] = porcentaje.trim().replace(',', '.').split('.');
+  const digitos = entera.padStart(CIFRAS_PARA_CORRER_LA_COMA, '0') + decimal;
+  const corte = digitos.length - decimal.length - POSICIONES_DEL_PORCENTAJE;
+  const nuevaEntera = digitos.slice(0, corte).replace(CEROS_A_LA_IZQUIERDA, '');
+  return `${nuevaEntera}.${digitos.slice(corte)}`;
+}

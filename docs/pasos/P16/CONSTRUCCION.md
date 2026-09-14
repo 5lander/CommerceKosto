@@ -588,3 +588,45 @@ dos se lee como un importe» en rojo (`ℹ fail 2`); restaurado → verde.
 ### Decisiones
 
 D-16.158…D-16.160 en `ESTADO.md`.
+
+---
+
+## Pantalla 5 — Insumo: alta · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/nuevo/page.tsx` | `POST /catalogo/items` con nombre, tipo, **«¿se produce en lote?» solo en una preparación** (`null` en un comprado, como exige la API), unidad de uso **elegida de `GET /catalogo/unidades`**, rendimiento **en porcentaje**, grupo y origen del precio. Envuelta en `Permitido permiso="catalog.create"`. Al crear, vuelve al listado |
+| `componentes/ui/Formulario.tsx` · `Volver.tsx` | Primitivas con su primer consumidor: campos + error de la API junto al botón + botón bloqueado mientras envía; «← Volver» a una ruta |
+| `lib/decimales.ts` | **`fraccionDePorcentaje`**: «85» → `0.85`, «92,5» → `0.925`, corriendo la coma sobre el texto. No valida el rango: lo dice la API |
+| `app/(app)/insumos/page.tsx` | «Nuevo insumo» en las acciones, solo con `catalog.create` |
+| `textos/es.ts` · `styles/global.css` | Textos del alta (la ayuda avisa **antes** de que tipo y unidad no se podrán cambiar); `.boton` para enlaces con forma de botón; `.formulario` a 32rem |
+
+### Cómo se verificó — en el navegador y en la base
+
+```
+botonNuevo            true                           (dueña)
+comprado              creado  → vuelve a /insumos
+preparacion           creado  («92,5», lt, «Sí: se produce en lote»)
+repetido              «Ya existe un ítem con ese nombre.»
+rendimientoImposible  «El rendimiento es la fracción que queda tras limpiar el producto: va entre 0 y 1…»
+gerenteVeBoton        false
+gerenteEnNuevo        «Tu usuario no tiene acceso a esta pantalla.»
+```
+
+En la base, lo que viajó:
+
+```
+Fondo de pescado …|PRODUCIDO|lt|0.925000000000|t|(sin grupo)
+Sal de mesa …     |COMPRADO |g |1.000000000000| |Abarrotes
+```
+
+### Guardián
+
+`CIFRAS_PARA_CORRER_LA_COMA` de 3 a 2 → «corre la coma dos posiciones sin dividir» y «acepta la coma de
+es-EC» en rojo; restaurado → verde.
+
+### Decisiones
+
+D-16.161…D-16.163 en `ESTADO.md`.

@@ -79,6 +79,28 @@ export const TEXTOS = {
     operacion: 'Operación diaria',
   },
 
+  /** Pantallas 5 y 6: el alta y la ficha de un insumo. */
+  insumo: {
+    nuevo: 'Nuevo insumo',
+    nuevoTitulo: 'Nuevo insumo',
+    nuevoAyuda: 'Lo que se compra o se prepara. Sus presentaciones de compra y su precio se añaden después.',
+    nombre: 'Nombre',
+    tipo: 'Tipo',
+    unidad: 'Unidad de uso',
+    unidadAyuda: 'La unidad en la que se escribe en las recetas. El tipo y la unidad no se pueden cambiar después: las cantidades ya registradas cambiarían de magnitud.',
+    rendimiento: 'Rendimiento (%)',
+    rendimientoAyuda: 'Lo que queda después de limpiar: 85 si de cada kilo quedan 850 gramos útiles. 100 si no se pierde nada.',
+    grupo: 'Grupo',
+    sinGrupo: 'Sin grupo',
+    confianza: 'Origen del precio',
+    confianzas: { FACTURA: 'Con factura', ESTIMADO: 'Estimado, sin factura' },
+    llevaStock: '¿Se produce en lote y se guarda?',
+    llevaStockSi: 'Sí: se produce en lote y aparece en inventario',
+    llevaStockNo: 'No: al vender se descuentan sus ingredientes',
+    crear: 'Crear insumo',
+    creando: 'Creando…',
+  },
+
   /** Pantalla 4: el catálogo de insumos. */
   insumos: {
     titulo: 'Insumos',
@@ -248,6 +270,7 @@ export const TEXTOS = {
     /** La raya para un dato que no aplica. No es «N/A» ni «null». */
     sinDato: '—',
     reintentar: 'Volver a intentar',
+    volver: 'Volver',
     sinPermiso: 'Tu usuario no tiene acceso a esta pantalla.',
     sinPermisoAyuda: 'Si crees que debería tenerlo, pídeselo a quien administra el sistema.',
     sesionCaducada: 'Tu sesión se cerró. Vuelve a entrar.',
