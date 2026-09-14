@@ -37,10 +37,13 @@ interface CosteoDeProducto extends ProductoCosteado {
 
 export function CostoDelProducto({
   productId,
+  combo,
   sucursal,
   insumos,
 }: {
   readonly productId: string;
+  /** Un combo sin nada que costear no tiene receta que escribir: le faltan componentes. */
+  readonly combo: boolean;
   readonly sucursal: string;
   readonly insumos: readonly InsumoDelCatalogo[];
 }): ReactNode {
@@ -52,7 +55,9 @@ export function CostoDelProducto({
       <Vista lectura={lectura} vacio="nunca">
         {(costeo) =>
           costeo.sinReceta ? (
-            <p className="panel panel--relleno atencion">{TEXTOS.costeo.sinReceta}</p>
+            <p className="panel panel--relleno atencion">
+              {combo ? TEXTOS.componentes.sinComponentes : TEXTOS.costeo.sinReceta}
+            </p>
           ) : (
             <div className="pila">
               <CostoYVenta costeo={costeo} />

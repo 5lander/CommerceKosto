@@ -908,3 +908,36 @@ gerente         costo, simulador y desglose (3 líneas); ni configuración ni em
 ### Decisiones
 
 D-16.183…D-16.186 en `ESTADO.md`; INC-026.
+
+---
+
+## Pantalla 13 — Componentes de combo · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `componentes/productos/ComponentesDelCombo.tsx` | En la ficha de un combo: `GET /productos/:id/componentes` (producto y cantidad, con enlace a cada uno) y «Editar componentes» con `product.write` |
+| `app/(app)/productos/[id]/componentes/page.tsx` | El editor: filas de producto y cantidad, añadir y quitar, y `PUT` de **la lista entera** con la `version` del combo. Ofrece productos con receta activos (más los que ya están); 400 con su motivo y 409 con «Ver la versión actual». Un producto con receta enseña que no tiene componentes |
+| `componentes/productos/CostoDelProducto.tsx` | Un combo sin nada que costear dice **«Sin componentes»**, no «escribe su receta» |
+
+### Cómo se verificó
+
+Con un combo sintético creado por la pantalla 11 («Combo de ensayo P13 (sintetico)»), como dueña en Local Centro:
+
+```
+ficha vacía     «Combo · Sin categoría» · Componentes «Todavía no tiene componentes.» · costo «Sin componentes: …» · «Editar componentes»
+editor          dos «Añadir componente» → Arroz marinero 1, Ceviche mixto 1 · opciones: los tres productos con receta, no el combo
+repetido        segunda fila = Arroz marinero → 400 «Un producto no puede aparecer dos veces en el mismo combo: sube su cantidad.»
+guardar         Arroz marinero 1 + Ceviche mixto 2 → ficha: componentes 2 filas · costo 6.14 · «no tiene PVP fijado en esta ubicación»
+409             otra escritura deja Ceviche mixto 3 → «Alguien más cambió este producto…» → «Ver la versión actual» → 1 fila, 3
+no es combo     /productos/<con receta>/componentes → «Este producto tiene receta, no componentes…»
+gerente         ficha con componentes y sin «Editar componentes»; el editor, «sin acceso»
+360 px          editor { desborda: false }
+```
+
+**El combo de ensayo se queda** (duda #14), **sin componentes**: la limpieza vació la lista.
+
+### Decisiones
+
+D-16.187…D-16.188 en `ESTADO.md`.

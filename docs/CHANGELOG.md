@@ -4,6 +4,17 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 13 — Los componentes de un combo · 2026-09-14
+
+> Decimocuarto commit de pantallas. Sin cambios en `apps/api`.
+
+**Un combo se arma desde su ficha**: qué productos con receta lleva y cuántos de cada uno. Se editan en una
+página propia y se guarda la lista entera; si algo no vale —un producto repetido, el propio combo— la API
+dice por qué, y si otra persona cambió el combo mientras tanto, se ofrece ver la versión actual. Un combo
+sin componentes dice que le faltan componentes, no que le falta receta.
+
+---
+
 ## P16 · Pantalla 12 — Lo que cuesta un plato, y a cuánto venderlo · 2026-09-14
 
 > Decimotercer commit de pantallas. Sin cambios en `apps/api`.

@@ -21,6 +21,7 @@ import { useParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import { Marco } from '../../../../componentes/Marco';
+import { ComponentesDelCombo } from '../../../../componentes/productos/ComponentesDelCombo';
 import { ConfiguracionEnSucursal } from '../../../../componentes/productos/ConfiguracionEnSucursal';
 import { CostoDelProducto } from '../../../../componentes/productos/CostoDelProducto';
 import { EmpaqueDelProducto } from '../../../../componentes/productos/EmpaqueDelProducto';
@@ -65,12 +66,20 @@ function Bloques({ leido, recargar }: { readonly leido: ProductoLeido; readonly 
   // viejos y la ficha acaba con dos costos, uno con la versión anterior.
   const clave = `${sucursal ?? ''}-${String(leido.ficha.version)}`;
   const escribe = tiene('product.write');
+  const combo = leido.ficha.tipo === 'COMBO';
 
   return (
     <div className="pila">
       <DatosDelProducto leido={leido} />
+      {combo && <ComponentesDelCombo key={`componentes-${clave}`} productId={leido.ficha.id} />}
       {sucursal !== null && tiene('costing.read') && (
-        <CostoDelProducto key={`costo-${clave}`} productId={leido.ficha.id} sucursal={sucursal} insumos={leido.insumos} />
+        <CostoDelProducto
+          key={`costo-${clave}`}
+          productId={leido.ficha.id}
+          combo={combo}
+          sucursal={sucursal}
+          insumos={leido.insumos}
+        />
       )}
       {sucursal !== null && escribe && (
         <ConfiguracionEnSucursal key={`configuracion-${clave}`} leido={leido} sucursal={sucursal} recargar={recargar} />

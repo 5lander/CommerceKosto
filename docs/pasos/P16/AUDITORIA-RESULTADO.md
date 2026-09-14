@@ -675,3 +675,39 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 13 — Componentes de combo · 2026-09-14
+
+**Alcance del diff:** `apps/web` (bloque de componentes en la ficha, editor de componentes, aviso de costo
+de un combo, textos), `ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Qué puede ser componente lo decide la API (400 con motivo); el selector solo filtra la oferta |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 555 archivos** (+2) |
+| C · Seguridad | ✅ | Gerente lee componentes y no edita (sin enlace, editor «sin acceso»); la frontera es el 403 |
+| E · Reglas | ✅ | Reemplazo total con `version` y 409 verificado (ADR-023); filas con clave propia (INC-026) |
+| G · Pruebas | ✅ | **49 del web**; sin lógica nueva en `lib/` |
+| I · Duplicación | ✅ | `Found 0 clones` |
+| I9 · Bundle | ✅ | `/productos/[id]` **148,8 KiB**; `/productos/[id]/componentes` 146,8 |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 555 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 527 skipped (546)
+      Tests  894 passed (894)
+ℹ tests 49
+ℹ pass 49
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

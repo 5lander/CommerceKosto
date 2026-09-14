@@ -169,6 +169,26 @@ export const TEXTOS = {
     excluida: 'Excluida: no suma',
   },
 
+  /** Pantalla 13: los componentes de un combo. */
+  componentes: {
+    titulo: 'Componentes',
+    editar: 'Editar componentes',
+    editarTitulo: 'Componentes del combo',
+    ayuda: 'Los productos con receta que forman el combo y cuántos de cada uno. Se guarda la lista entera: lo que quites deja de ser componente.',
+    producto: 'Producto',
+    cantidad: 'Cantidad',
+    quitar: 'Quitar',
+    anadir: 'Añadir componente',
+    guardar: 'Guardar componentes',
+    guardando: 'Guardando…',
+    sinFilas: 'El combo no tiene componentes: su costo no se puede calcular hasta tenerlos.',
+    sinOpciones: 'No hay productos con receta activos para componer el combo.',
+    noEsCombo: 'Este producto tiene receta, no componentes: solo un combo se arma con otros productos.',
+    vacio: 'Todavía no tiene componentes.',
+    vacioAyuda: 'Un combo se arma con productos que tienen receta; su costo es el de ellos.',
+    sinComponentes: 'Sin componentes: el costo no se puede calcular. Añade sus componentes para verlo.',
+  },
+
   /** Pantalla 10: sugerir un precio de referencia. */
   precioNuevo: {
     titulo: 'Sugerir precio',
