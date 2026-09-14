@@ -43,7 +43,10 @@ export const NAVEGACION: readonly GrupoDeNavegacion[] = [
   },
   {
     titulo: TEXTOS.navegacion.catalogo,
-    entradas: [{ href: '/insumos', texto: TEXTOS.insumos.titulo, permiso: 'catalog.read', conMes: false }],
+    entradas: [
+      { href: '/insumos', texto: TEXTOS.insumos.titulo, permiso: 'catalog.read', conMes: false },
+      { href: '/grupos', texto: TEXTOS.grupos.titulo, permiso: 'catalog.read', conMes: false },
+    ],
   },
   {
     titulo: TEXTOS.navegacion.analisis,

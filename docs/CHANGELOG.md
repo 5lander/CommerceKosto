@@ -4,6 +4,16 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 7 — Grupos y la tarifa de IVA que heredan · 2026-09-14
+
+> Octavo commit de pantallas. Sin cambios en `apps/api`.
+
+**`/grupos`.** La lista de grupos con su tarifa de IVA de compra —«No define» cuando no la fija, que no es
+0 %—, el alta y la edición. La tarifa se escribe en porcentaje y vacía viaja como `null`: entonces manda la
+del artículo. Un id que no existe en la empresa enseña su estado, no un formulario vacío.
+
+---
+
 ## P16 · Pantalla 6 — La ficha del insumo: lo que cuesta, su historia, editarlo y archivarlo · 2026-09-14
 
 > Séptimo commit de pantallas. Sin cambios en `apps/api`.

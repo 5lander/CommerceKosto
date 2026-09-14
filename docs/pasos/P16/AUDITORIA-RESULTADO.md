@@ -462,3 +462,36 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 7 — Grupos · 2026-09-14
+
+**Alcance del diff:** `apps/web` (`/grupos`, alta, edición, `FormularioDeGrupo`, navegación, textos),
+`ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | La precedencia de la tarifa la aplica la API; la pantalla distingue `null` de 0 |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 531 archivos** (+5) |
+| C · Seguridad | ✅ | Sin `catalog.create`/`catalog.update`, ni botón ni enlaces (gerente verificado) |
+| G · Pruebas | ✅ | Sin funciones nuevas en `lib/`: reutiliza `fraccionDePorcentaje` y `porcentajeDeFraccion`, ya probadas |
+| I9 · Bundle | ✅ | piso **126,9 KiB**; `/grupos/[id]/editar` 144,6; la mayor `/insumos/[id]` **145,4** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 531 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  894 passed (894)
+ℹ tests 40
+ℹ pass 40
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

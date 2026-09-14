@@ -676,3 +676,31 @@ en la ficha era la del formulario; se cambió por la del listado.
 ### Decisiones
 
 D-16.164…D-16.167 en `ESTADO.md`.
+
+---
+
+## Pantalla 7 — Grupos · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/grupos/page.tsx` · `layout.tsx` | La lista con la tarifa de IVA de cada grupo, **«No define» cuando es `null`**, nunca 0 %. «Nuevo grupo» con `catalog.create`; el nombre lleva a la edición con `catalog.update` |
+| `app/(app)/grupos/nuevo/page.tsx` · `[id]/editar/page.tsx` | Alta (`POST`) y edición (`PUT`). **No hay `GET` de un grupo suelto**: la edición lo busca en la lista, y un id que no está enseña «ese grupo no existe en tu empresa» en vez de un formulario vacío |
+| `componentes/grupos/FormularioDeGrupo.tsx` | Un solo formulario para los dos: nombre y tarifa **en porcentaje**, vacía = `null` |
+| `navegacion.ts` · `textos/es.ts` | «Grupos» en Catálogo; la ayuda explica que vacío no es cero |
+
+### Cómo se verificó
+
+```
+creado      Especias 93310 | 12,0 %
+precargado  "12"
+sinTarifa   Especias 93310 | No define        → en la base: iva_tarifa NULL
+repetido    «Ya existe un grupo con ese nombre.»
+noExiste    «Ese grupo no existe en tu empresa. / Vuelve a la lista de grupos y elige uno.» (sin formulario)
+gerente     { nuevo: false, enlaces: 0, filas: 6 }
+```
+
+### Decisiones
+
+D-16.168 y D-16.169 en `ESTADO.md`.

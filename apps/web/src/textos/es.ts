@@ -79,6 +79,26 @@ export const TEXTOS = {
     operacion: 'Operación diaria',
   },
 
+  /** Pantalla 7: los grupos de insumos y su tarifa de IVA. */
+  grupos: {
+    titulo: 'Grupos',
+    ayuda: 'Cómo se agrupan los insumos, y la tarifa de IVA que heredan sus compras sin artículo.',
+    nuevo: 'Nuevo grupo',
+    editar: 'Editar grupo',
+    nombre: 'Grupo',
+    iva: 'IVA de compra (%)',
+    ivaAyuda:
+      'Déjalo vacío si el grupo no define tarifa: entonces manda la del artículo, y si tampoco la hay, la compra se rechaza con su motivo. Vacío no es cero.',
+    noDefine: 'No define',
+    crear: 'Crear grupo',
+    guardar: 'Guardar cambios',
+    guardando: 'Guardando…',
+    vacio: 'Todavía no hay grupos.',
+    vacioAyuda: 'Un grupo junta insumos parecidos —lácteos, verduras— y puede fijar su tarifa de IVA.',
+    noEncontrado: 'Ese grupo no existe en tu empresa.',
+    noEncontradoAyuda: 'Vuelve a la lista de grupos y elige uno.',
+  },
+
   /** Pantallas 5 y 6: el alta y la ficha de un insumo. */
   insumo: {
     nuevo: 'Nuevo insumo',
