@@ -941,3 +941,45 @@ gerente         ficha con componentes y sin «Editar componentes»; el editor, �
 ### Decisiones
 
 D-16.187…D-16.188 en `ESTADO.md`.
+
+---
+
+## Pantalla 14 — Receta · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `componentes/recetas/receta.ts` | La lectura para editar: `GET /recetas?locationId=&productId|itemId=` (vigente y `ultimaVersionId`), los insumos con archivados, el nombre y tipo del destino y el nombre de la sucursal. `admiteReceta`: un producto con receta o una preparación |
+| `componentes/recetas/EditorDeReceta.tsx` | `PUT /recetas` con `basadaEn`: líneas desde la vigente, **vale desde** (hoy, a `12:00Z`) y nota. Avisa si ya hay una versión futura. 409 con «Ver la versión actual» |
+| `componentes/recetas/FilaDeReceta.tsx` | Una línea: insumo (activos, más los que ya están; nunca el propio destino), cantidad **con la unidad de uso en la etiqueta**, **«Tal como se compra (AP)» / «Ya limpio (EP)»**, excluida, quitar |
+| `componentes/recetas/PaginaDeReceta.tsx` | La página común, con `recipe.write`, en la sucursal del selector; a un combo o a un insumo comprado les dice por qué no tienen receta |
+| `app/(app)/productos/[id]/receta`, `app/(app)/insumos/[id]/receta` | Las dos rutas; al guardar, vuelven a la ficha |
+| fichas de producto e insumo | «Receta» con `recipe.write`, solo en un producto con receta y en una preparación |
+
+### Cómo se verificó
+
+Arroz marinero en Local Centro (receta vigente desde el 13 sept, tres líneas), como dueña:
+
+```
+editor          «Receta · Arroz marinero» · «En Local Centro. …» · vigente desde el 13 sept 2026 · vale desde 2026-09-14
+                Arroz (kg) 0.2 AP · Camaron pelado (kg) 0.1 EP · Aceite de girasol (lt) 0.02 AP
+añadir/quitar   4 filas → 3, sin guardar
+guardar         arroz «0,25», aceite excluido, nota → ficha: porción 3.08 → 3.57 · food cost 45,7 % → 53,0 %
+                desglose «Arroz 0.25 kg AP 2.70 75,6 %» · «Aceite de girasol Excluida: no suma 0.02 lt AP 0.00 0,0 %»
+409             otra versión creada con el editor abierto → «Alguien más cambió esta receta…» → «Ver la versión actual» → 0.3 en las tres
+preparación     «Receta» en la ficha de Fondo de pescado; «Todavía no tiene receta vigente»; el selector no se ofrece a sí misma
+comprado        sin «Receta» en la ficha; la ruta dice «Un insumo comprado no tiene receta…»
+combo           sin «Receta» en la ficha; la ruta dice «Un combo no tiene receta…»
+gerente         «Receta» y editor con las tres líneas (su sucursal)
+bodega          «sin acceso»
+360 px          { desborda: false }; cada línea, una tarjeta
+```
+
+AP y EP se ven en el costo: el camarón en EP cuesta 0.87 con su rendimiento aplicado por la API.
+**La receta original se restauró** como versión nueva (con su nota): porción 3.08, food cost 45,7 %. Las
+versiones del ensayo quedan en el historial, que es lo que deben hacer.
+
+### Decisiones
+
+D-16.189…D-16.191 en `ESTADO.md`.

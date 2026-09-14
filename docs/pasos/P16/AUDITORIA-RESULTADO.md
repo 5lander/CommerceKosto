@@ -711,3 +711,39 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 14 — Receta · 2026-09-14
+
+**Alcance del diff:** `apps/web` (lectura, editor, fila y página de receta, dos rutas, enlaces en las fichas,
+textos), `ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | El rendimiento de EP, los ciclos (R9) y el costo los resuelve la API; la pantalla manda `base` y `estado` tal cual |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 561 archivos** (+6); la vigencia a `12:00Z` por `lib/fechas` |
+| C · Seguridad | ✅ | BODEGA sin `recipe.read`: «sin acceso» (R8); la receta de otra sucursal es 403 en la API |
+| E · Reglas | ✅ | R4 (AP/EP con resultados distintos en el costo), versión nueva y no edición (SPEC §9), `basadaEn` y 409 (ADR-023) |
+| G · Pruebas | ✅ | **49 del web**; sin lógica nueva en `lib/` |
+| I · Duplicación | ✅ | `Found 0 clones`; una sola página para producto y preparación |
+| I9 · Bundle | ✅ | `/productos/[id]/receta` **148,5 KiB** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 561 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 527 skipped (546)
+      Tests  894 passed (894)
+ℹ tests 49
+ℹ pass 49
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

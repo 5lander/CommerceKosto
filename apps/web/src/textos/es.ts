@@ -169,6 +169,31 @@ export const TEXTOS = {
     excluida: 'Excluida: no suma',
   },
 
+  /** Pantalla 14: la receta de un producto o de una preparación. */
+  receta: {
+    titulo: 'Receta',
+    enlace: 'Receta',
+    en: 'En',
+    ayuda: 'Guardar crea una versión nueva desde la fecha que elijas; la anterior queda en el historial.',
+    sinVigente: 'Todavía no tiene receta vigente en esta sucursal.',
+    vigenteDesde: 'La receta que manda hoy es la vigente desde el',
+    hayFutura: 'Ya hay una versión guardada que empieza a valer más adelante. Si guardas, esta queda como la más nueva.',
+    ayudaBase: 'Tal como se compra (AP): la cantidad incluye lo que se pierde al limpiar. Ya limpio (EP): se le aplica el rendimiento del insumo.',
+    insumo: 'Insumo',
+    cantidad: 'Cantidad',
+    base: 'Se mide',
+    bases: { AP: 'Tal como se compra (AP)', EP: 'Ya limpio (EP)' },
+    excluida: 'Excluida (no suma, se conserva)',
+    quitar: 'Quitar',
+    anadir: 'Añadir insumo',
+    desde: 'Vale desde',
+    nota: 'Nota del cambio',
+    guardar: 'Guardar receta',
+    guardando: 'Guardando…',
+    comboSinReceta: 'Un combo no tiene receta: se arma con componentes, desde su ficha.',
+    compradoSinReceta: 'Un insumo comprado no tiene receta: solo una preparación se hace con otros insumos.',
+  },
+
   /** Pantalla 13: los componentes de un combo. */
   componentes: {
     titulo: 'Componentes',

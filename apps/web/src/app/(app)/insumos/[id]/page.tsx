@@ -43,7 +43,14 @@ export default function FichaDelInsumo(): ReactNode {
     <Marco
       titulo={ficha?.nombre ?? TEXTOS.insumo.fichaTitulo}
       ayuda={ficha === undefined ? '' : resumenDe(ficha)}
-      acciones={<AccionesDeLaFicha id={id} puedeEditar={tiene('catalog.update')} puedeSugerir={tiene('pricing.suggest')} />}
+      acciones={
+        <AccionesDeLaFicha
+          id={id}
+          puedeEditar={tiene('catalog.update')}
+          puedeSugerir={tiene('pricing.suggest')}
+          conReceta={ficha?.tipo === 'PRODUCIDO' && tiene('recipe.write')}
+        />
+      }
     >
       <Vista lectura={lectura} vacio="nunca">
         {(leido) => (
@@ -73,14 +80,22 @@ function AccionesDeLaFicha({
   id,
   puedeEditar,
   puedeSugerir,
+  conReceta,
 }: {
   readonly id: string;
   readonly puedeEditar: boolean;
   readonly puedeSugerir: boolean;
+  /** Una preparación, y la sesión puede escribir su receta. */
+  readonly conReceta: boolean;
 }): ReactNode {
   return (
     <div className="linea">
       <Volver href="/insumos" />
+      {conReceta && (
+        <Link href={`/insumos/${id}/receta`} className="boton">
+          {TEXTOS.receta.enlace}
+        </Link>
+      )}
       {puedeSugerir && (
         <Link href={`/precios/nuevo?itemId=${id}`} className="boton">
           {TEXTOS.precios.sugerir}

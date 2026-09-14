@@ -17,6 +17,7 @@
  * vieja para la siguiente escritura.
  */
 
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 
@@ -50,12 +51,28 @@ export default function FichaDelProducto(): ReactNode {
     <Marco
       titulo={ficha?.nombre ?? TEXTOS.productoDeVenta.fichaTitulo}
       ayuda={ficha === undefined ? '' : resumenDe(ficha)}
-      acciones={<Volver href="/productos" />}
+      acciones={<AccionesDelProducto id={id} conReceta={ficha?.tipo === 'SIMPLE'} />}
     >
       <Vista lectura={lectura} vacio="nunca">
         {(leido) => <Bloques leido={leido} recargar={lectura.recargar} />}
       </Vista>
     </Marco>
+  );
+}
+
+/** Volver, y la receta de la sucursal elegida si el producto la tiene y la sesión puede escribirla. */
+function AccionesDelProducto({ id, conReceta }: { readonly id: string; readonly conReceta: boolean }): ReactNode {
+  const { tiene } = usePermisos();
+
+  return (
+    <div className="linea">
+      <Volver href="/productos" />
+      {conReceta && tiene('recipe.write') && (
+        <Link href={`/productos/${id}/receta`} className="boton">
+          {TEXTOS.receta.enlace}
+        </Link>
+      )}
+    </div>
   );
 }
 

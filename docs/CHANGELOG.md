@@ -4,6 +4,17 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 14 — Escribir la receta · 2026-09-14
+
+> Decimoquinto commit de pantallas. Sin cambios en `apps/api`.
+
+**La receta de un plato o de una preparación, en la sucursal elegida.** Cada línea dice qué insumo, cuánto
+en su unidad y si se mide **tal como se compra o ya limpio**; una línea se puede excluir sin borrarla.
+Guardar crea una versión nueva desde la fecha elegida —la anterior queda en el historial— y la ficha del
+plato enseña enseguida el costo nuevo. Si alguien guardó otra versión mientras tanto, se ofrece verla.
+
+---
+
 ## P16 · Pantalla 13 — Los componentes de un combo · 2026-09-14
 
 > Decimocuarto commit de pantallas. Sin cambios en `apps/api`.
