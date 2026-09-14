@@ -209,3 +209,24 @@ export function comoPorcentaje(fraccion: string): string {
 export function enPuntos(puntos: string): string {
   return `${redondear(puntos, DECIMALES_DE_PORCENTAJE).replace('.', ',')} pp`;
 }
+
+/** Hasta cuántos decimales se enseña un costo por unidad de uso. */
+const DECIMALES_DE_COSTO_DE_USO = 4;
+
+/** Los ceros de la derecha que sobran después del segundo decimal. */
+const CEROS_TRAS_EL_SEGUNDO_DECIMAL = /(\.\d{2}\d*?)0+$/u;
+
+/**
+ * `0.001176470588` a `0.0012`, y `8.695652173913` a `8.70`.
+ *
+ * **UN COSTO POR GRAMO NO CABE EN DOS DECIMALES.** La harina a 1,18 el kilo cuesta
+ * `0.0012` por gramo, y `comoImporte` la enseñaría como `0.00`: un insumo que
+ * parece gratis. **Y UNO POR KILO NO NECESITA CUATRO**: `8.6957` es ruido donde
+ * `8.70` dice lo mismo. Con parte entera, dos decimales; sin ella, hasta cuatro
+ * —medio hacia arriba, como todo aquí— sin los ceros que sobran tras el segundo.
+ * Mirar si la parte entera es cero es leer el texto, no comparar números.
+ */
+export function comoCostoDeUso(valor: string): string {
+  if (!valor.replace(MENOS, '').startsWith('0')) return comoImporte(valor);
+  return redondear(valor, DECIMALES_DE_COSTO_DE_USO).replace(CEROS_TRAS_EL_SEGUNDO_DECIMAL, '$1');
+}

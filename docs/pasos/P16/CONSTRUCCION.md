@@ -554,3 +554,37 @@ guardado de todas las filas con valor **ya estaban** desde P16-C y el armazón; 
 ### Decisiones
 
 D-16.156 y D-16.157 en `ESTADO.md`.
+
+---
+
+## Pantalla 4 — Insumos: listado · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/page.tsx` · `layout.tsx` | El catálogo: nombre (con tipo, unidad y «Archivado»), grupo, rendimiento y **costo neto por unidad de uso**. Lee ítems y grupos, y **`GET /precios/costos` solo si la sesión tiene `pricing.read`**: `BODEGA` ve el catálogo para contar, sin la columna y sin la llamada. Filtros de nombre (sin tildes ni mayúsculas) y grupo sobre la lista leída; «Incluir archivados» va a la API |
+| `componentes/ui/Casilla.tsx` · `Selector.tsx` | Primitivas con su primer consumidor |
+| `lib/decimales.ts` | **`comoCostoDeUso`**: con parte entera, dos decimales (`8.70 / kg`); sin ella, hasta cuatro (`0.0012 / g`). `comoImporte` enseñaría `0.00` a un costo por gramo |
+| `componentes/armazon/navegacion.ts` · `textos/es.ts` · `styles/global.css` | Grupo «Catálogo»; textos; `.filtros` y `.casilla` |
+
+**Sin enlaces a la ficha ni al alta todavía**: son las pantallas 5 y 6, y con `typedRoutes` un `href` a una
+ruta que no existe no compila. Entran con ellas.
+
+### Cómo se verificó
+
+- **Log de la API**: `/precios/costos` 4 veces (dueña y gerente, dos anchos) y **ninguna para `BODEGA`**.
+- **Capturas**, tres roles × 1280 y 360, sin desbordes: el gerente ve `2.43 / lt`, `1.20 / kg`, `8.70 / kg`
+  (tras el ajuste; la primera captura decía `8.6957`, que era ruido); `BODEGA` ve tres columnas y la ayuda
+  sin «cuánto cuesta» (también ajustado mirando la captura).
+- **Filtros en el navegador**: «LIMÓN» → `Limon sutil`; grupo «Granos» → `Arroz`; «zzz» → «Ningún insumo
+  coincide con la búsqueda».
+
+### Guardián
+
+`comoCostoDeUso` cambiado a `comoImporte` → «lo pequeño conserva hasta cuatro decimales» y «lo que cabe en
+dos se lee como un importe» en rojo (`ℹ fail 2`); restaurado → verde.
+
+### Decisiones
+
+D-16.158…D-16.160 en `ESTADO.md`.

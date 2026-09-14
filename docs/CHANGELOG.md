@@ -4,6 +4,17 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 4 — Insumos: el catálogo con su costo por unidad de uso · 2026-09-14
+
+> Quinto commit de pantallas. Sin cambios en `apps/api`.
+
+**`/insumos`.** El catálogo con grupo, rendimiento y lo que cuesta cada insumo por unidad de uso —«Sin
+precio» cuando no hay precio confirmado, nunca un cero—. `BODEGA` lo ve para contar, **sin la columna de
+costo y sin pedirla**. Búsqueda sin tildes, filtro por grupo e «Incluir archivados». Un costo por gramo se
+enseña con los decimales que necesita (`0.0012 / g`) y uno por kilo como un importe (`8.70 / kg`).
+
+---
+
 ## P16 · Pantalla 3 — Ventas deja de costear la carta para saber qué hay · 2026-09-14
 
 > Cuarto commit de pantallas. Sin cambios en `apps/api`.

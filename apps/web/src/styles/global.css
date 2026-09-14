@@ -240,6 +240,36 @@ p {
 }
 
 /*
+ * Los filtros de un listado: en fila cuando caben, uno debajo de otro en el
+ * teléfono. Cada filtro con su etiqueta encima (`.campo`).
+ */
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--f1);
+}
+
+/*
+ * Una casilla con su texto: la línea entera es el objetivo táctil. La casilla
+ * no hereda el alto ni el relleno de `input`, que son de un campo de texto.
+ */
+.casilla {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--f-menos1);
+  min-height: var(--tactil);
+}
+
+.casilla input {
+  min-height: 0;
+  width: var(--f2);
+  height: var(--f2);
+  padding: 0;
+  accent-color: var(--color-marca);
+}
+
+/*
  * Un enlace dentro del texto de una pantalla: «volver a entrar», «pedir otro».
  * En el color de marca y subrayado, que es lo que dice «esto se pulsa» sin ser
  * un botón. Con `--tactil` de alto mínimo: se toca con el pulgar.

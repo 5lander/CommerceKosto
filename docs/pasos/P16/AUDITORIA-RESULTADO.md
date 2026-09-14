@@ -358,3 +358,37 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 4 — Insumos: listado · 2026-09-14
+
+**Alcance del diff:** `apps/web` (`/insumos`, `Casilla`, `Selector`, `comoCostoDeUso` y sus pruebas,
+navegación, textos, CSS), `ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | El costo lo calcula la API; el cliente redondea para enseñar. Los filtros no deciden nada |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 517 archivos** (+4: `Casilla`, `Selector`, `insumos/page.tsx`, `insumos/layout.tsx`) |
+| C · Seguridad | ✅ | `BODEGA` no pide `GET /precios/costos` (log de la API) y no tiene `pricing.read` (403 en la API) |
+| F · Frontend | ✅ | Estados vacío y sin coincidencias; capturas y filtros en `CONSTRUCCION.md` |
+| G · Pruebas | ✅ | **34 del web** (+3 de `comoCostoDeUso`), con guardián |
+| I9 · Bundle | ✅ | piso **126,9 KiB**; `/insumos` 143,4; la mayor `/inventario` **143,9** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 517 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  894 passed (894)
+ℹ tests 34
+ℹ pass 34
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

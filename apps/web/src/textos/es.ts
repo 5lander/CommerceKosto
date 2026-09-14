@@ -74,8 +74,31 @@ export const TEXTOS = {
     etiqueta: 'Navegación principal',
     menu: 'Menú',
     general: 'General',
+    catalogo: 'Catálogo',
     analisis: 'Análisis',
     operacion: 'Operación diaria',
+  },
+
+  /** Pantalla 4: el catálogo de insumos. */
+  insumos: {
+    titulo: 'Insumos',
+    ayuda: 'Lo que se compra o se prepara, y cuánto cuesta por unidad de uso.',
+    ayudaSinCosto: 'Lo que se compra o se prepara, con su unidad y su rendimiento.',
+    incluirArchivados: 'Incluir archivados',
+    buscar: 'Buscar por nombre',
+    grupo: 'Grupo',
+    todosLosGrupos: 'Todos los grupos',
+    insumo: 'Insumo',
+    rendimiento: 'Rendimiento',
+    costoDeUso: 'Costo por unidad de uso',
+    // Sin precio confirmado NO es cero: se dice, porque un cero abarataría el plato sin avisar.
+    sinPrecio: 'Sin precio',
+    archivado: 'Archivado',
+    tipos: { COMPRADO: 'Comprado', PRODUCIDO: 'Preparación' },
+    vacio: 'Todavía no hay insumos en el catálogo.',
+    vacioAyuda: 'Cuando se den de alta o se importen, aquí verás cuánto cuesta cada uno por unidad de uso.',
+    sinCoincidencias: 'Ningún insumo coincide con la búsqueda.',
+    sinCoincidenciasAyuda: 'Prueba con otra palabra o con todos los grupos.',
   },
 
   /** Pantalla 2 (U2): el mes de la sucursal de un vistazo. */

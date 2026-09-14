@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { comoImporte, comoPorcentaje, enPuntos, redondear, sinCerosDeSobra } from './decimales.ts';
+import { comoCostoDeUso, comoImporte, comoPorcentaje, enPuntos, redondear, sinCerosDeSobra } from './decimales.ts';
 
 describe('redondear — medio hacia arriba, como el ROUND de Excel', () => {
   it('redondea y no trunca', () => {
@@ -71,6 +71,24 @@ describe('enPuntos', () => {
   it('los puntos porcentuales con un decimal', () => {
     assert.equal(enPuntos('2'), '2,0 pp');
     assert.equal(enPuntos('-1.25'), '-1,3 pp');
+  });
+});
+
+describe('comoCostoDeUso — un costo por gramo no cabe en dos decimales', () => {
+  it('lo pequeño conserva hasta cuatro decimales, redondeados', () => {
+    assert.equal(comoCostoDeUso('0.001176470588'), '0.0012');
+    assert.equal(comoCostoDeUso('0.001000000000'), '0.001');
+  });
+
+  it('con parte entera, dos decimales: un costo por kilo se lee como un importe', () => {
+    assert.equal(comoCostoDeUso('8.695652173913'), '8.70');
+    assert.equal(comoCostoDeUso('8.500000000000'), '8.50');
+  });
+
+  it('sin parte entera, hasta cuatro sin los ceros que sobran', () => {
+    assert.equal(comoCostoDeUso('0.500000000000'), '0.50');
+    assert.equal(comoCostoDeUso('0.000000000000'), '0.00');
+    assert.equal(comoCostoDeUso('0.99995'), '1.00');
   });
 });
 
