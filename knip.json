@@ -16,6 +16,7 @@
     "apps/web": {
       "entry": [
         "src/app/**/{page,layout,loading,error,not-found,route,template}.tsx",
+        "src/**/*.spec.ts",
         "next.config.ts"
       ],
       "project": [

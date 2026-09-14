@@ -14,6 +14,7 @@
  * En CI nunca se pasa esa bandera: alli la base siempre esta.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -102,6 +103,24 @@ function correrProyecto(proyecto) {
 const unitariasOk = correrProyecto('unit');
 if (!unitariasOk) {
   console.error('\naudit:tests  FALLO — pruebas unitarias en rojo');
+  process.exit(1);
+}
+
+/**
+ * Las pruebas de `apps/web/src/lib`: funciones puras del cliente —cómo se
+ * enseña un número, qué mes se mira— que ninguna prueba de la API puede ver.
+ * Nacieron con el signo perdido de `comoImporte` (INC-024).
+ *
+ * **CON EL EJECUTOR DE NODE, SIN DEPENDENCIAS.** Node 24 quita los tipos de un
+ * `.ts` por su cuenta y `node --test` expande el patrón. `process.execPath` y no
+ * `node`: es el mismo binario que corre este script (INC-006).
+ */
+const web = spawnSync(process.execPath, ['--test', 'src/**/*.spec.ts'], {
+  cwd: join(RAIZ, 'apps', 'web'),
+  stdio: 'inherit',
+});
+if (web.status !== 0) {
+  console.error('\naudit:tests  FALLO — pruebas de apps/web en rojo');
   process.exit(1);
 }
 

@@ -235,3 +235,49 @@ Corrida con la base publicada en el 5442 (D-16.145) y `costeo-api` parado (INC-0
 | `audit:complexity` con el glob `.tsx` | Diez funciones partidas; `HojaDeConteo` (41) y `FormularioDeEntrada` (46) en una segunda vuelta, con `FilaParaContar` y `CampoDeTexto` |
 | Recorrido en el navegador | INC-023, filas guardadas no editables, lateral corta, cabecera móvil de cuatro filas |
 | Mover la base al 5442 | La guardia de «unitarias sin base» y la sonda de `audit:tests` vigilaban el 5432 fijo; leen las cadenas de conexión |
+
+---
+
+## Inicio (pantalla 2) · 2026-09-14
+
+**Alcance del diff:** `apps/web` (Inicio, `Indicador`, `Vista` y sus cinco llamadas, `decimales` y las
+dos primeras pruebas, navegación, textos, CSS, `tsconfig`), `tools/audit/tests.mjs`, `knip.json`,
+`eslint.config.mjs`, ADR-027, INC-024, INC-023, `ESTRATEGIA.md`, `ESTADO.md`, `CHANGELOG`,
+`FUNCIONAMIENTO.md` y este documento. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Ninguna regla en el cliente: cifras y colores de `GET /analitica/resumen`; qué pantalla ver sale del permiso, no del rol |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 510 archivos** |
+| C · Seguridad | ✅ | `BODEGA` no recibe el resumen (403 de la API) y su reposición no trae cantidades (capturado); ninguna dependencia nueva |
+| D · Base de datos | — no aplica | |
+| E · Reglas de negocio | ✅ sin cambio | `audit:tests` |
+| F · Frontend | ✅ | Estados con `Vista`; semáforo por atributo y CSS; 6 capturas sin desbordes |
+| G · Pruebas | ✅ | **20 pruebas nuevas en `apps/web`**; cuatro guardianes (W1–W4) en `CONSTRUCCION.md` |
+| G2 bis · Contador | ✅ | **505 → 510, y los +5 están identificados**: `inicio/page.tsx`, `inicio/layout.tsx`, `ui/Indicador.tsx`, `lib/decimales.spec.ts` y `lib/fechas.spec.ts` |
+| H · Documentación | ✅ | ADR-027, INC-024, ESTRATEGIA, FUNCIONAMIENTO, CHANGELOG, ESTADO |
+| I9 · Bundle | ✅ | `medir-bundle`: piso **126,9 KiB**, `/inicio` **142,1**, la mayor `/inventario` **143,0**; presupuesto 200 / 350 |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 510 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+ Test Files  2 passed | 31 skipped (33)
+      Tests  19 passed | 527 skipped (546)
+ Test Files  67 passed (67)
+      Tests  894 passed (894)
+ℹ tests 20
+ℹ pass 20
+ℹ fail 0
+ Test Files  33 passed (33)
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```
+
+Las tres líneas `ℹ` son las 20 pruebas nuevas de `apps/web`, entre las unitarias de la API y las de integración.

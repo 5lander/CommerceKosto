@@ -75,8 +75,11 @@ export default function MenuEngineering(): ReactNode {
     <Marco titulo={TEXTOS.menu.titulo} ayuda={TEXTOS.menu.ayuda}>
       <Vista
         lectura={lectura}
-        esVacio={(menu) => menu.productos.every((p) => p.cuadrante === 'INACTIVO')}
-        vacio={{ titulo: TEXTOS.menu.vacio, ayuda: TEXTOS.menu.vacioAyuda }}
+        vacio={{
+          esVacio: (menu) => menu.productos.every((p) => p.cuadrante === 'INACTIVO'),
+          titulo: TEXTOS.menu.vacio,
+          ayuda: TEXTOS.menu.vacioAyuda,
+        }}
       >
         {(menu) => (
           <div className="pila">

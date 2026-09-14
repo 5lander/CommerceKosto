@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-/** La raíz manda al costeo, que es la pantalla que el dueño abre. */
-export default function Inicio(): never {
-  redirect('/costeo');
+/** La raíz manda a Inicio: el mes de la sucursal, o qué reponer (U2). */
+export default function Raiz(): never {
+  redirect('/inicio');
 }

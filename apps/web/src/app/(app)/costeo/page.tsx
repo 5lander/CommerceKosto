@@ -106,8 +106,11 @@ export default function Costeo(): ReactNode {
     <Marco titulo={TEXTOS.costeo.titulo} ayuda={TEXTOS.costeo.ayuda}>
       <Vista
         lectura={lectura}
-        esVacio={(carta) => carta.productos.length === 0}
-        vacio={{ titulo: TEXTOS.costeo.vacio, ayuda: TEXTOS.costeo.vacioAyuda }}
+        vacio={{
+          esVacio: (carta) => carta.productos.length === 0,
+          titulo: TEXTOS.costeo.vacio,
+          ayuda: TEXTOS.costeo.vacioAyuda,
+        }}
       >
         {(carta) => <TablaDeCosteo productos={carta.productos} />}
       </Vista>

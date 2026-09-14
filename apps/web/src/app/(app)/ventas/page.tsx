@@ -132,8 +132,11 @@ export default function Ventas(): ReactNode {
     <Marco titulo={TEXTOS.ventas.titulo} ayuda={TEXTOS.ventas.ayuda}>
       <Vista
         lectura={lectura}
-        esVacio={(datos) => datos.activos.length === 0}
-        vacio={{ titulo: TEXTOS.ventas.vacio, ayuda: TEXTOS.ventas.vacioAyuda }}
+        vacio={{
+          esVacio: (datos) => datos.activos.length === 0,
+          titulo: TEXTOS.ventas.vacio,
+          ayuda: TEXTOS.ventas.vacioAyuda,
+        }}
       >
         {(datos) =>
           sucursal !== null && <RejillaDeVentas datos={datos} destino={{ locationId: sucursal, ...periodo }} />

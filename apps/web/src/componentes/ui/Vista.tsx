@@ -8,6 +8,18 @@ import { Cargando, Error as Fallo, Vacio } from './Estados';
 const PERIODO_SIN_DATOS = 'PERIODO_SIN_DATOS';
 
 /**
+ * Cuándo lo leído está vacío, y qué decir entonces.
+ *
+ * **`'nunca'` SE ESCRIBE, NO SE OMITE.** Un resumen del mes no tiene estado
+ * vacío propio —si el mes no tiene nada, la API responde `PERIODO_SIN_DATOS`—,
+ * pero que una pantalla no tenga vacío tiene que ser una decisión que se lee, no
+ * un olvido que pasa por defecto.
+ */
+export type EstadoVacio<T> =
+  | { readonly esVacio: (datos: T) => boolean; readonly titulo: string; readonly ayuda: string }
+  | 'nunca';
+
+/**
  * Los cuatro estados de una lectura, siempre en el mismo orden: error, cargando,
  * vacío y datos. Una pantalla que lee una sola cosa no vuelve a escribirlos.
  *
@@ -17,13 +29,11 @@ const PERIODO_SIN_DATOS = 'PERIODO_SIN_DATOS';
  */
 export function Vista<T>({
   lectura,
-  esVacio,
   vacio,
   children,
 }: {
   readonly lectura: Lectura<T>;
-  readonly esVacio: (datos: T) => boolean;
-  readonly vacio: { readonly titulo: string; readonly ayuda: string };
+  readonly vacio: EstadoVacio<T>;
   readonly children: (datos: T) => ReactNode;
 }): ReactNode {
   if (lectura.codigo === PERIODO_SIN_DATOS) {
@@ -31,6 +41,6 @@ export function Vista<T>({
   }
   if (lectura.error !== null) return <Fallo mensaje={lectura.error} reintentar={lectura.recargar} />;
   if (lectura.datos === null) return <Cargando />;
-  if (esVacio(lectura.datos)) return <Vacio titulo={vacio.titulo} ayuda={vacio.ayuda} />;
+  if (vacio !== 'nunca' && vacio.esVacio(lectura.datos)) return <Vacio titulo={vacio.titulo} ayuda={vacio.ayuda} />;
   return children(lectura.datos);
 }

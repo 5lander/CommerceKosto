@@ -34,6 +34,14 @@ export interface GrupoDeNavegacion {
 
 export const NAVEGACION: readonly GrupoDeNavegacion[] = [
   {
+    titulo: TEXTOS.navegacion.general,
+    entradas: [
+      // `replenishment.read` lo tienen todos los roles: Inicio es de todos, y la
+      // página enseña el resumen o la reposición según lo que la sesión lee.
+      { href: '/inicio', texto: TEXTOS.inicio.titulo, permiso: 'replenishment.read', conMes: true },
+    ],
+  },
+  {
     titulo: TEXTOS.navegacion.analisis,
     entradas: [
       { href: '/costeo', texto: TEXTOS.costeo.titulo, permiso: 'costing.read', conMes: false },

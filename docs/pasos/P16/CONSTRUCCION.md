@@ -339,3 +339,109 @@ las cuatro secciones a 1280 y 360 px, guardar ventas y un conteo, recargar y vol
   `iva compra` y `tarifa de iva`, no `ivaTarifa`. El runbook dice `iva`. Se corrige el texto de la
   decisión o se añade el alias en el próximo paquete que toque `imports`.
 - Siguen en pie: `DELETE /usuarios/roles` por Caddy (P16-C) y las dudas #9, #10 y #11.
+
+---
+
+## Inicio (pantalla 2) · 2026-09-14
+
+### Objetivo
+
+U2: la primera pantalla tras entrar es el mes de la sucursal de un vistazo —y, para `BODEGA`, qué
+reponer—; `/` y la elección de sucursal llevan ahí.
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/inicio/page.tsx` · `layout.tsx` | `ResumenDelMes` (nueve indicadores de `GET /analitica/resumen`) si la sesión tiene `analytics.read`; si no, `ReposicionDelMes` (`GET /analitica/reposicion`, lo que hay que reponer primero). La sección pide `replenishment.read`, que tienen todos los roles |
+| `componentes/ui/Indicador.tsx` | Etiqueta, cifra, nota y `data-semaforo`: el color lo decide `global.css` con el semáforo de la API |
+| `componentes/armazon/navegacion.ts` · `textos/es.ts` | Grupo «General» con Inicio arriba; los textos de la pantalla |
+| `componentes/ui/Vista.tsx` + las cinco pantallas | `vacio` pasa a ser `{ esVacio, titulo, ayuda } \| 'nunca'`: un resumen sin estado vacío propio lo declara en vez de pasar un vacío falso |
+| `app/page.tsx` · `app/sucursal/page.tsx` | `/` y la elección de sucursal van a `/inicio` (D-16.136) |
+| `lib/decimales.ts` | **`conSigno`** —el arreglo de INC-024— y `enPuntos` para la brecha en puntos porcentuales |
+| `lib/decimales.spec.ts` · `lib/fechas.spec.ts` | **Las primeras pruebas de `apps/web`**: 20, con `node --test` (ADR-027) |
+| `tools/audit/tests.mjs` | Corre las del web tras las unitarias de la API |
+| `apps/web/tsconfig.json` · `knip.json` · `eslint.config.mjs` | `allowImportingTsExtensions`; las pruebas como entrada de knip; `describe`/`it` de `node:test` fuera de `no-floating-promises` |
+| `styles/global.css` | `.indicadores` (rejilla que baja de fila) e `.indicador[data-semaforo]` |
+
+### Decisiones
+
+D-16.148…D-16.151 en `ESTADO.md`; la de las pruebas, con su porqué, en **ADR-027**.
+
+### Cómo se verificó
+
+**En el navegador** (build de producción, tenant de ensayo; se registraron dos compras sintéticas en la
+Bodega Norte para que `BODEGA` tuviera algo que reponer):
+
+| Rol | `/inicio` |
+|---|---|
+| Gerente (Local Centro, septiembre) | Venta neta 199.22 · food cost real **16,9 %** en verde (teórico 16,9 %) · brecha 0,0 pp · utilidad **164.96** en verde, margen de seguridad 100,0 % · prime cost 17,2 % · varianza 0.00 · cobertura «—» con «Sin conteo» · 3 por reponer · 0 sin costo |
+| Dueña (Bodega Norte) | Venta 0.00 y el resto «—»: la bodega no vende |
+| Bodega (Bodega Norte) | «Qué reponer»: Arroz · Bien, Cebolla paitena · Bien. **Sin cantidades**, y sin el resumen |
+
+Ninguna captura desborda a 360 px. `/` responde `307 → /inicio`. Ajustado **mirando las capturas**: la
+cifra no arrancaba a la misma altura en tarjetas vecinas (`align-content: start`), y «Sin conteo» iba
+como cifra en dos líneas (ahora es la nota bajo la raya).
+
+### Guardianes
+
+```
+=== W1-redondear-sin-signo: apps/web/src/lib/decimales.ts
+    $ node --test src/**/*.spec.ts -> exit 1
+      ✖ un negativo con acarreo conserva el signo (antes: 100.00) (3.5811ms)
+      ✖ un cero no lleva signo (0.6636ms)
+      ✖ el signo — el `-` no es un dígito (8.5992ms)
+      ℹ pass 18
+      ℹ fail 2
+      ✖ failing tests:
+      ✖ un negativo con acarreo conserva el signo (antes: 100.00) (3.5811ms)
+      ✖ un cero no lleva signo (0.6636ms)
+
+=== W2-porcentaje-sin-signo: apps/web/src/lib/decimales.ts
+    $ node --test src/**/*.spec.ts -> exit 1
+      ✖ un porcentaje negativo corre la coma sin ceros de más (antes: -007,5 %) (1.527ms)
+      ✖ el signo — el `-` no es un dígito (4.7826ms)
+      ℹ pass 19
+      ℹ fail 1
+      ✖ failing tests:
+      ✖ un porcentaje negativo corre la coma sin ceros de más (antes: -007,5 %) (1.527ms)
+
+=== W3-audit-tests-ve-el-web: apps/web/src/lib/fechas.spec.ts
+    $ node tools/audit/tests.mjs --solo-unitarias -> exit 1
+      ✓  unit  src/shared/infrastructure/http/error.filter.spec.ts (20 tests) 23ms
+      ✓  unit  src/shared/domain/errors/valor-en-mensaje.spec.ts (6 tests) 7ms
+      ✖ es la consulta que piden la API y la URL (1.3403ms)
+      ✖ consultaDelMes (1.6839ms)
+      ℹ pass 19
+      ℹ fail 1
+      ✖ failing tests:
+      ✖ es la consulta que piden la API y la URL (1.3403ms)
+      audit:tests  FALLO — pruebas de apps/web en rojo
+
+=== W4-lint-mira-las-pruebas-del-web: eslint.config.mjs
+    $ npx.cmd eslint apps/web/src/lib/fechas.spec.ts --max-warnings=0 --no-inline-config -> exit 1
+      10:1  error  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+      11:3  error  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+      17:3  error  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+      … (diez errores, uno por cada describe/it del archivo)
+```
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo |
+|---|---|---|
+| **`comoImporte('-9.999')` daba `100.00`** y un −7,5 % salía `-007,5 %` | `conSigno` y las pruebas del web. **INC-024** | 10 min |
+| El guion de aplicación se paró a medias: el ancla de `no-empty` está dos veces en `eslint.config.mjs` | Ancla única y segundo guion con los pasos que faltaban; nada quedó aplicado dos veces | 5 min |
+
+### Incidencias registradas
+
+| Incidencia | Síntoma | ¿Prevención automatizada? |
+|---|---|---|
+| **INC-024** | Un margen negativo se enseña como `100.00` | ✅ `lib/decimales.spec.ts` en `audit:tests`, con guardián |
+
+### Deuda y pendientes
+
+- La tabla de reposición de `BODEGA` enseña «Bien» para `OK`: la API colapsa `SIN_CONSUMO` y `OK`
+  (§4.3), así que «Bien» también significa «no se consume». Es lo que la API puede decir sin revelar el
+  teórico.
+- Siguen en pie: dudas #9, #10, #11 y #13; `DELETE /usuarios/roles` por Caddy.

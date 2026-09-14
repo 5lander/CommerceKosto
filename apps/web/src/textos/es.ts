@@ -48,8 +48,34 @@ export const TEXTOS = {
   navegacion: {
     etiqueta: 'Navegación principal',
     menu: 'Menú',
+    general: 'General',
     analisis: 'Análisis',
     operacion: 'Operación diaria',
+  },
+
+  /** Pantalla 2 (U2): el mes de la sucursal de un vistazo. */
+  inicio: {
+    titulo: 'Inicio',
+    ayuda: 'Cómo va el mes en esta sucursal.',
+    venta: 'La venta y lo que deja',
+    operacion: 'La operación',
+    ventaNeta: 'Venta neta del mes',
+    foodCostReal: 'Food cost real',
+    teorico: 'Teórico:',
+    brecha: 'Brecha teórico–real',
+    utilidad: 'Utilidad operativa',
+    margenDeSeguridad: 'Margen de seguridad:',
+    primeCost: 'Prime cost',
+    varianza: 'Varianza de inventario',
+    cobertura: 'Cobertura del conteo',
+    sinConteo: 'Sin conteo',
+    porReponer: 'Ítems por reponer',
+    sinCosto: 'Ítems sin costo',
+    reposicion: 'Qué reponer',
+    estado: 'Estado',
+    semaforos: { REPONER: 'Reponer', OK: 'Bien' },
+    sinItems: 'Todavía no hay ítems con movimientos en esta sucursal este mes.',
+    sinItemsAyuda: 'Cuando se registren compras o conteos, aquí verás qué hay que reponer.',
   },
 
   sucursal: {

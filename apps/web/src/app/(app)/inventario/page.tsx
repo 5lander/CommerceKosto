@@ -144,8 +144,11 @@ export default function Inventario(): ReactNode {
     <Marco titulo={TEXTOS.inventario.titulo} ayuda={TEXTOS.inventario.ayuda}>
       <Vista
         lectura={lectura}
-        esVacio={(leido) => leido.hoja.filas.length === 0}
-        vacio={{ titulo: TEXTOS.inventario.vacio, ayuda: TEXTOS.inventario.vacioAyuda }}
+        vacio={{
+          esVacio: (leido) => leido.hoja.filas.length === 0,
+          titulo: TEXTOS.inventario.vacio,
+          ayuda: TEXTOS.inventario.vacioAyuda,
+        }}
       >
         {(leido) => <ConteoAbierto leido={leido} recargar={lectura.recargar} />}
       </Vista>

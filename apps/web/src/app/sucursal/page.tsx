@@ -37,8 +37,11 @@ export default function ElegirSucursal(): ReactNode {
 
       <Vista
         lectura={lectura}
-        esVacio={(sucursales) => sucursales.length === 0}
-        vacio={{ titulo: TEXTOS.sucursal.ninguna, ayuda: TEXTOS.sucursal.ningunaAyuda }}
+        vacio={{
+          esVacio: (sucursales) => sucursales.length === 0,
+          titulo: TEXTOS.sucursal.ninguna,
+          ayuda: TEXTOS.sucursal.ningunaAyuda,
+        }}
       >
         {(sucursales) => <ListaDeSucursales sucursales={sucursales} />}
       </Vista>
@@ -59,7 +62,7 @@ function ListaDeSucursales({ sucursales }: { readonly sucursales: readonly Sucur
             className="opcion"
             onClick={() => {
               elegir(sucursal.id);
-              router.replace('/costeo');
+              router.replace('/inicio');
             }}
           >
             <span>{sucursal.nombre}</span>

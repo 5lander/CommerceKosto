@@ -4,6 +4,23 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Inicio (pantalla 2) — El mes de un vistazo, y las primeras pruebas del web · 2026-09-14
+
+> Segundo commit de pantallas. **ADR-027**, una incidencia nueva (INC-024). Sin cambios en `apps/api`.
+
+**Inicio (U2).** La primera pantalla tras entrar. Quien lee analítica ve el mes de la sucursal en nueve
+indicadores —venta neta, food cost real con el teórico al lado, brecha, utilidad con su margen de
+seguridad, prime cost, varianza, cobertura del conteo, ítems por reponer y sin costo—, cada uno con el
+color que decidió la API. `BODEGA` ve qué reponer, lo pendiente primero y sin una sola cantidad. `/` y
+la elección de sucursal llevan ahí.
+
+**Un margen negativo se enseñaba como `100.00`** (INC-024). `comoImporte` y `comoPorcentaje` trataban el
+signo como un dígito: con acarreo desaparecía, y un −7,5 % salía `-007,5 %`. La pantalla de menú ya lo
+usaba con el margen de contribución. Arreglado, y con **las primeras pruebas de `apps/web`**: 20, con el
+ejecutor de Node y sin dependencias (ADR-027), corridas por `audit:tests`.
+
+---
+
 ## P16-D — El costeo dice «sin receta» en vez de cero · 2026-09-14
 
 > Paquete de API corto, abierto por decisión del usuario (duda #12, opción (a)). Sin migraciones ni

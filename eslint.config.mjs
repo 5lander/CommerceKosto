@@ -71,6 +71,13 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'error',
       '@typescript-eslint/no-unsafe-return': 'error',
       'no-empty': ['error', { allowEmptyCatch: true }],
+      // `describe` e `it` de `node:test` devuelven una promesa que el propio
+      // ejecutor espera: no son promesas flotando. Solo esas dos, por nombre y
+      // por módulo, para que la regla siga viendo las demás.
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        { allowForKnownSafeCalls: [{ from: 'package', name: ['describe', 'it'], package: 'node:test' }] },
+      ],
 
       'no-restricted-syntax': [
         'error',

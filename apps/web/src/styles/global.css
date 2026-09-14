@@ -751,6 +751,37 @@ input[type='number'] {
 }
 
 /*
+ * Los indicadores de Inicio: tarjetas que se reparten el ancho y bajan de fila
+ * cuando no caben —dos en un teléfono, cinco en escritorio—.
+ *
+ * EL COLOR SALE DEL SEMÁFORO QUE MANDÓ LA API, como el de los cuadrantes: la
+ * pantalla solo dice cuál es y esta hoja decide cómo se pinta. `SIN_DATO` no
+ * lleva color: no es un nivel, es que no se pudo medir.
+ */
+.indicadores {
+  display: grid;
+  gap: var(--f1);
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+}
+
+/* La cifra arranca a la misma altura en todas, lleven nota debajo o no. */
+.indicador {
+  align-content: start;
+}
+
+.indicador[data-semaforo='VERDE'] .cifra {
+  color: var(--color-bien);
+}
+
+.indicador[data-semaforo='AMBAR'] .cifra {
+  color: var(--color-atencion);
+}
+
+.indicador[data-semaforo='ROJO'] .cifra {
+  color: var(--color-mal);
+}
+
+/*
  * La celda editable de la rejilla de ventas y de la hoja de conteo.
  *
  * Ancho fijo para que la columna no baile mientras se escribe, y `--tactil` de

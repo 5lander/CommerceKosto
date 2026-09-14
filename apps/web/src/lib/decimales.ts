@@ -80,6 +80,28 @@ function sumarUno(digitos: string): string {
   return `1${cifras.join('')}`;
 }
 
+const MENOS = '-';
+
+/** Un resultado hecho solo de ceros: `0`, `0.00`. */
+const SOLO_CEROS = /^[0.]+$/u;
+
+/**
+ * Aplica `transformar` al valor ABSOLUTO y le devuelve el signo después.
+ *
+ * **LAS OPERACIONES DE ESTE ARCHIVO SON SOBRE DÍGITOS, Y EL `-` NO ES UN
+ * DÍGITO.** Hasta la pantalla de Inicio, `redondear` y `moverComa` lo trataban
+ * como uno: `comoImporte('-9.999')` daba `100.00` —el acarreo convertía el signo
+ * en un nueve— y un −7,5 % salía `-007,5 %`. La pantalla de menú ya pasaba por
+ * aquí el margen de contribución, que es negativo en un plato que pierde dinero.
+ *
+ * Y un cero no lleva signo: `-0.001` redondeado es `0.00`, no `-0.00`.
+ */
+function conSigno(valor: string, transformar: (absoluto: string) => string): string {
+  if (!valor.startsWith(MENOS)) return transformar(valor);
+  const resultado = transformar(valor.slice(MENOS.length));
+  return SOLO_CEROS.test(resultado) ? resultado : `${MENOS}${resultado}`;
+}
+
 /**
  * Redondea un decimal escrito como cadena, **medio hacia arriba**.
  *
@@ -91,6 +113,10 @@ function sumarUno(digitos: string): string {
  * clase de número plausible y falso que este sistema existe para evitar.
  */
 export function redondear(valor: string, decimales: number): string {
+  return conSigno(valor, (absoluto) => redondearSinSigno(absoluto, decimales));
+}
+
+function redondearSinSigno(valor: string, decimales: number): string {
   const [entera = '0', decimal = ''] = valor.split('.');
 
   // Se pide un dígito de más: el que decide el redondeo.
@@ -140,7 +166,7 @@ export function comoImporte(valor: string): string {
   return redondear(valor, DECIMALES_VISIBLES);
 }
 
-/** Un decimal se muestra con un decimal de porcentaje. */
+/** Un porcentaje y unos puntos porcentuales se muestran con un decimal. */
 const DECIMALES_DE_PORCENTAJE = 1;
 
 /** Mover la coma dos posiciones es multiplicar por cien, sin aritmética. */
@@ -171,5 +197,15 @@ function moverComa(valor: string, posiciones: number): string {
 export function comoPorcentaje(fraccion: string): string {
   const redondeado = redondear(fraccion, POSICIONES_DEL_PORCENTAJE + DECIMALES_DE_PORCENTAJE);
 
-  return `${moverComa(redondeado, POSICIONES_DEL_PORCENTAJE).replace('.', ',')} %`;
+  const corrido = conSigno(redondeado, (absoluto) => moverComa(absoluto, POSICIONES_DEL_PORCENTAJE));
+  return `${corrido.replace('.', ',')} %`;
+}
+
+/**
+ * `2` a `2,0 pp`: puntos porcentuales, como la brecha entre el food cost teórico
+ * y el real. **NO ES UN PORCENTAJE**: la API ya los manda en puntos, y pasarlos
+ * por `comoPorcentaje` los multiplicaría por cien.
+ */
+export function enPuntos(puntos: string): string {
+  return `${redondear(puntos, DECIMALES_DE_PORCENTAJE).replace('.', ',')} pp`;
 }
