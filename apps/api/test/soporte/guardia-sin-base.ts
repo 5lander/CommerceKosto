@@ -15,11 +15,56 @@
  * prohibir la red en general.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
+import { resolve } from 'node:path';
+import { parseEnv } from 'node:util';
 import { afterAll, beforeAll } from 'vitest';
 
 const PUERTO_POSTGRES_POR_DEFECTO = 5432;
-const PUERTO_VIGILADO = Number(process.env['POSTGRES_PORT'] ?? PUERTO_POSTGRES_POR_DEFECTO);
+
+/** Las cadenas por las que una prueba podría llegar a la base: directa o por el pooler. */
+const CADENAS_DE_LA_BASE = ['DATABASE_URL', 'MIGRATION_DATABASE_URL', 'PGBOUNCER_DATABASE_URL'] as const;
+
+// `__dirname`, como en `entorno-de-integracion.ts`: la aplicación compila a CommonJS.
+const ARCHIVO_ENV = resolve(__dirname, '..', '..', '..', '..', '.env');
+
+/**
+ * El `.env` LEÍDO, NO CARGADO. Las unitarias corren sin las variables del
+ * archivo y así se quedan: meterlas en `process.env` cambiaría lo que prueban.
+ * Solo se miran los puertos.
+ */
+function variablesDelArchivo(): Record<string, string | undefined> {
+  return existsSync(ARCHIVO_ENV) ? parseEnv(readFileSync(ARCHIVO_ENV, 'utf8')) : {};
+}
+
+/**
+ * **LOS PUERTOS DE LAS CADENAS DE CONEXIÓN, NO UN NÚMERO FIJO.** Hasta el
+ * armazón se vigilaba `POSTGRES_PORT ?? 5432` leído de `process.env`, que en las
+ * unitarias no trae el `.env`: con la base publicada en otro puerto —para no
+ * chocar con otro proyecto de la máquina—, la guardia habría vigilado un puerto
+ * donde ya no hay nada, y una prueba que conectara a la base de verdad habría
+ * pasado en verde. Es INC-007 con otro disfraz. Se vigila el 5432 de siempre,
+ * `POSTGRES_PORT` y el puerto de cada cadena, venga del entorno o del archivo.
+ */
+function puertosVigilados(): ReadonlySet<number> {
+  const archivo = variablesDelArchivo();
+  const leer = (nombre: string): string | undefined => process.env[nombre] ?? archivo[nombre];
+  const puertos = new Set([PUERTO_POSTGRES_POR_DEFECTO]);
+
+  const declarado = leer('POSTGRES_PORT');
+  if (declarado !== undefined && declarado !== '') puertos.add(Number(declarado));
+
+  for (const nombre of CADENAS_DE_LA_BASE) {
+    const cadena = leer(nombre);
+    if (cadena === undefined || cadena === '') continue;
+    const { port } = new URL(cadena);
+    puertos.add(port === '' ? PUERTO_POSTGRES_POR_DEFECTO : Number(port));
+  }
+  return puertos;
+}
+
+const PUERTOS_VIGILADOS = puertosVigilados();
 
 const conexionOriginal = net.Socket.prototype.connect;
 
@@ -79,7 +124,7 @@ beforeAll(() => {
     ...args: Parameters<typeof conexionOriginal>
   ): net.Socket {
     const puerto = puertoDestino(args[0]);
-    if (puerto === PUERTO_VIGILADO) throw new Error(mensaje(puerto));
+    if (puerto !== undefined && PUERTOS_VIGILADOS.has(puerto)) throw new Error(mensaje(puerto));
     return conexionOriginal.apply(this, args);
   };
 

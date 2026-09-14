@@ -20,8 +20,9 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { ReactNode, SyntheticEvent } from 'react';
 
+import { CampoDeTexto } from '../../componentes/ui/Campo';
 import { Logotipo } from '../../componentes/ui/Marca';
-import { ErrorDeApi, llamar } from '../../lib/api';
+import { codigoDe, llamar } from '../../lib/api';
 import { guardarCsrf } from '../../lib/csrf';
 import { TEXTOS } from '../../textos/es';
 
@@ -34,7 +35,7 @@ interface RespuestaDeLogin {
   readonly csrf: string;
 }
 
-export default function Entrar(): ReactNode {
+function useEntrada() {
   const router = useRouter();
   const [correo, setCorreo] = useState('');
   const [contrasena, setContrasena] = useState('');
@@ -60,12 +61,15 @@ export default function Entrar(): ReactNode {
     } catch (fallo) {
       // El mensaje del bloqueo SÍ se toma del backend, que sabe cuánto falta.
       // El del rechazo se escribe aquí, deliberadamente vago.
-      const bloqueado = fallo instanceof ErrorDeApi && fallo.codigo === BLOQUEADO;
-      setError(bloqueado ? TEXTOS.acceso.bloqueado : TEXTOS.acceso.rechazado);
+      setError(codigoDe(fallo) === BLOQUEADO ? TEXTOS.acceso.bloqueado : TEXTOS.acceso.rechazado);
       setEntrando(false);
     }
   }
 
+  return { correo, setCorreo, contrasena, setContrasena, error, entrando, enviar };
+}
+
+export default function Entrar(): ReactNode {
   return (
     <main className="pantalla pantalla--angosta">
       {/*
@@ -75,61 +79,56 @@ export default function Entrar(): ReactNode {
       */}
       <div className="pila">
         <Logotipo />
-
         <p className="nota">{TEXTOS.firma}</p>
-
         <h1 className="titulo">{TEXTOS.acceso.titulo}</h1>
-
-        {/*
-          El manejador se envuelve en una funcion que NO devuelve la promesa: React
-          espera `void` en `onSubmit`, y devolverle una promesa deja un rechazo sin
-          capturar que no llega a ningun sitio. `void` lo dice explicitamente.
-        */}
-        <form
-          onSubmit={(evento) => {
-            void enviar(evento);
-          }}
-          className="pila pila--apretada"
-        >
-          <label className="campo">
-            {TEXTOS.acceso.correo}
-            <input
-              type="email"
-              name="email"
-              autoComplete="username"
-              required
-              value={correo}
-              onChange={(e) => {
-                setCorreo(e.target.value);
-              }}
-            />
-          </label>
-
-          <label className="campo">
-            {TEXTOS.acceso.contrasena}
-            <input
-              type="password"
-              name="contrasena"
-              autoComplete="current-password"
-              required
-              value={contrasena}
-              onChange={(e) => {
-                setContrasena(e.target.value);
-              }}
-            />
-          </label>
-
-          {error !== null && (
-            <p role="alert" className="mal">
-              {error}
-            </p>
-          )}
-
-          <button type="submit" data-variante="primario" disabled={entrando}>
-            {entrando ? TEXTOS.acceso.entrando : TEXTOS.acceso.entrar}
-          </button>
-        </form>
+        <FormularioDeEntrada />
       </div>
     </main>
+  );
+}
+
+function FormularioDeEntrada(): ReactNode {
+  const entrada = useEntrada();
+
+  return (
+    // El manejador se envuelve en una función que NO devuelve la promesa: React
+    // espera `void` en `onSubmit`, y devolverle una promesa deja un rechazo sin
+    // capturar que no llega a ningún sitio. `void` lo dice explícitamente.
+    <form
+      onSubmit={(evento) => {
+        void entrada.enviar(evento);
+      }}
+      className="pila pila--apretada"
+    >
+      <CampoDeTexto
+        etiqueta={TEXTOS.acceso.correo}
+        tipo="email"
+        nombre="email"
+        autocompletar="username"
+        requerido
+        valor={entrada.correo}
+        cambiar={entrada.setCorreo}
+      />
+
+      <CampoDeTexto
+        etiqueta={TEXTOS.acceso.contrasena}
+        tipo="password"
+        nombre="contrasena"
+        autocompletar="current-password"
+        requerido
+        valor={entrada.contrasena}
+        cambiar={entrada.setContrasena}
+      />
+
+      {entrada.error !== null && (
+        <p role="alert" className="mal">
+          {entrada.error}
+        </p>
+      )}
+
+      <button type="submit" data-variante="primario" disabled={entrada.entrando}>
+        {entrada.entrando ? TEXTOS.acceso.entrando : TEXTOS.acceso.entrar}
+      </button>
+    </form>
   );
 }

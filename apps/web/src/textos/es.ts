@@ -44,17 +44,41 @@ export const TEXTOS = {
     salir: 'Salir',
   },
 
+  /** El armazón: la barra lateral y la cabecera (P16). */
+  navegacion: {
+    etiqueta: 'Navegación principal',
+    menu: 'Menú',
+    analisis: 'Análisis',
+    operacion: 'Operación diaria',
+  },
+
   sucursal: {
     titulo: '¿En qué sucursal estás?',
     ayuda: 'Los números que veas son de la sucursal que elijas.',
     ninguna: 'Tu usuario todavía no tiene ninguna sucursal asignada.',
     ningunaAyuda: 'Pídele a quien administra el sistema que te asigne una.',
     cambiar: 'Cambiar de sucursal',
+    etiqueta: 'Sucursal',
   },
 
   periodo: {
     mes: 'Mes',
     anio: 'Año',
+    /** En orden: el índice 0 es enero. */
+    meses: [
+      'Enero',
+      'Febrero',
+      'Marzo',
+      'Abril',
+      'Mayo',
+      'Junio',
+      'Julio',
+      'Agosto',
+      'Septiembre',
+      'Octubre',
+      'Noviembre',
+      'Diciembre',
+    ],
   },
 
   costeo: {
@@ -150,5 +174,8 @@ export const TEXTOS = {
     sinPermiso: 'Tu usuario no tiene acceso a esta pantalla.',
     sinPermisoAyuda: 'Si crees que debería tenerlo, pídeselo a quien administra el sistema.',
     sesionCaducada: 'Tu sesión se cerró. Vuelve a entrar.',
+    // D-16.2: un mes que nadie ha trabajado no es un error, es un estado.
+    mesSinAbrir: 'Este mes todavía no tiene datos en esta sucursal.',
+    mesSinAbrirAyuda: 'Cuando se carguen sus ventas o sus movimientos, aquí aparecerán sus números.',
   },
 } as const;

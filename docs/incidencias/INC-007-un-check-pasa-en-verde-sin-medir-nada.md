@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
-| **Recurrencias** | **12** |
+| **Recurrencias** | **13** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -342,6 +342,73 @@ murieron antes del commit, que es exactamente para lo que existe el guardián:
 > **La lección, que amplía la del caso 11:** preguntar «¿qué pasaría si el sistema no cumpliera el
 > título?» no basta si la respuesta se imagina. **Hay que escribir el sistema que no lo cumple** —el
 > `if` previo, el esquema viejo, el `dist` sin compilar— y verlo fallar.
+
+## Caso 13 (P16 · Armazón) — `typecheck` del web no comprobaba las rutas tipadas en un clon limpio
+
+**Dos checks del mismo commit con el mismo modo de fallo.** Uno se destapó solo; el otro, al
+preguntarse si el primero tenía hermano.
+
+### Qué pasó
+
+1. **Las rutas tipadas.** `apps/web` tiene `typedRoutes`: un `<Link href="/ruta-que-no-existe">` no
+   compila. **Pero los tipos de las rutas los genera Next en `.next/types/`**, y `npm run typecheck`
+   era `tsc --noEmit` a secas. Tras mover las cuatro páginas a `(app)/`, `tsc` falló contra un
+   `.next/types/validator.ts` rancio que aún importaba `src/app/costeo/page.js`. El hermano, que es el
+   grave: **en un clon limpio —el de CI— no hay `.next/` ni `next-env.d.ts`, y `tsc` no ve la
+   restricción**. Sonda, con un `href` a una ruta inexistente:
+
+   ```
+   --- sin tipos generados (lo que ve CI):
+   (sin salida: tsc en verde)
+   --- con tipos generados:
+   src/app/sonda-rutas.tsx:5:16 - error TS2322: Type '"/ruta-que-no-existe"' is not assignable to type 'UrlObject | RouteImpl<"/ruta-que-no-existe">'.
+   ```
+
+   CI nunca construye `apps/web`, así que **ningún check del proyecto validaba las rutas tipadas**.
+
+2. **La complejidad de los `.tsx`.** `audit:complexity` solo tenía el glob `apps/*/src/**/*.ts`.
+   Estaba dicho —el commit 0 lo dejó para el armazón—, pero no medido: con el glob `.tsx` añadido, el
+   árbol de P16-C, que salió con `audit exit=0`, tiene **diez** incumplimientos (`Ventas` de 163 líneas
+   y complejidad 15, `Inventario` de 141 y 15, `Marco` de 87, `Entrar` de 79, `ElegirSucursal` de 71,
+   `HojaDeConteo` de 58, `Cuadrante` de 49, `MenuEngineering` de 43). El armazón los deja en cero.
+
+### La prevención
+
+`"typecheck": "next typegen && tsc --noEmit"`: los tipos se regeneran **siempre** antes de comprobar,
+así que no hay `.next/` rancio en local ni ausente en CI. Guardián, borrando `.next/types` y
+`next-env.d.ts` como en un clon limpio:
+
+```
+--- ROJO esperado (sonda con href inexistente):
+✓ Types generated successfully
+src/app/sonda-rutas.tsx:5:16 - error TS2322: Type '"/ruta-que-no-existe"' is not assignable to type 'UrlObject | RouteImpl<"/ruta-que-no-existe">'.
+--- VERDE esperado (sonda retirada):
+✓ Types generated successfully
+```
+
+Y el glob `'apps/*/src/**/*.tsx'` en `eslint.complexity.config.mjs`, con los diez de arriba como
+guardián: la configuración vieja no los veía, la nueva sí.
+
+### Y dos más, al mover la base de puerto, que no suben el contador porque se cazaron antes
+
+El usuario pidió publicar la base de desarrollo en el 5442. Antes de hacerlo se buscó quién tenía el
+5432 escrito, y dos checks lo tenían **con el `.env` fuera de su alcance**:
+
+1. **La guardia de «unitarias sin base»** (`test/soporte/guardia-sin-base.ts`) vigilaba
+   `POSTGRES_PORT ?? 5432` de `process.env`, y el proyecto `unit` no carga el `.env`. Con la base en el
+   5442, una unitaria que abriera un socket a la base de verdad **pasaba en verde** —comprobado con
+   una sonda, salida en `docs/pasos/P16/CONSTRUCCION.md`—.
+2. **La sonda de `audit:tests`** preguntaba al mismo `POSTGRES_PORT ?? 5432`, y este proceso tampoco
+   carga el `.env`. En el pre-commit, con `--solo-unitarias`, un puerto vacío es un **PARCIAL en verde
+   sin una sola prueba de integración**.
+
+Las dos leen ahora **las cadenas de conexión**, del entorno o del `.env` leído con `util.parseEnv` y
+**sin cargarlo** (las unitarias no deben ver sus variables). La guardia vigila además el puerto de
+PgBouncer: una unitaria tampoco debe llegar a la base por el pooler.
+
+> **La lección que añade:** un número escrito en un check no es una constante, es una suposición sobre
+> el entorno. Cuando el entorno se puede configurar, el check tiene que leer **la misma fuente** que el
+> código que vigila, no un valor por defecto que coincidía.
 
 ## Referencias
 

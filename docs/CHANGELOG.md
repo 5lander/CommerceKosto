@@ -4,6 +4,45 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Armazón (pantalla 1) — La aplicación gana su esqueleto, y entrar vuelve a funcionar · 2026-09-13
+
+> Primer commit de pantallas de la pasada. Sin cambios en `apps/api`. **ADR-020** y **ADR-022**, una
+> incidencia nueva (INC-023) y dos recurrencias con su prevención automatizada (INC-015 → 1 en
+> `doctor`; INC-007 → 13 en `typecheck` y `audit:complexity`).
+
+**El armazón (U1).** Un grupo de rutas `(app)` envuelve la aplicación autenticada con una cabecera
+—marca, sucursal, mes, salir— y una barra lateral por grupos, «Análisis» y «Operación diaria». Los
+permisos salen de `GET /auth/sesion` una vez y **cerrados por defecto**: la barra empieza vacía y se
+llena, y cada sección declara el suyo en una línea (`seccion('costing.read')`). Sin permiso, la
+sección lo dice en sitio, también si se escribe la URL a mano. **El mes vive en la URL** y es el de
+Ecuador, no el de UTC. En el teléfono la navegación va detrás de «Menú» y la cabecera ocupa tres
+filas.
+
+**El kit (ADR-022).** `useLectura`/`useCarga` —una respuesta de otra lectura ya no puede pisar a la
+actual—, `Vista` con los cuatro estados en orden y el vacío obligatorio, `useEnvio`, la rejilla que se
+recorre con el teclado y la casilla editable, una vez para ventas y conteo. Las cuatro pantallas y las
+dos públicas, migradas y partidas: **`audit:complexity` mide desde hoy los `.tsx`**, y el árbol
+anterior tenía diez incumplimientos que nadie veía.
+
+**Lo que destapó entrar de verdad.** Se capturó la aplicación con tres roles a 1280 y 360 px, entrando
+por el formulario, y salieron dos fallos que estaban en `main`: **desde P16-A2 nadie podía entrar
+desde un navegador sin sesión** —el cliente pedía un token anti-CSRF antes del login, sin sesión eso es
+401 y la pantalla decía «el correo o la contraseña no coinciden»— (INC-023), y **una fila ya guardada
+de ventas o del conteo no se podía editar**, porque llegaba como `19.000000000000` a una casilla que
+solo admite dígitos. Los dos, arreglados y comprobados guardando y recargando.
+
+**Y los checks que no medían.** `typecheck` del web no comprobaba las rutas tipadas en un clon limpio
+—CI nunca las validó—, y ahora genera sus tipos antes. `npm run doctor` sondea los puertos de la base:
+tras un reinicio de Docker Desktop, el 5432 aceptaba y cortaba con la base sana. La base de desarrollo
+se publica ahora en el **5442** (a pedido del usuario, solo en el `.env` local), y moverla destapó que
+la guardia de «unitarias sin base» y la sonda de `audit:tests` estaban atadas al 5432: habrían vigilado
+un puerto vacío. Leen las cadenas de conexión.
+
+**Pendiente:** la duda #12 —costeo `0.00` sin receta—, que el usuario resolvió con la opción (a); la
+conciliación con doce decimales (pantalla 23); `/ventas` leyendo `/costeo` entero (pantalla 3).
+
+---
+
 ## P16-C — La carga del mes con testigo, la rejilla que borraba lo que no se tocaba, y lo que la pantalla de usuarios necesitaba · 2026-09-12
 
 > Cuarto y último paquete de API de la pasada P16 → P20. Un commit, **una migración reversible**

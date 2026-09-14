@@ -19,16 +19,15 @@
  * con el color de la pérdida y uno del 40 % de verde.
  */
 
-import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
-import { Marco } from '../../componentes/Marco';
-import { Tabla } from '../../componentes/ui/Tabla';
-import { llamar } from '../../lib/api';
-import { comoImporte, comoPorcentaje } from '../../lib/decimales';
-import { useSucursal } from '../../lib/sesion';
-import { TEXTOS } from '../../textos/es';
+import { Marco } from '../../../componentes/Marco';
+import { Tabla } from '../../../componentes/ui/Tabla';
+import { Vista } from '../../../componentes/ui/Vista';
+import { comoImporte, comoPorcentaje } from '../../../lib/decimales';
+import { useSucursal } from '../../../lib/sesion';
+import { useLectura } from '../../../lib/useLectura';
+import { TEXTOS } from '../../../textos/es';
 
 interface ImporteDto {
   readonly mostrar: string;
@@ -96,43 +95,17 @@ const CLASE_DEL_SEMAFORO: Readonly<Record<Semaforo, string>> = {
 
 export default function Costeo(): ReactNode {
   const { sucursal } = useSucursal();
-  const [carta, setCarta] = useState<CosteoDeCarta | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const cargar = useCallback(async (): Promise<void> => {
-    if (sucursal === null) return;
-    setError(null);
-    setCarta(null);
-
-    try {
-      setCarta(await llamar<CosteoDeCarta>({ ruta: `/costeo?locationId=${sucursal}` }));
-    } catch (fallo) {
-      setError(fallo instanceof Error ? fallo.message : TEXTOS.comun.cargando);
-    }
-  }, [sucursal]);
-
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
+  const lectura = useLectura<CosteoDeCarta>(sucursal === null ? null : `/costeo?locationId=${sucursal}`);
 
   return (
     <Marco titulo={TEXTOS.costeo.titulo} ayuda={TEXTOS.costeo.ayuda}>
-      {error !== null && (
-        <Fallo
-          mensaje={error}
-          reintentar={() => {
-            void cargar();
-          }}
-        />
-      )}
-
-      {error === null && carta === null && <Cargando />}
-
-      {carta !== null && carta.productos.length === 0 && (
-        <Vacio titulo={TEXTOS.costeo.vacio} ayuda={TEXTOS.costeo.vacioAyuda} />
-      )}
-
-      {carta !== null && carta.productos.length > 0 && <TablaDeCosteo productos={carta.productos} />}
+      <Vista
+        lectura={lectura}
+        esVacio={(carta) => carta.productos.length === 0}
+        vacio={{ titulo: TEXTOS.costeo.vacio, ayuda: TEXTOS.costeo.vacioAyuda }}
+      >
+        {(carta) => <TablaDeCosteo productos={carta.productos} />}
+      </Vista>
     </Marco>
   );
 }

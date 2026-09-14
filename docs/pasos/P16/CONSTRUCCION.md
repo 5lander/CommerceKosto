@@ -138,3 +138,204 @@ npm run build --workspace @costeo/web && npm run medir-bundle
 ### Deuda y pendientes
 
 **El override de `multer` es deuda con condición de salida:** se retira cuando `@nestjs/platform-express` fije `multer ≥ 2.3.0`. Está en `ESTADO.md`. Lo demás: El glob `.tsx` de `audit:complexity` es del commit «Armazón», y está en el plan.
+
+---
+
+## Armazón (pantalla 1) · 2026-09-13
+
+### Objetivo
+
+Que las treinta pantallas que faltan sean **una carpeta y una línea**: el esqueleto común —cabecera,
+barra lateral por grupos, guardia de sucursal, permisos, mes— y el kit con el que se lee y se escribe,
+con las cuatro pantallas que ya existían migradas a él y partidas por debajo de los límites de
+complejidad que desde este commit también se miden en los `.tsx`.
+
+### Plan aprobado
+
+«Commit Armazón» del plan (`PLAN.md`): `app/(app)/layout.tsx` + `armazon/*` + `navegacion.ts` +
+`lib/permisos.tsx` + `lib/periodo.ts` + `lib/fechas.ts` + fábrica `seccion(permiso)`; `useLectura` +
+`Vista` y cada primitiva con su primer consumidor; `git mv` de las cuatro páginas con partición ≤ 40
+líneas; glob `.tsx` en `audit:complexity` con guardián; `/` → `/inicio`. **Lo último se movió al
+commit «Inicio»** (D-16.136): con `typedRoutes` no compila un `redirect` a una ruta que no existe.
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/layout.tsx` | El grupo de rutas autenticado: `ProveedorDePermisos` → `Suspense` → `Armazon`. `/entrar` y `/sucursal` quedan fuera |
+| `app/(app)/{costeo,menu,ventas,inventario}/layout.tsx` | Una línea cada uno: `export default seccion('<permiso>')` |
+| `app/(app)/{costeo,menu,ventas,inventario}/page.tsx` | Movidas con `git mv`. **Costeo y menú** leen con `useLectura` + `Vista`; el menú, con el mes de la URL y su fila extraída (`FilaDelMenu`). **Ventas**: `useVentasDelMes` (carta + mes + anterior en paralelo, con `useCarga`), `useCapturaDeVentas`, `RejillaDeVentas`, `BarraDeGuardado`, `FilaDeVenta`. **Inventario**: `conteoDelMes`, `conciliacionSiSePuede`, `useConteoDelMes`, `ConteoAbierto`, `AccionesDelConteo`, `HojaDeConteo`, `FilaParaContar`, `FilaConciliadaDeLaTabla` |
+| `componentes/armazon/` | `Armazon` (cabecera + lateral + lámina; la lámina enseña el error si la sesión no se pudo leer), `Cabecera` (marca, sucursal, mes si la sección lo tiene, salir), `BarraLateral` (grupos filtrados por permiso; el mes viaja en el enlace), `SelectorDeSucursal`, `SelectorDeMes`, `Permitido` + `seccion`, `navegacion.ts` (el registro) |
+| `componentes/Marco.tsx` | Adelgaza a lo que es de cada pantalla: título, ayuda, acciones y la guardia de sucursal. Ya no pinta la barra ni el `main` |
+| `componentes/ui/Vista.tsx` · `CeldaEditable.tsx` · `Campo.tsx` | Los cuatro estados de una lectura; la casilla de una rejilla de captura; el campo de texto con etiqueta (primer consumidor: `Entrar`) |
+| `lib/useLectura.ts` · `lib/useEnvio.ts` · `lib/rejilla.ts` | `useCarga`/`useLectura` con el origen del resultado; la escritura con su estado; Enter y flechas por la rejilla |
+| `lib/permisos.tsx` | `ProveedorDePermisos`, `usePermisos`, `useEntrarAlCaducar` |
+| `lib/fechas.ts` · `lib/periodo.ts` | El mes de Ecuador, `mesDeTexto` sin parsear, `mesAnterior`, `consultaDelMes`; `usePeriodo` sobre la URL |
+| `lib/api.ts` | `alCaducarSesion` (devuelve cómo quitarlo), `mensajeDe`, `codigoDe` y **la mutación sin sesión que sale sin token** (INC-023) |
+| `lib/decimales.ts` | `sinCerosDeSobra` |
+| `app/entrar/page.tsx` · `app/sucursal/page.tsx` | Partidas: `useEntrada` + `FormularioDeEntrada`; `/sucursal` con `useLectura` + `Vista` y `useEntrarAlCaducar` |
+| `styles/global.css` | `.aplicacion`, `.armazon`, `.lateral`, `.barra__contexto`, `.selector-compacto`, `.barra__interior--ancha`; todo con tokens |
+| `textos/es.ts` | Navegación, etiqueta de sucursal, nombres de los meses, mes sin abrir |
+| `apps/web/package.json` | `"typecheck": "next typegen && tsc --noEmit"` (INC-007, caso 13) |
+| `eslint.complexity.config.mjs` | El glob `'apps/*/src/**/*.tsx'` |
+| `tools/doctor.mjs` | «Puertos de la base (INC-015)»: `SSLRequest` a cada `host:puerto` de las cadenas de conexión; `revisar` pasa a asíncrono |
+| `apps/api/test/soporte/guardia-sin-base.ts` | Vigila **los puertos de las cadenas de conexión** (`DATABASE_URL`, `MIGRATION_DATABASE_URL`, `PGBOUNCER_DATABASE_URL`, del entorno o del `.env` leído sin cargarlo), además de `POSTGRES_PORT` y el 5432. Antes: `POSTGRES_PORT ?? 5432` de un entorno sin `.env` |
+| `tools/audit/tests.mjs` | La sonda pregunta al host y al puerto de `MIGRATION_DATABASE_URL`, que es donde conectan las de integración. Antes: `POSTGRES_PORT ?? 5432` sin leer el `.env` |
+| `docs/decisiones/ADR-020`, `ADR-022` | El armazón; cómo leen y escriben las pantallas |
+| `docs/incidencias/INC-023` · INC-015 · INC-007 | La nueva y las dos recurrencias |
+
+### Decisiones técnicas tomadas
+
+D-16.131…D-16.144 en `ESTADO.md`, con su porqué en ADR-020 y ADR-022. Las que más pesan:
+
+| # | Decisión | Alternativas descartadas | Razón |
+|---|---|---|---|
+| 1 | **Sin sesión, la mutación sale sin token** (D-16.137) | Flag `sinSesion` por llamada; token vacío | El flag es una lista en el cliente que se olvida en la quinta ruta pública (1b trae tres); el token vacío da 403 `CSRF_INVALIDO` donde el error verdadero es `SESION_INVALIDA` |
+| 2 | **El resultado de una lectura recuerda su origen** (D-16.131) | Poner a «cargando» en el efecto; cancelar con `AbortController` | Poner el estado en el efecto deja un render con los datos viejos bajo el mes nuevo; abortar no evita que llegue una respuesta que ya estaba en camino, y `llamar` no admite señal. Comparar el origen es una línea y no deja ventana |
+| 3 | **El estado editable se monta con los datos** (D-16.139) | Copiar los datos al estado con un `useEffect` | El efecto copia en cada relectura y pisa lo que se estaba escribiendo; montado, se inicializa una vez y `Vista` lo remonta al cambiar de mes |
+| 4 | **Dos `select` para el mes** (D-16.134) | `<input type="month">` | Firefox de escritorio lo degrada a texto libre |
+| 5 | **`typecheck` con `next typegen`** (D-16.138) | Construir el web en CI | Construir cuesta medio minuto y no es lo que el check dice medir; generar los tipos cuesta un segundo y deja el mismo `tsc` en local y en CI |
+
+### Cómo se verificó — en el navegador, con datos y con tres roles
+
+La pila de producción local (Caddy y el web viejo) no se tocó. Se levantaron **la API compilada en el
+puerto 3000 y el build de producción del web en el 3100**, con el tenant de ensayo sintético del
+runbook (`duena@`, `gerente@`, `bodega@ensayo.invalid`, dominio `.invalid`) y su catálogo de cinco
+ítems, cinco artículos, dos productos y seis líneas de receta, importado con `npm run importar`. Y
+Chrome sin cabeza conducido por el protocolo de DevTools desde un guion de la sesión (sin
+dependencias: `WebSocket` de Node 24), **entrando por el formulario**, no pegando una cookie.
+
+**33 capturas**: tres roles × 1280 y 360 px × `/sucursal`, `/costeo`, `/menu`, `/ventas`,
+`/inventario`, más el menú abierto en móvil. En todas, `scrollWidth ≤ clientWidth` (ninguna desborda).
+Lo que enseñan:
+
+| Rol | Barra lateral | `/costeo` · `/menu` · `/ventas` | `/inventario` |
+|---|---|---|---|
+| Dueña | Análisis (2) + Operación diaria (2) | Datos; en la bodega, costos `0.00` (duda #12) | Hoja + diferencia |
+| Gerente (Local Centro) | Las cuatro | Costeo 1,03 / 1,16 / 1,18 · food cost 17,2 % y 26,5 %; rejilla con los dos productos | Hoja + diferencia |
+| Bodega (Bodega Norte) | **Solo «Inventario y conteo»** | «Tu usuario no tiene acceso a esta pantalla», también escribiendo la URL | **Hoja sin diferencia** (el 403 de `count.read`) |
+
+**Y la escritura, en el mismo navegador** (gerente):
+
+```
+{
+  "antes": "Sin cambios que guardar",
+  "focoBajo": true,                    ← Enter en la primera casilla lleva el foco a la segunda
+  "letrasRechazadas": true,            ← «1a» no entra
+  "boton": "Guardar (1)",
+  "guardado": true,                    ← «Guardado» tras el POST con versión y token
+  "persistido": "29",                  ← tras recargar
+  "editable": "297",                   ← y se puede seguir escribiendo (antes: imposible)
+  "contado": "1.5",                    ← «1,5» anotado en la hoja, tras recargar
+  "contadoEditable": "1.",
+  "mesAnteriorEnOctubre": "29"         ← octubre enseña septiembre como mes anterior
+}
+```
+
+### Guardianes
+
+**El glob `.tsx` de `audit:complexity`** — el árbol de P16-C (`git show HEAD:…`) con la configuración
+nueva; con la de HEAD esos archivos no se examinaban y P16-C salió con `audit exit=0`:
+
+```
+  37:16  error  Function 'Entrar' has too many lines (79). Maximum allowed is 40
+   87:16  error  Function 'Inventario' has too many lines (141). Maximum allowed is 40
+   87:16  error  Function 'Inventario' has a complexity of 15. Maximum allowed is 10
+  258:1   error  Function 'HojaDeConteo' has too many lines (58). Maximum allowed is 40
+   71:16  error  Function 'MenuEngineering' has too many lines (43). Maximum allowed is 40
+  171:1   error  Function 'Cuadrante' has too many lines (49). Maximum allowed is 40
+  28:16  error  Function 'ElegirSucursal' has too many lines (71). Maximum allowed is 40
+  94:16  error  Function 'Ventas' has too many lines (163). Maximum allowed is 40
+  94:16  error  Function 'Ventas' has a complexity of 15. Maximum allowed is 10
+  35:8  error  Function 'Marco' has too many lines (87). Maximum allowed is 40
+✖ 10 problems (10 errors, 0 warnings)
+```
+
+Con el árbol de este commit: 0.
+
+**`typecheck` con `next typegen`** — `.next/types` y `next-env.d.ts` borrados, como en un clon limpio,
+y una sonda `<Link href="/ruta-que-no-existe">`:
+
+```
+--- antes del cambio (tsc a secas): sin salida, en verde
+--- ROJO esperado:
+✓ Types generated successfully
+src/app/sonda-rutas.tsx:5:16 - error TS2322: Type '"/ruta-que-no-existe"' is not assignable to type 'UrlObject | RouteImpl<"/ruta-que-no-existe">'.
+--- VERDE esperado (sonda retirada):
+✓ Types generated successfully
+```
+
+**`doctor`** — con el reenvío roto de verdad, con puertos cerrados y con el 6432 que sí contesta:
+
+```
+[ FALLO]  Puertos de la base (INC-015)   localhost:5432 cortada
+[ FALLO]  Puertos de la base (INC-015)   localhost:5999 rechazada · localhost:5998 rechazada
+[  OK  ]  Puertos de la base (INC-015)   localhost:6432 contestan
+```
+
+**La guardia de «unitarias sin base» con la base en otro puerto** — `.env` en el 5442 y una prueba unitaria que abre un socket a ese puerto:
+
+```
+=== GUARDIA VIEJA  (POSTGRES_PORT ?? 5432, sin .env)
+ ✓  unit  src/sonda-puerto.spec.ts (1 test) 7ms
+ Test Files  1 passed (1)                        ← una unitaria que toca la base, en verde
+=== GUARDIA NUEVA  (los puertos de las cadenas de conexión)
+ ×  sonda del puerto de la base > una unitaria que conecta al puerto de la base del .env
+Una prueba del proyecto "unit" intento conectar al puerto 5442 (PostgreSQL).
+ Test Files  1 failed (1)
+```
+
+Retirada la sonda, las 891 unitarias en verde. La de `audit:tests` se ve en la corrida completa: con
+la base en el 5442, sondeó el 5442 y corrió las 536 de integración.
+
+**INC-023 y las filas no editables** no tienen guardián automático —`apps/web` no tiene ejecutor de
+pruebas—: su guardián es el recorrido de arriba, hecho antes y después del arreglo (antes: «no
+coinciden» con 60 `GET /auth/sesion` y ningún `POST /auth/login`; «19.000000000000» que no admitía
+teclas).
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo perdido |
+|---|---|---|
+| **«Entrar» no funcionaba desde un navegador sin sesión**, desde P16-A2 | La mutación sin sesión sale sin token (D-16.137). **INC-023** | 15 min |
+| **Las filas guardadas de ventas y del conteo no se podían editar**: la API las devuelve a escala de almacenamiento y las casillas solo admiten dígitos o tres decimales | `sinCerosDeSobra` al precargar (D-16.140) | 10 min |
+| `tsc` del web en rojo contra un `.next/types/validator.ts` rancio tras el `git mv`; y, al tirar del hilo, **en un clon limpio no comprobaba las rutas tipadas** | `next typegen` antes de `tsc`. INC-007, caso 13 | 10 min |
+| **El puerto 5432 del host aceptaba y cortaba** (`Connection terminated unexpectedly`) con la base sana, tras un reinicio de Docker Desktop | Las capturas, por el 6432 de PgBouncer; la comprobación, escrita en `doctor`. **El usuario pidió publicar la base en otro puerto**: `.env` local al 5442 y contenedor recreado (D-16.145); datos intactos, Caddy, web y PgBouncer sin tocar. INC-015, recurrencia 1 | 20 min |
+| **Mover el puerto habría dejado ciegos dos checks**: la guardia de «unitarias sin base» y la sonda de `audit:tests` leían `POSTGRES_PORT ?? 5432` de un entorno sin `.env` | Las dos leen las cadenas de conexión. Guardián arriba. INC-007, caso 13 | 15 min |
+| El CSV de artículos del ensayo traía la cabecera `ivaTarifa`, que el importador no reconoce (acepta `iva` y sus alias, y el mensaje lo dice) | Copia con `iva`. Pendiente: D-16.44 nombra la columna `ivaTarifa` (abajo) | 5 min |
+| En escritorio el fondo de la lateral acababa a media pantalla; en el teléfono la cabecera ocupaba cuatro filas; «MES» pegado al selector de sucursal | `.aplicacion` a alto de ventana y lateral estirada; sucursal y mes a su fila con la etiqueta oculta a la vista; `column-gap`. **Visto en capturas** | 15 min |
+| El guion de bash con Python embebido se rompió con las comillas (otra vez) | Los guiones van a archivo con Write | 2 min |
+
+### Cómo probar
+
+```sh
+npm run typecheck --workspace @costeo/web     # genera los tipos de rutas y comprueba
+npm run audit:complexity                      # ahora también los .tsx
+npm run build --workspace @costeo/web && npm run medir-bundle
+npm run doctor                                # incluye los puertos de la base
+```
+
+Y en el navegador, con el tenant de ensayo del runbook: entrar con cada rol, elegir sucursal, recorrer
+las cuatro secciones a 1280 y 360 px, guardar ventas y un conteo, recargar y volver a editar.
+
+### Incidencias registradas en este commit
+
+| Incidencia | Síntoma | ¿Se automatizó la prevención? |
+|---|---|---|
+| **INC-023** (nueva) | «Entrar» dice «no coinciden» con credenciales correctas | Se eliminó el modo de fallo (no hay lista de rutas públicas que olvidar). Sin prueba automatizada: `apps/web` no tiene ejecutor |
+| INC-015, recurrencia 1 | `Connection terminated unexpectedly` en 5432 con la base sana | ✅ `npm run doctor`, con guardián |
+| INC-007, caso 13 | `tsc` en verde con un `href` a una ruta que no existe; y dos checks atados al 5432 | ✅ `next typegen` en `typecheck`, el glob `.tsx`, y la guardia y la sonda leyendo las cadenas de conexión; los cuatro con guardián |
+
+### Deuda y pendientes
+
+- **Duda #12**: el costeo de un producto sin receta en la sucursal sale `0.00`.
+- **La conciliación del conteo enseña doce decimales** (`3.652173913044`): es de la pantalla 23, que
+  la rehace.
+- **`/ventas` sigue leyendo `/costeo` entero** para saber qué productos hay: la pantalla 3 lo cambia a
+  `GET /productos/ubicaciones`, que existe desde P16-B.
+- **A 360 px la tabla de ventas desplaza en horizontal** dentro de su marco y la cabecera «Unidades»
+  queda a la derecha del borde. No desborda la página; se revisa con la pantalla 3.
+- **D-16.44 nombra la columna del CSV `ivaTarifa`**, y el importador acepta `iva`, `tarifa iva`,
+  `iva compra` y `tarifa de iva`, no `ivaTarifa`. El runbook dice `iva`. Se corrige el texto de la
+  decisión o se añade el alias en el próximo paquete que toque `imports`.
+- Siguen en pie: `DELETE /usuarios/roles` por Caddy (P16-C) y las dudas #9, #10 y #11.

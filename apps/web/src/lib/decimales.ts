@@ -107,6 +107,24 @@ export function redondear(valor: string, decimales: number): string {
   return decimales === 0 ? parteEntera : `${parteEntera}.${conAcarreo.slice(corte)}`;
 }
 
+/**
+ * `19.000000000000` a `19`, y `1.500000000000` a `1.5`: sin redondear.
+ *
+ * **ES LO QUE PRECARGA UNA CASILLA EDITABLE.** La API manda las unidades y las
+ * cantidades a escala de almacenamiento, y hasta el armazón la rejilla de ventas
+ * y la hoja de conteo las ponían tal cual en el campo: con la regla de «solo
+ * dígitos» o «tres decimales», **una fila ya guardada no se podía editar** —ni
+ * borrar un carácter—. Solo lo destapó capturar la pantalla con datos.
+ *
+ * No redondea, a diferencia de `comoImporte`: lo que sobra son ceros, y quitar
+ * ceros de la derecha de la coma no cambia el número. Un entero sin coma se
+ * devuelve igual: sus ceros sí cuentan.
+ */
+export function sinCerosDeSobra(valor: string): string {
+  if (!valor.includes('.')) return valor;
+  return valor.replace(/0+$/u, '').replace(/\.$/u, '');
+}
+
 /** Cuántos decimales se enseñan de un importe o de un ratio. */
 const DECIMALES_VISIBLES = 2;
 

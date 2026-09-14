@@ -45,7 +45,7 @@ const LIMITES = {
 export default [
   { ignores: IGNORADOS },
   {
-    files: ['apps/*/src/**/*.ts'],
+    files: ['apps/*/src/**/*.ts', 'apps/*/src/**/*.tsx'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: { ecmaVersion: 2023, sourceType: 'module' },

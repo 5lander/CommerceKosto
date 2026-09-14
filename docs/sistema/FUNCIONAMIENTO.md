@@ -734,6 +734,42 @@ el login, el back office, el limitador global de 300/min y el límite de tasa de
 
 ---
 
+## El armazón de la aplicación cliente (desde P16 · Armazón)
+
+Todo lo autenticado de `apps/web` cuelga de un grupo de rutas; lo público queda fuera. Las decisiones
+están en **ADR-020** (el armazón) y **ADR-022** (cómo leen y escriben las pantallas).
+
+```mermaid
+graph TD
+    R[app/layout.tsx<br/>ProveedorDeSucursal] --> PUB[/entrar · /sucursal<br/>fuera del grupo/]
+    R --> G["app/(app)/layout.tsx"]
+    G --> PP[ProveedorDePermisos<br/>GET /auth/sesion una vez<br/>permisos + token CSRF]
+    PP --> S[Suspense<br/>useSearchParams]
+    S --> A[Armazon<br/>Cabecera · BarraLateral · lámina]
+    A --> L["(app)/ventas/layout.tsx<br/>seccion('sales.read')"]
+    L -->|sin permiso o cargando| NO[Estado en sitio]
+    L -->|tiene| P[page.tsx<br/>Marco → Vista → contenido]
+    P --> UL[useLectura / useCarga]
+    P --> UE[useEnvio]
+    UL --> API[(lib/api.ts → API)]
+    UE --> API
+```
+
+- **Los permisos no se deducen del rol** y empiezan cerrados: mientras `GET /auth/sesion` no ha
+  contestado, `tiene()` dice que no y ninguna sección lanza su lectura.
+- **El mes es `?anio&mes`**, por defecto el de `America/Guayaquil`. La cabecera solo enseña el
+  selector en las secciones que lo tienen (`conMes` en `navegacion.ts`) y la barra lateral lo lleva en
+  sus enlaces.
+- **Una lectura enseña solo su propio resultado**: si la sucursal o el mes cambian, vuelve a
+  «cargando» en el mismo render, y la respuesta vieja se descarta al llegar.
+- **Si la sesión se cae**, cualquier respuesta `SESION_INVALIDA` manda a `/entrar` desde un solo sitio
+  (`useEntrarAlCaducar`), registrado por el armazón y por `/sucursal`.
+- **Sin sesión, las mutaciones salen sin `X-CSRF-Token`** y decide la API: el login, la activación, el
+  olvido y el restablecimiento funcionan; una ruta protegida contesta `SESION_INVALIDA`. Hasta el
+  armazón, el cliente pedía el token también sin sesión y **el login no llegaba a salir** (INC-023).
+
+---
+
 ## La sesión y el token anti-CSRF (desde P16-A2)
 
 Hasta P16-A2 la única defensa contra CSRF era el atributo `SameSite=Strict` de la cookie de sesión.

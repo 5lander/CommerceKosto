@@ -114,3 +114,124 @@ Corrida sobre el árbol exacto del commit, con `costeo-api` parado (INC-016). La
 |---|---|
 | `audit:forbidden` (antes de tocar nada) | `docs/Sistema ejemplo/package.json` con un `start` que apunta a `dist/server.cjs`, inexistente. La carpeta se ignora en git (D-16.39): es una referencia, no código del proyecto |
 | `audit:deps` — 4 altas sin aceptar | Un solo paquete, `multer@2.2.0`, arrastrado por `@nestjs/platform-express@11.2.3` (que lo fija exacto) y por eso `core` y `terminus` salían en la lista. Se fuerza 2.3.0 con `overrides`; como npm no re-resuelve una arista sobreescrita cuando ya hay lockfile, la entrada se trasplantó de una resolución sin lock (mismas dependencias) y se probó con `npm ci --ignore-scripts` en copia limpia: 2.3.0, sin copia anidada, lock idéntico. **INC-021**, con regla nueva `override-de-npm-reflejado-en-el-lock` y su guardián |
+
+---
+
+## Armazón (pantalla 1) · 2026-09-13
+
+**Alcance del diff:** `apps/web` (grupo de rutas `(app)`, `componentes/armazon/`, tres primitivas de
+`ui/`, cinco módulos de `lib/`, las seis páginas, `global.css`, `textos/es.ts`, `package.json`),
+`eslint.complexity.config.mjs`, `tools/doctor.mjs`, `tools/audit/tests.mjs`, ADR-020, ADR-022, INC-023,
+INC-015, INC-007, `.env.example`, `docs/sistema/configuracion.md`, `ESTADO.md`, `CHANGELOG`,
+`FUNCIONAMIENTO.md` y este documento. **De `apps/api`, solo `test/soporte/guardia-sin-base.ts`**: ni
+una línea de `src`.
+
+### A. Arquitectura
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| A1–A6 | Regla de dependencia | ✅ sin cambio | `audit:arch` — `✔ no dependency violations found (390 modules, 1751 dependencies cruised)`. El commit no toca `apps/api` |
+| A7 | Cero lógica de negocio en el frontend | ✅ | Los permisos salen de la API; el mes por defecto es una fecha, no una regla; `sinCerosDeSobra` quita ceros de un texto sin cambiar el número; nada compara contra umbrales |
+
+### B. Código
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| B1 | Sin `any`, `@ts-ignore`, `eslint-disable` | ✅ | `audit:forbidden` — **47 reglas sobre 504 archivos** |
+| B2 | Compila en estricto | ✅ | `audit:types` — los cuatro proyectos; el web con `next typegen` delante |
+| B3 | Lint | ✅ | `audit:lint` sin avisos |
+| B4–B6 | Tamaño, profundidad, parámetros | ✅ | `audit:complexity` **ahora sobre los `.tsx`**: de 10 incumplimientos a 0 |
+| B10 | Sin `catch` que silencie | ✅ | `useEnvio` y `useCarga` capturan para **enseñar** el mensaje; `tokenDeMutacion` solo absorbe `SESION_INVALIDA` y relanza lo demás |
+| B11 | Sin código comentado | ✅ | Revisión del diff |
+
+### C. Seguridad
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| C-CSRF | El token sigue en toda mutación con sesión | ✅ | Verificado en el navegador: `POST /analitica/ventas` y `PUT /conteos/:id/lineas` con sesión llevan `X-CSRF-Token` y guardan. Sin sesión sale sin cabecera y la API decide (ADR-022, decisión 4): una ruta protegida responde `SESION_INVALIDA` antes del guard de CSRF |
+| C-autorización | El frontend no decide permisos | ✅ | Con `BODEGA`, `/costeo`, `/menu` y `/ventas` escritas a mano enseñan el estado sin permiso; la conciliación no llega (403 de la API) |
+| C11 | Secretos | ✅ | `audit:secrets`. Las contraseñas del tenant de ensayo viven en el scratchpad de la sesión, no en el repositorio |
+| C26 | Vulnerabilidades | ✅ | `audit:deps` — sin altas fuera de las 4 aceptadas. **Sin dependencias nuevas** |
+
+### D. Base de datos
+
+**— No aplica.** Sin migraciones ni consultas. `audit:migrations` — 18 migraciones reversibles y con RLS.
+
+### E. Reglas de negocio
+
+**— Sin cambio en la API.** `audit:tests` en verde: 891 unitarias y 536 + 5 de integración, las mismas
+que P16-C.
+
+### F. Frontend
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| F1 | Cero estilos literales | ✅ | Todo en `global.css` con tokens; los componentes solo ponen `className` |
+| F2 | Estados de carga, error y vacío | ✅ | `Vista` los exige; las cuatro secciones y `/sucursal` la usan |
+| F3 | Accesibilidad básica | ✅ | `aria-expanded`/`aria-controls` en «Menú», `aria-current` en el enlace activo, etiquetas ocultas a la vista y no al lector, foco que baja con Enter |
+| F4 | Datos protegidos no llegan | ✅ | `BODEGA` sin diferencia en el conteo |
+| F5 | Móvil | ✅ | 33 capturas; ninguna desborda a 360 px |
+| F6 | Sin `localStorage` sensible | ✅ | Solo el id de la sucursal, como antes; permisos y token en memoria |
+
+### G. Pruebas
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| G1 | Todas en verde | ✅ | 891 unitarias; 536 de integración + 5 de rendimiento saltadas (solo se exigen en CI). Salida abajo |
+| **G2** | Guardián de cada verificación nueva | ✅ | Glob `.tsx`: 10 → 0. `next typegen`: sonda en rojo en clon limpio, verde al retirarla. `doctor`: `cortada`, `rechazada`, `contestan`. **Guardia de «unitarias sin base» con la base en el 5442**: la vieja deja pasar una unitaria que conecta a la base, la nueva la para con su mensaje. Salidas en `CONSTRUCCION.md` |
+| G2 bis | Contador de `audit:forbidden` (INC-007 caso 10) | ✅ | **483 → 504, y los +21 están identificados**: 16 archivos nuevos (`fechas`, `periodo`, `useLectura`, `useEnvio`, `rejilla`, `permisos`, `Vista`, `CeldaEditable`, `Campo` y los siete de `armazon/`) y 5 `layout.tsx` (el del grupo y los cuatro de sección). Los `git mv` no suman |
+| G7 | Sin datos reales | ✅ | Tenant `Ensayo de Despliegue (sintetico)`, dominio `.invalid` |
+
+### H. Documentación
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| H1 | `CONSTRUCCION.md` | ✅ | Sección «Armazón» |
+| H3 | FUNCIONAMIENTO | ✅ | «El armazón de la aplicación cliente», con diagrama |
+| H6 | ADR | ✅ | **ADR-020** y **ADR-022**, los dos números que el plan reservó |
+| H8 | CHANGELOG | ✅ | Entrada «P16 · Armazón» |
+| H10–H12 | Incidencias | ✅ | INC-023 nueva; INC-015 (→1) e INC-007 (→13) con su prevención |
+| H13 | Describe lo construido | ✅ | Los números son los medidos: capturas, bundle, contador |
+
+### I. Optimización
+
+| # | Punto | Resultado | Evidencia |
+|---|---|---|---|
+| I1 | Sin código muerto | ✅ | `audit:deadcode` — `knip` sale con 0 |
+| I2 | Complejidad | ✅ | `audit:complexity` |
+| I3 | Duplicación | ✅ | `audit:duplication` — `Found 0 clones`. La casilla editable y la navegación por la rejilla, que ventas e inventario copiaban, viven una vez |
+| I8 | `npm run bench` | — no aplica | Sin cambios de lectura en la API |
+| **I9** | Presupuesto de bundle | ✅ | `medir-bundle`: piso **126,9 KiB** gzip (428,6 bruto), pantalla más cara `/inventario` **142,6 KiB** (antes 138,7); presupuesto 200 / 350 |
+
+### Salida de `npm run audit`
+
+Líneas de resultado de cada check, sin los códigos de color:
+
+```
+audit:forbidden  OK — 47 reglas sobre 504 archivos
+✔ no dependency violations found (390 modules, 1751 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+ Test Files  2 passed | 31 skipped (33)
+      Tests  19 passed | 522 skipped (541)
+ Test Files  66 passed (66)
+      Tests  891 passed (891)
+ Test Files  33 passed (33)
+      Tests  536 passed | 5 skipped (541)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```
+
+Corrida con la base publicada en el 5442 (D-16.145) y `costeo-api` parado (INC-016). Las 522
+«skipped» de la primera pasada son `audit:sec-headers`, que filtra por nombre.
+
+### Correcciones hechas durante la auditoría
+
+| Check que falló | Qué se corrigió |
+|---|---|
+| `audit:types` (web) | `.next/types` rancio tras el `git mv` → `next typegen` en `typecheck` (INC-007, caso 13) |
+| `audit:complexity` con el glob `.tsx` | Diez funciones partidas; `HojaDeConteo` (41) y `FormularioDeEntrada` (46) en una segunda vuelta, con `FilaParaContar` y `CampoDeTexto` |
+| Recorrido en el navegador | INC-023, filas guardadas no editables, lateral corta, cabecera móvil de cuatro filas |
+| Mover la base al 5442 | La guardia de «unitarias sin base» y la sonda de `audit:tests` vigilaban el 5432 fijo; leen las cadenas de conexión |

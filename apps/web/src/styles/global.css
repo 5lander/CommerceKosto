@@ -240,6 +240,122 @@ p {
 }
 
 /* ==========================================================================
+ * EL ARMAZÓN · U1, como Commerce
+ * ==========================================================================
+ *
+ * Barra lateral por grupos y lámina. EL CORTE ES EL MISMO `60rem` DE LA LÁMINA Y
+ * LA BARRA: por debajo, la navegación se esconde detrás de «Menú» y la lámina
+ * ocupa el ancho entero, porque en un teléfono —de pie, en la bodega— el ancho
+ * es de la hoja de conteo. Por encima, la barra se queda al costado.
+ *
+ * `.aplicacion` ocupa al menos el alto de la ventana, y la lateral se estira con
+ * ella: sin eso, en una sección corta el fondo de la barra acababa a media
+ * pantalla (visto en la captura a 1280, no deducido).
+ *
+ * La barra superior pasa a ancho completo (`--ancha`): con la lateral a la
+ * izquierda, centrarla en 76rem la desalinearía de las dos columnas.
+ */
+.barra__interior--ancha {
+  max-width: none;
+}
+
+.aplicacion {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.armazon {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lateral {
+  display: grid;
+  align-content: start;
+  gap: var(--f2);
+  padding: var(--f2) var(--f1);
+  background: var(--color-superficie);
+  border-bottom: 1px solid var(--color-borde);
+}
+
+.lateral[data-abierta='false'] {
+  display: none;
+}
+
+.lateral__grupo {
+  display: grid;
+  gap: var(--f-menos1);
+}
+
+.lateral__enlace {
+  width: 100%;
+}
+
+/*
+ * Sucursal y mes. EN EL TELÉFONO BAJAN A SU PROPIA FILA y la marca comparte la
+ * primera con «Salir»: con las cuatro cosas en fila, la cabecera ocupaba cuatro
+ * renglones —215 px de 780— en la pantalla que se usa de pie.
+ */
+.barra__contexto {
+  order: 1;
+  flex-basis: 100%;
+  column-gap: var(--f1);
+}
+
+.selector-compacto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--f-menos1);
+}
+
+/*
+ * En el teléfono la etiqueta se oculta A LA VISTA, NO AL LECTOR DE PANTALLA: el
+ * control sigue diciendo qué es. Es la etiqueta o la tercera fila.
+ */
+.selector-compacto .etiqueta {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 60rem) {
+  .armazon {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+
+  .lateral,
+  .lateral[data-abierta='false'] {
+    display: grid;
+    border-bottom: 0;
+    border-right: 1px solid var(--color-borde);
+  }
+
+  .barra__contexto {
+    order: 0;
+    flex-basis: auto;
+    margin-left: auto;
+  }
+
+  .selector-compacto .etiqueta {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  /* Con la barra siempre a la vista, el botón que la abre sobra. */
+  .alternador {
+    display: none;
+  }
+}
+
+/* ==========================================================================
  * CABECERA DE PANTALLA
  * ========================================================================== */
 

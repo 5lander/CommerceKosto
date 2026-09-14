@@ -65,6 +65,32 @@ const SIN_DETALLE = 'Algo salió mal. Vuelve a intentarlo en un momento.';
 /** El código con el que la API dice «ese token no es el de esta sesión». */
 const CSRF_INVALIDO = 'CSRF_INVALIDO';
 
+/**
+ * El código de una sesión caducada, revocada o inexistente. **No es cualquier
+ * 401**: el login fallido también lo es (`CREDENCIALES_INVALIDAS`), y mandar a
+ * «entrar» a quien está entrando sería un bucle.
+ */
+const SESION_INVALIDA = 'SESION_INVALIDA';
+
+/**
+ * Qué hacer cuando la sesión se cae a mitad de uso — lo registra el armazón.
+ *
+ * **ES TRANSPORTE, NO NEGOCIO**, y vive aquí para no copiar el mismo `if` en
+ * treinta pantallas (el clon que `audit:duplication` cazaría). Una sola: la
+ * registra quien sabe navegar (`useEntrarAlCaducar`).
+ *
+ * **DEVUELVE CÓMO QUITARLO, Y SOLO QUITA EL SUYO**: al pasar de `/sucursal` al
+ * armazón, el que se desmonta no debe borrar el que acaba de registrar el otro.
+ */
+let alCaducar: (() => void) | null = null;
+
+export function alCaducarSesion(manejador: () => void): () => void {
+  alCaducar = manejador;
+  return () => {
+    if (alCaducar === manejador) alCaducar = null;
+  };
+}
+
 async function comoError(respuesta: Response): Promise<ErrorDeApi> {
   const cuerpo = (await respuesta.json().catch(() => ({}))) as CuerpoDeError;
 
@@ -72,6 +98,19 @@ async function comoError(respuesta: Response): Promise<ErrorDeApi> {
   const mensaje = typeof cuerpo.message === 'string' ? cuerpo.message : SIN_DETALLE;
 
   return new ErrorDeApi(codigo, mensaje, respuesta.status);
+}
+
+/**
+ * El texto que una pantalla enseña cuando algo falló: el `message` del backend,
+ * que ya viene escrito para leerse, o el genérico si ni siquiera hubo respuesta.
+ */
+export function mensajeDe(fallo: unknown): string {
+  return fallo instanceof Error ? fallo.message : SIN_DETALLE;
+}
+
+/** El código de dominio de un fallo, o `null` si no vino de la API. */
+export function codigoDe(fallo: unknown): string | null {
+  return fallo instanceof ErrorDeApi ? fallo.codigo : null;
 }
 
 type Metodo = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -88,26 +127,41 @@ interface SesionDeLaApi {
 }
 
 /**
- * El token que firma la mutación.
+ * El token que firma la mutación, o `null` si no hay sesión.
+ *
+ * **SIN SESIÓN NO HAY TOKEN, Y LA MUTACIÓN SALE SIN ÉL.** Hasta el armazón, un
+ * 401 aquí subía tal cual, y eso rompió «Entrar» desde P16-A2 sin que nada lo
+ * dijera: sin cookie, `GET /auth/sesion` da 401, el login no llegaba a salir y la
+ * pantalla lo pintaba como «el correo o la contraseña no coinciden» (INC-023).
+ * Las cuatro rutas públicas —login, activación, olvido, restablecimiento— no
+ * piden token porque nace CON la sesión. Y no se marca cuáles son aquí: una
+ * lista en el cliente es la que alguien olvida al añadir la quinta. Sin sesión
+ * la API decide: la ruta pública funciona y la protegida contesta
+ * `SESION_INVALIDA`, que es el error verdadero y no uno de CSRF que mandaría a
+ * recargar una página que va a volver a fallar.
  *
  * **NO HAY RECURSIÓN**: `GET /auth/sesion` es una lectura, y las lecturas no
- * piden token. Si la llamada falla, el error sube tal cual — un 401 aquí
- * significa que la sesión caducó, y esconderlo detrás de un fallo de CSRF
- * mandaría al usuario a recargar una página que va a volver a fallar.
+ * piden token.
  */
-async function tokenDeMutacion(): Promise<string> {
+async function tokenDeMutacion(): Promise<string | null> {
   const enMemoria = csrfEnMemoria();
   if (enMemoria !== null) return enMemoria;
 
-  const sesion = await llamar<SesionDeLaApi>({ ruta: '/auth/sesion' });
-  guardarCsrf(sesion.csrf);
-  return sesion.csrf;
+  try {
+    const sesion = await intentar<SesionDeLaApi>({ ruta: '/auth/sesion' });
+    guardarCsrf(sesion.csrf);
+    return sesion.csrf;
+  } catch (fallo) {
+    if (codigoDe(fallo) === SESION_INVALIDA) return null;
+    throw fallo;
+  }
 }
 
 async function cabecerasDe(metodo: Metodo, cuerpo: unknown): Promise<HeadersInit> {
   const cabeceras: Record<string, string> = {};
   if (cuerpo !== undefined) cabeceras['content-type'] = 'application/json';
-  if (metodo !== 'GET') cabeceras['X-CSRF-Token'] = await tokenDeMutacion();
+  const token = metodo === 'GET' ? null : await tokenDeMutacion();
+  if (token !== null) cabeceras['X-CSRF-Token'] = token;
   return cabeceras;
 }
 
@@ -173,7 +227,11 @@ async function intentar<T>({ ruta, metodo = 'GET', cuerpo }: Peticion): Promise<
     throw new ErrorDeApi('SIN_RED', SIN_RED, 0);
   }
 
-  if (!respuesta.ok) throw await comoError(respuesta);
+  if (!respuesta.ok) {
+    const error = await comoError(respuesta);
+    if (error.codigo === SESION_INVALIDA) alCaducar?.();
+    throw error;
+  }
   if (respuesta.status === SIN_CONTENIDO) return undefined as T;
 
   return (await respuesta.json()) as T;

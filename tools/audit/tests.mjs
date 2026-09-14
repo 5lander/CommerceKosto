@@ -14,16 +14,39 @@
  * En CI nunca se pasa esa bandera: alli la base siempre esta.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { parseEnv } from 'node:util';
 
 import { correrCli } from '../../scripts/lib/proceso.mjs';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP = join(RAIZ, 'apps', 'api');
-const PUERTO = Number(process.env['POSTGRES_PORT'] ?? 5432);
-const HOST = process.env['POSTGRES_HOST'] ?? '127.0.0.1';
+const ARCHIVO_ENV = join(RAIZ, '.env');
+
+/**
+ * **LA SONDA PREGUNTA DONDE VAN A CONECTAR LAS PRUEBAS**: al host y al puerto de
+ * `MIGRATION_DATABASE_URL`, que es la cadena con la que las de integración
+ * preparan sus datos. Hasta el armazón preguntaba a `POSTGRES_PORT ?? 5432`
+ * leído de `process.env`, y este proceso no carga el `.env`: con la base
+ * publicada en otro puerto habría sondeado uno vacío. En el pre-commit, con
+ * `--solo-unitarias`, eso es un PARCIAL en verde sin una sola prueba de
+ * integración (INC-007).
+ *
+ * El `.env` se LEE, no se carga: `process.env` pasa tal cual a Vitest, y las
+ * unitarias no deben ver sus variables.
+ */
+function destinoDeLaBase() {
+  const archivo = existsSync(ARCHIVO_ENV) ? parseEnv(readFileSync(ARCHIVO_ENV, 'utf8')) : {};
+  const cadena = process.env['MIGRATION_DATABASE_URL'] ?? archivo['MIGRATION_DATABASE_URL'];
+  if (cadena === undefined || cadena === '') return { host: '127.0.0.1', puerto: 5432 };
+  const url = new URL(cadena);
+  return { host: url.hostname, puerto: url.port === '' ? 5432 : Number(url.port) };
+}
+
+const { host: HOST, puerto: PUERTO } = destinoDeLaBase();
 const SOLO_UNITARIAS = process.argv.includes('--solo-unitarias');
 
 /**

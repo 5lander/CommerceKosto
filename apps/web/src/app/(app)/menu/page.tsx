@@ -22,15 +22,16 @@
  * ahora en `nombre`, así que la segunda llamada y el `Map` se van.
  */
 
-import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { Cargando, Error as Fallo, Vacio } from '../../componentes/ui/Estados';
-import { Marco } from '../../componentes/Marco';
-import { llamar } from '../../lib/api';
-import { comoImporte } from '../../lib/decimales';
-import { useSucursal } from '../../lib/sesion';
-import { TEXTOS } from '../../textos/es';
+import { Marco } from '../../../componentes/Marco';
+import { Vista } from '../../../componentes/ui/Vista';
+import { comoImporte } from '../../../lib/decimales';
+import { consultaDelMes } from '../../../lib/fechas';
+import { usePeriodo } from '../../../lib/periodo';
+import { useSucursal } from '../../../lib/sesion';
+import { useLectura } from '../../../lib/useLectura';
+import { TEXTOS } from '../../../textos/es';
 
 type Cuadrante = keyof typeof TEXTOS.menu.cuadrantes;
 
@@ -63,60 +64,27 @@ const ORDEN: readonly Cuadrante[] = [
   'INACTIVO',
 ];
 
-function mesActual(): { readonly anio: number; readonly mes: number } {
-  const ahora = new Date();
-  return { anio: ahora.getUTCFullYear(), mes: ahora.getUTCMonth() + 1 };
-}
-
 export default function MenuEngineering(): ReactNode {
   const { sucursal } = useSucursal();
-  const [menu, setMenu] = useState<Menu | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const cargar = useCallback(async (): Promise<void> => {
-    if (sucursal === null) return;
-    setError(null);
-    setMenu(null);
-
-    const { anio, mes } = mesActual();
-    const periodo = `locationId=${sucursal}&anio=${String(anio)}&mes=${String(mes)}`;
-
-    try {
-      setMenu(await llamar<Menu>({ ruta: `/analitica/menu-engineering?${periodo}` }));
-    } catch (fallo) {
-      setError(fallo instanceof Error ? fallo.message : TEXTOS.comun.cargando);
-    }
-  }, [sucursal]);
-
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
-
-  const conVentas = menu?.productos.filter((p) => p.cuadrante !== 'INACTIVO') ?? [];
+  const { periodo } = usePeriodo();
+  const lectura = useLectura<Menu>(
+    sucursal === null ? null : `/analitica/menu-engineering?locationId=${sucursal}&${consultaDelMes(periodo)}`,
+  );
 
   return (
     <Marco titulo={TEXTOS.menu.titulo} ayuda={TEXTOS.menu.ayuda}>
-      {error !== null && (
-        <Fallo
-          mensaje={error}
-          reintentar={() => {
-            void cargar();
-          }}
-        />
-      )}
-
-      {error === null && menu === null && <Cargando />}
-
-      {menu !== null && conVentas.length === 0 && (
-        <Vacio titulo={TEXTOS.menu.vacio} ayuda={TEXTOS.menu.vacioAyuda} />
-      )}
-
-      {menu !== null && conVentas.length > 0 && (
-        <div className="pila">
-          <Referencia menu={menu} />
-          <Matriz menu={menu} />
-        </div>
-      )}
+      <Vista
+        lectura={lectura}
+        esVacio={(menu) => menu.productos.every((p) => p.cuadrante === 'INACTIVO')}
+        vacio={{ titulo: TEXTOS.menu.vacio, ayuda: TEXTOS.menu.vacioAyuda }}
+      >
+        {(menu) => (
+          <div className="pila">
+            <Referencia menu={menu} />
+            <Matriz menu={menu} />
+          </div>
+        )}
+      </Vista>
     </Marco>
   );
 }
@@ -187,34 +155,37 @@ function Cuadrante({
 
       <div className="tabla-marco">
         <table className="tabla tabla--compacta">
-        <thead>
-          <tr>
-            <th>{TEXTOS.costeo.producto}</th>
-            <th>{TEXTOS.menu.unidades}</th>
-            <th>{TEXTOS.costeo.margen}</th>
-            <th>{TEXTOS.menu.indice}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {productos.map((producto) => (
-            <tr key={producto.productId}>
-              <td>{producto.nombre === '' ? producto.productId : producto.nombre}</td>
-              <td className="numero">{producto.unidades}</td>
-              <td className="numero">
-                {producto.margenContribucion === null
-                  ? TEXTOS.comun.sinDato
-                  : comoImporte(producto.margenContribucion)}
-              </td>
-              <td className="numero">
-                {producto.indicePopularidad === null
-                  ? TEXTOS.comun.sinDato
-                  : comoImporte(producto.indicePopularidad)}
-              </td>
+          <thead>
+            <tr>
+              <th>{TEXTOS.costeo.producto}</th>
+              <th>{TEXTOS.menu.unidades}</th>
+              <th>{TEXTOS.costeo.margen}</th>
+              <th>{TEXTOS.menu.indice}</th>
             </tr>
-          ))}
-        </tbody>
+          </thead>
+          <tbody>
+            {productos.map((producto) => (
+              <FilaDelMenu key={producto.productId} producto={producto} />
+            ))}
+          </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+/** Un decimal de la API a dos decimales, o la raya si no aplica. */
+function importeOSinDato(valor: string | null): string {
+  return valor === null ? TEXTOS.comun.sinDato : comoImporte(valor);
+}
+
+function FilaDelMenu({ producto }: { readonly producto: ProductoDelMenu }): ReactNode {
+  return (
+    <tr>
+      <td>{producto.nombre === '' ? producto.productId : producto.nombre}</td>
+      <td className="numero">{producto.unidades}</td>
+      <td className="numero">{importeOSinDato(producto.margenContribucion)}</td>
+      <td className="numero">{importeOSinDato(producto.indicePopularidad)}</td>
+    </tr>
   );
 }

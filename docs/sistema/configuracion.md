@@ -27,7 +27,7 @@ Declaradas en `.env.example`. **`.env` nunca se versiona** — lo garantiza `.gi
 | Variable | Obligatoria | Notas |
 |---|---|---|
 | `POSTGRES_DB` | compose | Nombre de la base. Por defecto `costeo` |
-| `POSTGRES_PORT` | compose | Puerto publicado en el host |
+| `POSTGRES_PORT` | compose | Puerto publicado en el host. Si cambia (p. ej. 5442 cuando otro proyecto usa el 5432, D-16.145), las cinco cadenas `localhost:<puerto>` cambian con él: la guardia de las unitarias y `audit:tests` leen el puerto **de las cadenas**, y `npm run doctor` comprueba que contestan |
 | `POSTGRES_SUPERUSER` / `POSTGRES_SUPERUSER_PASSWORD` | compose | Solo para `initdb` y para las aserciones de las pruebas. **La aplicación jamás se conecta con esto** |
 | `COSTEO_MIGRATOR_PASSWORD` | compose | Contraseña de `costeo_migrator`, la usa `initdb` |
 | `COSTEO_APP_PASSWORD` | compose | Contraseña de `costeo_app` |
