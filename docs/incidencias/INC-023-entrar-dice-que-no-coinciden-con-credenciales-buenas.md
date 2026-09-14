@@ -95,12 +95,12 @@ anotar un conteo llevan el token y persisten tras recargar.
   un flag `sinSesion: true` en las llamadas públicas: es una lista en el cliente, y la quinta ruta
   pública —`/olvide`, `/restablecer`, `/activacion` llegan en la pantalla 1b— es la que alguien
   olvida. Sin lista, no hay nada que olvidar (ADR-022, decisión 4).
-- [ ] **¿Prueba automatizada?** No en este commit: `apps/web` no tiene ejecutor de pruebas —la deuda #8 de
+- [x] **¿Prueba automatizada?** *Desde la pantalla 1b, sí*: `lib/api.spec.ts` —«sin sesión, la mutación
+  sale SIN cabecera y llega a la API»—, con guardián (INC-025). Lo que sigue es la historia. No en el commit del armazón: `apps/web` no tiene ejecutor de pruebas —la deuda #8 de
   `ESTADO.md` lo dice de la capa visual, y tampoco lo hay para `lib/`—, y montar uno para una función es la abstracción especulativa de `OPTIMIZACION.md` §1.
   **Si vuelve un fallo del cliente que ninguna prueba de la API puede ver, se monta.** *(Volvió un
   commit después —INC-024, el signo en `lib/decimales`— y se montó: `node --test`, ADR-027. Este fallo
-  en concreto sigue sin prueba: vive en `lib/api.ts`, que necesita simular `fetch` con módulos, y el
-  diseño ya lo hace imposible.)*
+  en concreto quedó con prueba en la pantalla 1b, simulando `fetch` en `globalThis`.)*
 - [x] **¿Regla de proceso?** Ya existía y es la que lo cazó: cada commit de pantalla se verifica
   **entrando de verdad** con los roles, no con una cookie pegada a mano. P16-A2, B y C no tocaban
   pantallas y por eso nadie entró.

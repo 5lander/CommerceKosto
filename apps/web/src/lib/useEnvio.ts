@@ -15,31 +15,36 @@
 
 import { useCallback, useState } from 'react';
 
-import { mensajeDe } from './api';
+import { codigoDe, mensajeDe } from './api';
 
 export interface Envio {
   readonly ocupado: boolean;
   readonly error: string | null;
+  /** El código de dominio del fallo (`LIMITE_DE_SOLICITUDES`, …), o `null`. */
+  readonly codigo: string | null;
   readonly enviar: (accion: () => Promise<void>) => Promise<boolean>;
 }
 
 export function useEnvio(): Envio {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [codigo, setCodigo] = useState<string | null>(null);
 
   const enviar = useCallback(async (accion: () => Promise<void>): Promise<boolean> => {
     setOcupado(true);
     setError(null);
+    setCodigo(null);
     try {
       await accion();
       return true;
     } catch (fallo) {
       setError(mensajeDe(fallo));
+      setCodigo(codigoDe(fallo));
       return false;
     } finally {
       setOcupado(false);
     }
   }, []);
 
-  return { ocupado, error, enviar };
+  return { ocupado, error, codigo, enviar };
 }

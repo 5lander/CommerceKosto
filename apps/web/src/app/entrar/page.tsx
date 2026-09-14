@@ -16,6 +16,7 @@
  * única pantalla donde la marca se presenta; en las demás ya se la conoce.
  */
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { ReactNode, SyntheticEvent } from 'react';
@@ -82,6 +83,9 @@ export default function Entrar(): ReactNode {
         <p className="nota">{TEXTOS.firma}</p>
         <h1 className="titulo">{TEXTOS.acceso.titulo}</h1>
         <FormularioDeEntrada />
+        <Link href="/olvide" className="enlace">
+          {TEXTOS.recuperacion.olvido}
+        </Link>
       </div>
     </main>
   );

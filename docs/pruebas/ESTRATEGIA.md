@@ -10,7 +10,7 @@ El producto es la exactitud del número. Un fallo de UI se ve; un fallo de cálc
 |---|---|---|
 | **Unitarias de dominio** (mayoría) | Motor de costeo, validación de ciclos, proyección del libro, cascada de subpreparaciones | ✅ Sí, obligatorio |
 | **Integración** | Aislamiento entre companies y ubicaciones, confidencialidad por rol, conciliación, transacciones | ❌ Con base real |
-| **Unitarias de `apps/web/src/lib`** *(desde Inicio)* | Funciones puras del cliente: cómo se enseña un número (`decimales`), qué mes se mira (`fechas`). Con `node --test`, sin dependencias (ADR-027) | ✅ Sí |
+| **Unitarias de `apps/web/src/lib`** *(desde Inicio)* | Funciones puras del cliente: cómo se enseña un número (`decimales`), qué mes se mira (`fechas`); y el transporte (`api`) con `fetch` simulado en `globalThis`: cuerpos vacíos, token anti-CSRF, reintento único, sesión caída. Con `node --test`, sin dependencias (ADR-027) | ✅ Sí |
 | **Extremo a extremo** (mínimas) | Los tres flujos que si se rompen el cliente no puede trabajar: cargar una receta, registrar una compra, hacer un conteo | ❌ |
 
 ## Reglas duras

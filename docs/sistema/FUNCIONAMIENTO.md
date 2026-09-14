@@ -773,6 +773,8 @@ graph TD
   indicadores del resumen del mes con el semáforo de la API; sin él —`BODEGA`—, qué reponer, sin
   cantidades. La sección pide `replenishment.read`, que tienen todos los roles, y `/` lleva ahí.
 - **Lo que `lib/` calcula para enseñar tiene pruebas** (`node --test`, ADR-027): `decimales` y `fechas`.
+- **Las páginas públicas** son `/entrar`, `/sucursal`, `/olvide` y `/restablecer` *(pantalla 1b)*: pedir el
+  enlace dice siempre lo mismo, y restablecer comprueba largo y repetición **antes** de gastar el token.
 - **Sin sesión, las mutaciones salen sin `X-CSRF-Token`** y decide la API: el login, la activación, el
   olvido y el restablecimiento funcionan; una ruta protegida contesta `SESION_INVALIDA`. Hasta el
   armazón, el cliente pedía el token también sin sesión y **el login no llegaba a salir** (INC-023).

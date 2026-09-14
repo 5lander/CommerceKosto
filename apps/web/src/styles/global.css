@@ -239,6 +239,20 @@ p {
   color: var(--cloud-dancer);
 }
 
+/*
+ * Un enlace dentro del texto de una pantalla: «volver a entrar», «pedir otro».
+ * En el color de marca y subrayado, que es lo que dice «esto se pulsa» sin ser
+ * un botón. Con `--tactil` de alto mínimo: se toca con el pulgar.
+ */
+.enlace {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tactil);
+  color: var(--color-marca);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
 /* ==========================================================================
  * EL ARMAZÓN · U1, como Commerce
  * ==========================================================================

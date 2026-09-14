@@ -25,12 +25,12 @@
  * `llamar`.
  */
 
-import { csrfEnMemoria, guardarCsrf } from './csrf';
+// Con extensión: es lo que deja probar este archivo con `node --test` (ADR-027).
+import { csrfEnMemoria, guardarCsrf } from './csrf.ts';
 
 /** La URL de la API. Sin valor por defecto: si falta, se ve al arrancar. */
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? '';
 
-const SIN_CONTENIDO = 204;
 
 /**
  * Un error que la API devolvió, con su código de dominio.
@@ -41,13 +41,16 @@ const SIN_CONTENIDO = 204;
  * inventar; lo que sí hace la pantalla es decidir dónde ponerlo.
  */
 export class ErrorDeApi extends Error {
-  public constructor(
-    public readonly codigo: string,
-    mensaje: string,
-    public readonly estado: number,
-  ) {
+  public readonly codigo: string;
+  public readonly estado: number;
+
+  // Campos explícitos y no `public readonly` en los parámetros: esa forma no es
+  // sintaxis borrable, y Node la rechaza al correr las pruebas (ADR-027).
+  public constructor(codigo: string, mensaje: string, estado: number) {
     super(mensaje);
     this.name = 'ErrorDeApi';
+    this.codigo = codigo;
+    this.estado = estado;
   }
 }
 
@@ -232,7 +235,20 @@ async function intentar<T>({ ruta, metodo = 'GET', cuerpo }: Peticion): Promise<
     if (error.codigo === SESION_INVALIDA) alCaducar?.();
     throw error;
   }
-  if (respuesta.status === SIN_CONTENIDO) return undefined as T;
+  return cuerpoDe<T>(respuesta);
+}
 
-  return (await respuesta.json()) as T;
+/**
+ * El cuerpo de una respuesta que salió bien, o `undefined` si no trae.
+ *
+ * **NO SOLO EL 204 VIENE VACÍO.** Hasta la pantalla 1b solo se trataba así el
+ * 204, y `POST /auth/password/olvido` responde **202 sin cuerpo** —siempre, para
+ * no delatar si el correo existe—: `respuesta.json()` reventaba con «Unexpected
+ * end of JSON input» y la pantalla enseñaba ese texto a quien acababa de pedir su
+ * enlace, que sí se había encolado (INC-025). Se lee el texto y se decide por lo
+ * que trae, no por el código de estado.
+ */
+async function cuerpoDe<T>(respuesta: Response): Promise<T> {
+  const texto = await respuesta.text();
+  return (texto === '' ? undefined : JSON.parse(texto)) as T;
 }

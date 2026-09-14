@@ -44,6 +44,31 @@ export const TEXTOS = {
     salir: 'Salir',
   },
 
+  /** Pantalla 1b: olvidé mi contraseña y restablecer desde el enlace del correo. */
+  recuperacion: {
+    olvido: '¿Olvidaste tu contraseña?',
+    olvideTitulo: 'Olvidé mi contraseña',
+    olvideAyuda: 'Escribe el correo con el que entras y te mandaremos un enlace para elegir otra.',
+    pedir: 'Enviarme el enlace',
+    pidiendo: 'Enviando…',
+    // La MISMA frase exista o no la cuenta: decir otra cosa revelaría quién tiene cuenta.
+    pedido:
+      'Si ese correo tiene una cuenta activa, te llegará un enlace en unos minutos. Sirve una sola vez y caduca: úsalo en cuanto llegue. Revisa también el correo no deseado.',
+    volverAEntrar: 'Volver a entrar',
+    restablecerTitulo: 'Elige tu contraseña nueva',
+    restablecerAyuda: 'Al guardarla se cerrarán las sesiones abiertas en otros dispositivos.',
+    nueva: 'Contraseña nueva',
+    repetir: 'Repítela',
+    politica: 'Al menos 12 caracteres. Una frase que recuerdes sirve mejor que una palabra con símbolos.',
+    corta: 'Tiene menos de 12 caracteres. Alárgala antes de guardar: si no, el enlace se gastaría.',
+    noCoinciden: 'Las dos contraseñas no coinciden.',
+    guardar: 'Guardar contraseña',
+    guardando: 'Guardando…',
+    hecho: 'Listo. Tu contraseña cambió y las demás sesiones se cerraron. Ya puedes entrar con la nueva.',
+    sinToken: 'Este enlace está incompleto. Ábrelo tal cual llegó en el correo, o pide otro.',
+    pedirOtro: 'Pedir otro enlace',
+  },
+
   /** El armazón: la barra lateral y la cabecera (P16). */
   navegacion: {
     etiqueta: 'Navegación principal',

@@ -445,3 +445,82 @@ como cifra en dos líneas (ahora es la nota bajo la raya).
   (§4.3), así que «Bien» también significa «no se consume». Es lo que la API puede decir sin revelar el
   teórico.
 - Siguen en pie: dudas #9, #10, #11 y #13; `DELETE /usuarios/roles` por Caddy.
+
+---
+
+## Pantalla 1b — Olvidé mi contraseña · Restablecer · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/olvide/page.tsx` | Correo → `POST /auth/password/olvido` → **la misma frase exista o no la cuenta**. El 429 se enseña con el mensaje de la API (dice cuánto esperar) |
+| `app/restablecer/page.tsx` | `?token=` → contraseña y repetición → `POST /auth/password/restablecimiento`. Sin token: «enlace incompleto». **Antes de enviar**, que tenga 12 caracteres y que coincidan: la API gasta el token antes de mirar la contraseña, y un error de tecleo obligaría a pedir otro enlace. Cualquier 400 ofrece «Pedir otro enlace»; un 429 deja el formulario, porque el límite se comprueba antes de tocar el token |
+| `app/entrar/page.tsx` | «¿Olvidaste tu contraseña?» |
+| `lib/useEnvio.ts` | Expone `codigo`, como `useLectura` |
+| `lib/api.ts` | **`cuerpoDe`**: un 202 sin cuerpo ya no revienta (INC-025). Importe `./csrf.ts` y `ErrorDeApi` con campos explícitos, para cargarlo con `node --test` |
+| `lib/api.spec.ts` | **11 pruebas del transporte** con `fetch` simulado: 202/204 vacíos, JSON, fallos con código y mensaje, sin red, **sin sesión la mutación sale sin cabecera (INC-023)**, con sesión lleva el token, una lectura no lo pide, reintento único ante `CSRF_INVALIDO` y sin bucle, el aviso de sesión caída solo al registrado |
+| `apps/web/tsconfig.json` | **`erasableSyntaxOnly`**: la sintaxis que Node no sabe quitar falla en `tsc` |
+| `textos/es.ts` · `styles/global.css` | Los textos de la recuperación; `.enlace` |
+
+### Decisiones
+
+D-16.152…D-16.155 en `ESTADO.md`.
+
+### Cómo se verificó — en el navegador
+
+Build de producción, 360 px, con la dueña del tenant de ensayo; el enlace se leyó del outbox, donde
+existe en claro solo mientras el correo está en vuelo:
+
+```
+enlaceEnEntrar     true
+pedidoInexistente  «Si ese correo tiene una cuenta activa, te llegará un enlace…»
+pedidoExistente    «Si ese correo tiene una cuenta activa, te llegará un enlace…»   ← mismaFrase: true
+sinToken           «Este enlace está incompleto. Ábrelo tal cual llegó en el correo, o pide otro.»
+tokenInventado     «El enlace de restablecimiento no es valido o ya caduco. Pide uno nuevo.» + Pedir otro enlace
+corta              «Tiene menos de 12 caracteres. Alárgala antes de guardar…»          (no se envió)
+noCoinciden        «Las dos contraseñas no coinciden.»                                  (no se envió)
+hecho              «Listo. Tu contraseña cambió y las demás sesiones se cerraron…»
+reutilizado        «El enlace … no es valido o ya caduco.» + Pedir otro enlace          (un solo uso)
+entraConLaNueva    true
+```
+
+**La primera pasada falló** en los dos «pedido»: la pantalla enseñaba «Failed to execute 'json' on
+'Response': Unexpected end of JSON input» (INC-025). La contraseña de ensayo se devolvió a la original
+con `POST /auth/password` tras cada pasada.
+
+### Guardianes
+
+```
+=== W5-cuerpo-vacio-como-json: apps/web/src/lib/api.ts -> exit 1
+      ✖ un 202 sin cuerpo es `undefined`, no un error de JSON (INC-025) (27.4865ms)
+      ✖ un 204 también (0.6583ms)
+      ✖ el cuerpo de una respuesta que salió bien (35.2827ms)
+      ℹ pass 9
+      ℹ fail 2
+      ✖ failing tests:
+
+=== W6-sin-sesion-el-error-sube: apps/web/src/lib/api.ts -> exit 1
+      ✖ sin sesión, la mutación sale SIN cabecera y llega a la API (INC-023) (0.9772ms)
+      ✖ el token anti-CSRF (5.497ms)
+      ℹ pass 10
+      ℹ fail 1
+      ✖ failing tests:
+      ✖ sin sesión, la mutación sale SIN cabecera y llega a la API (INC-023) (0.9772ms)
+
+=== erasableSyntaxOnly: una clase con `public readonly` en el constructor, colada en lib/csrf.ts
+src/lib/csrf.ts:38:22 - error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+```
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo |
+|---|---|---|
+| **Un 202 sin cuerpo reventaba al leerse como JSON** | `cuerpoDe`. **INC-025** | 5 min |
+| `api.spec.ts` no cargaba: `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` («parameter property is not supported in strip-only mode») | `ErrorDeApi` con campos explícitos y `erasableSyntaxOnly`, que lo caza en `tsc` | 5 min |
+
+### Deuda y pendientes
+
+- **Los mensajes de `iam/domain/errores.ts` van sin tildes** («no es valido o ya caduco») y llegan tal
+  cual a la pantalla. Es texto de la API; se corrige en el próximo paquete que toque `iam`.
+- El largo mínimo (12) está en el cliente como **ayuda**, con su porqué: si la API lo cambia, manda su 400.

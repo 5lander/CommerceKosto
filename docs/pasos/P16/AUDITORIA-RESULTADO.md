@@ -281,3 +281,44 @@ audit exit=0
 ```
 
 Las tres líneas `ℹ` son las 20 pruebas nuevas de `apps/web`, entre las unitarias de la API y las de integración.
+
+---
+
+## Pantalla 1b — Olvidé mi contraseña · Restablecer · 2026-09-14
+
+**Alcance del diff:** `apps/web` (`/olvide`, `/restablecer`, enlace en `/entrar`, `useEnvio`, `api.ts` y su
+prueba, `tsconfig`, textos, CSS), INC-025, INC-023, `ESTRATEGIA.md`, `ESTADO.md`, `CHANGELOG`,
+`FUNCIONAMIENTO.md` y este documento. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | La política de contraseñas la decide la API; el cliente solo evita gastar el enlace en un error de tecleo |
+| B · Código | ✅ | `audit:types` (con `erasableSyntaxOnly`), `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 513 archivos** |
+| C · Seguridad | ✅ | **La misma frase exista o no la cuenta** (verificado); el enlace de un solo uso (verificado); sin dependencias |
+| F · Frontend | ✅ | Estados: pedido, sin token, token inválido, corta, no coinciden, 429, hecho |
+| G · Pruebas | ✅ | **11 pruebas nuevas del transporte**, 31 en `apps/web`; guardianes W5, W6 y `erasableSyntaxOnly` |
+| G2 bis · Contador | ✅ | **510 → 513**: `olvide/page.tsx`, `restablecer/page.tsx` y `lib/api.spec.ts` |
+| H · Documentación | ✅ | INC-025, INC-023, ESTRATEGIA, FUNCIONAMIENTO, CHANGELOG, ESTADO |
+| I9 · Bundle | ✅ | piso **126,9 KiB**; `/olvide` 138,5, `/restablecer` 138,8; la mayor `/inventario` **143,5** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 513 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+ Test Files  2 passed | 31 skipped (33)
+      Tests  19 passed | 527 skipped (546)
+ Test Files  67 passed (67)
+      Tests  894 passed (894)
+ℹ tests 31
+ℹ pass 31
+ℹ fail 0
+ Test Files  33 passed (33)
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

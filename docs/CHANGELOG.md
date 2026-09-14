@@ -4,6 +4,23 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 1b — Olvidé mi contraseña, y la respuesta vacía que la rompía · 2026-09-14
+
+> Tercer commit de pantallas. Una incidencia nueva (INC-025). Sin cambios en `apps/api`.
+
+**`/olvide` y `/restablecer`.** Pedir el enlace dice **siempre la misma frase**, exista o no la cuenta.
+Restablecer comprueba el largo y la repetición **antes** de enviar, porque la API gasta el token antes de
+mirar la contraseña; cualquier rechazo ofrece pedir otro enlace, y un límite de tasa deja reintentar.
+Verificado de punta a punta en el navegador con el enlace leído del outbox: un solo uso, sesiones
+cerradas, entrar con la nueva. «¿Olvidaste tu contraseña?» en `/entrar`.
+
+**La pantalla enseñaba «Unexpected end of JSON input»** tras pedir un enlace que sí se había encolado
+(INC-025): el cliente solo trataba como vacío el 204, y `olvido` responde 202 sin cuerpo. Arreglado, y
+**el transporte tiene pruebas** —11, con `fetch` simulado—, que fijan también INC-023.
+`erasableSyntaxOnly` en el web.
+
+---
+
 ## P16 · Inicio (pantalla 2) — El mes de un vistazo, y las primeras pruebas del web · 2026-09-14
 
 > Segundo commit de pantallas. **ADR-027**, una incidencia nueva (INC-024). Sin cambios en `apps/api`.
