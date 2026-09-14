@@ -33,13 +33,12 @@ import { Formulario } from '../../../../../componentes/ui/Formulario';
 import { Selector, type Opcion } from '../../../../../componentes/ui/Selector';
 import { Vista } from '../../../../../componentes/ui/Vista';
 import { Volver } from '../../../../../componentes/ui/Volver';
+import { VolverACargar } from '../../../../../componentes/ui/VolverACargar';
 import { llamar } from '../../../../../lib/api';
 import { fraccionDePorcentaje, porcentajeDeFraccion } from '../../../../../lib/decimales';
 import { useEnvio } from '../../../../../lib/useEnvio';
 import { useCarga, type Lectura } from '../../../../../lib/useLectura';
 import { TEXTOS } from '../../../../../textos/es';
-
-const CONFLICTO_DE_VERSION = 'CONFLICTO_DE_VERSION';
 
 interface ParaEditar {
   readonly ficha: FichaDeItem;
@@ -146,11 +145,7 @@ function FormularioDeEdicion({ datos, recargar }: { readonly datos: ParaEditar; 
       {ficha.tipo === 'PRODUCIDO' && (
         <Selector etiqueta={insumo.llevaStock} valor={borrador.llevaStock} opciones={SI_NO} cambiar={cambiar('llevaStock')} />
       )}
-      {envio.codigo === CONFLICTO_DE_VERSION && (
-        <button type="button" onClick={recargar}>
-          {insumo.volverACargar}
-        </button>
-      )}
+      <VolverACargar envio={envio} recargar={recargar} />
     </Formulario>
   );
 }

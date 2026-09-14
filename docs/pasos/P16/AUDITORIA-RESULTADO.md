@@ -637,3 +637,41 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 12 — Producto: PVP y activación, empaque, simulador y desglose · 2026-09-14
+
+**Alcance del diff:** `apps/web` (bloques de la ficha del producto, tipos de costeo compartidos,
+`VolverACargar`, `CONFLICTO_DE_VERSION`, textos), `docs/incidencias/INC-026`, `ESTADO.md`, `CHANGELOG` y
+`docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Ni un cálculo: costos, venta, semáforo y simulación son de `GET /costeo/:id`; la regla «activo necesita PVP» la decide la API (el `required` del campo es ayuda) |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 553 archivos** (+7) |
+| C · Seguridad | ✅ | Gerente sin `product.write`: sin formularios; el desglose depende de `recipe.read` en la API (D-16.106) |
+| E · Reglas | ✅ | R14 (PVP con IVA, venta neta de la API); concurrencia de ADR-023 con 409 verificado |
+| G · Pruebas | ✅ | **49 del web**; sin lógica nueva en `lib/` |
+| H · Documentación | ✅ | INC-026 con su prevención |
+| I · Duplicación | ✅ | `Found 0 clones`; tipos de costeo y botón del 409 viven una vez |
+| I9 · Bundle | ✅ | `/productos/[id]` **148,3 KiB** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 553 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 527 skipped (546)
+      Tests  894 passed (894)
+ℹ tests 49
+ℹ pass 49
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

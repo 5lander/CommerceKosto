@@ -21,6 +21,7 @@
 
 import type { ReactNode } from 'react';
 
+import type { ProductoCosteado, Semaforo } from '../../../componentes/costeo/tipos';
 import { Marco } from '../../../componentes/Marco';
 import { Tabla } from '../../../componentes/ui/Tabla';
 import { Vista } from '../../../componentes/ui/Vista';
@@ -28,44 +29,6 @@ import { comoImporte, comoPorcentaje } from '../../../lib/decimales';
 import { useSucursal } from '../../../lib/sesion';
 import { useLectura } from '../../../lib/useLectura';
 import { TEXTOS } from '../../../textos/es';
-
-interface ImporteDto {
-  readonly mostrar: string;
-  readonly exacto: string;
-}
-
-interface VentaDto {
-  readonly vendible: true;
-  readonly ventaNeta: ImporteDto;
-  readonly margenContribucion: ImporteDto;
-  readonly mcPct: string;
-  readonly foodCostPct: string;
-  readonly multiplicador: string | null;
-}
-
-interface SinVentaDto {
-  readonly vendible: false;
-  readonly motivo: string;
-}
-
-/** El color lo decide la API con los umbrales de la company (D-16.105). */
-type Semaforo = 'VERDE' | 'AMBAR' | 'ROJO' | 'SIN_DATO';
-
-interface ProductoCosteado {
-  readonly productId: string;
-  readonly semaforoFoodCost: Semaforo;
-  readonly nombre: string;
-  readonly categoria: string | null;
-  readonly costos: {
-    readonly costoBrutoLote: ImporteDto;
-    readonly costoNetoLote: ImporteDto;
-    readonly costoTotalUnidad: ImporteDto;
-  };
-  readonly venta: VentaDto | SinVentaDto;
-  readonly itemsSinCosto: readonly string[];
-  /** Sin receta en esta sucursal: sus ceros no son un costo (P16-D, D-16.146). */
-  readonly sinReceta: boolean;
-}
 
 interface CosteoDeCarta {
   readonly productos: readonly ProductoCosteado[];

@@ -4,6 +4,20 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 12 — Lo que cuesta un plato, y a cuánto venderlo · 2026-09-14
+
+> Decimotercer commit de pantallas. Sin cambios en `apps/api`.
+
+**La ficha del producto se vuelve la página de trabajo del plato.** En la sucursal elegida: lo que cuesta
+por porción —con la provisión de merma y el empaque—, lo que deja al PVP actual con el semáforo del food
+cost, un **simulador** para probar otro precio sin guardarlo y el **desglose** de la receta con el peso de
+cada insumo. Quien administra fija ahí si se vende, el PVP y las porciones por lote, y el empaque; si otra
+persona guardó antes, la ficha lo dice y ofrece ver la versión actual.
+
+**Arreglado antes de salir (INC-026):** tras guardar, la ficha enseñaba el costo viejo al lado del nuevo.
+
+---
+
 ## P16 · Pantalla 11 — Los productos de la carta · 2026-09-14
 
 > Duodécimo commit de pantallas. Sin cambios en `apps/api`.

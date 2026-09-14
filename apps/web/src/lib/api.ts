@@ -31,6 +31,8 @@ import { csrfEnMemoria, guardarCsrf } from './csrf.ts';
 /** La URL de la API. Sin valor por defecto: si falta, se ve al arrancar. */
 const BASE = process.env['NEXT_PUBLIC_API_URL'] ?? '';
 
+/** Otra escritura del mismo agregado llegó antes (ADR-023): se vuelve a leer. */
+export const CONFLICTO_DE_VERSION = 'CONFLICTO_DE_VERSION';
 
 /**
  * Un error que la API devolvió, con su código de dominio.

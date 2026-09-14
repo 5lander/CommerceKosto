@@ -859,3 +859,52 @@ porque la API no tiene `PUT /productos/:id` (duda #14).
 ### Decisiones
 
 D-16.180…D-16.182 en `ESTADO.md`; duda #14.
+
+---
+
+## Pantalla 12 — Producto: PVP y activación, empaque, simulador y desglose · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/productos/[id]/page.tsx` | La ficha compone sus bloques por permiso: datos · **lo que cuesta y deja en la sucursal elegida** (`costing.read`) · **configuración en esa sucursal** y **empaque** (`product.write`) · dónde se vende. Tras cada escritura se relee y los bloques se remontan con la versión nueva |
+| `componentes/productos/ficha.ts` | la lectura: ficha, configuraciones, sucursales e insumos (con archivados) |
+| `componentes/productos/CostoDelProducto.tsx` | `GET /costeo/:id?locationId=`: costo por porción, con provisión de merma, empaque, costo total; venta neta, margen, food cost con el semáforo de la API y multiplicador. **Simulador** con `?pvp=`, debajo de lo real. Sin receta, el aviso y nada más |
+| `componentes/productos/DesgloseDelCosto.tsx` | `costos.lineas` (solo con `recipe.read`): insumo, cantidad **con la unidad del catálogo**, base, costo y peso en el lote; las excluidas, atenuadas |
+| `componentes/productos/ConfiguracionEnSucursal.tsx` | `PUT /productos/:id/ubicaciones` con `version`: se vende, PVP con IVA y porciones por lote (vacío = `null`); 400 y 409 junto al botón |
+| `componentes/productos/EmpaqueDelProducto.tsx` | `PUT /productos/:id/empaque` con `version`: un insumo activo o «Sin empaque» |
+| `componentes/costeo/tipos.ts` | la forma de `GET /costeo`, compartida con la tabla de costeo (segundo uso) |
+| `componentes/ui/VolverACargar.tsx`, `lib/api.ts` | el botón del 409 (tercer uso) y `CONFLICTO_DE_VERSION` |
+
+### Lo que destapó la verificación
+
+**INC-026.** Los tres bloques remontables compartían la misma `key`: tras guardar, React dejaba el costo y
+el formulario viejos al lado de los nuevos —dos secciones de costo, una con el PVP anterior— y el siguiente
+envío se perdía. Una clave por bloque. Y un detalle de lectura: «porción 3.08 + empaque 0.00» no daba el
+«total 3.14» a la vista; entra el indicador **con provisión de merma** entre los dos.
+
+### Cómo se verificó
+
+Arroz marinero en Local Centro (receta de tres líneas), como dueña:
+
+```
+costo           porción 3.08 · con merma 3.14 · empaque 0.00 · total 3.14   (una sola sección)
+venta           neta 7.04 · margen 3.90 · food cost 44,6 % [ROJO] · multiplicador 2.24
+desglose        Arroz 0.2 kg AP 2.16 70,2 % · Camaron pelado 0.1 kg EP 0.87 28,2 % · Aceite 0.02 lt AP 0.05 1,6 %
+simulador       «9,50» → «Con PVP 9.50»: neta 8.26 · margen 5.12 · 38,0 % · 2.63; en la API el PVP no cambió
+sin PVP         el navegador no envía (PVP requerido si se vende); la API, directa: 400 «Un producto activo necesita PVP…»
+guardar 8,20    tabla 8.20 · venta neta 7.13 · campo «8.2» releído · secciones de costo: 1
+409             otra escritura con la versión actual (8.3) → «Alguien más cambió este producto…» + «Ver la versión actual» → campo 8.3
+empaque         Aceite de girasol → dato «Aceite de girasol», empaque 2.43, total 5.57; «Sin empaque» → 0.00 y 3.14
+Bodega Norte    «Sin receta en esta sucursal…»; configuración sin marcar
+sin receta      el producto de ensayo P11: aviso y sin simulador
+gerente         costo, simulador y desglose (3 líneas); ni configuración ni empaque
+360 px          { desborda: false }
+```
+
+**Lo que se tocó se restauró**: PVP 7.9, porciones 1, sin empaque (la versión del producto quedó en 10).
+
+### Decisiones
+
+D-16.183…D-16.186 en `ESTADO.md`; INC-026.

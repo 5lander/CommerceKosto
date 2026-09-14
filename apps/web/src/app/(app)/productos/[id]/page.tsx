@@ -1,77 +1,44 @@
 'use client';
 
 /**
- * Pantalla 11 (ficha) — un producto: sus datos y dónde se vende.
+ * Pantallas 11 y 12 — la ficha de un producto: sus datos, lo que cuesta y deja en
+ * la sucursal elegida, su configuración ahí, su empaque y dónde se vende.
  *
  * **LA CONFIGURACIÓN POR SUCURSAL LA FILTRA LA API POR ALCANCE** (D-16.113): un
  * gerente ve solo la suya, la dueña todas. La ficha no filtra nada; pinta lo que
  * llega, con el nombre de cada sucursal de `GET /ubicaciones`.
  *
- * **EL EMPAQUE ES UN INSUMO** (ADR-008): la ficha trae su id y el nombre sale de
- * su ficha de catálogo. Cambiarlo, el PVP y la activación llegan en la pantalla
- * 12; aquí se leen.
+ * **CADA BLOQUE APARECE CON SU PERMISO**: el costo con `costing.read`, los dos
+ * formularios con `product.write`. La frontera sigue siendo el 403 de la API.
+ *
+ * **TRAS GUARDAR, LA FICHA SE VUELVE A LEER**, y lo que depende de ella se monta
+ * otra vez con la `version` nueva como clave: el costo se recalcula con el PVP y
+ * el empaque que se acaban de guardar, y un formulario no se queda con la versión
+ * vieja para la siguiente escritura.
  */
 
 import { useParams } from 'next/navigation';
-import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 
 import { Marco } from '../../../../componentes/Marco';
+import { ConfiguracionEnSucursal } from '../../../../componentes/productos/ConfiguracionEnSucursal';
+import { CostoDelProducto } from '../../../../componentes/productos/CostoDelProducto';
+import { EmpaqueDelProducto } from '../../../../componentes/productos/EmpaqueDelProducto';
+import {
+  useProducto,
+  type Configuracion,
+  type FichaDeProducto,
+  type ProductoLeido,
+} from '../../../../componentes/productos/ficha';
 import { Dato } from '../../../../componentes/ui/Dato';
 import { Pildora } from '../../../../componentes/ui/Pildora';
 import { Tabla } from '../../../../componentes/ui/Tabla';
 import { Vista } from '../../../../componentes/ui/Vista';
 import { Volver } from '../../../../componentes/ui/Volver';
-import { llamar } from '../../../../lib/api';
 import { comoImporte, sinCerosDeSobra } from '../../../../lib/decimales';
-import type { Sucursal } from '../../../../lib/sesion';
-import { useCarga, type Lectura } from '../../../../lib/useLectura';
+import { usePermisos } from '../../../../lib/permisos';
+import { useSucursal } from '../../../../lib/sesion';
 import { TEXTOS } from '../../../../textos/es';
-
-interface FichaDeProducto {
-  readonly id: string;
-  readonly nombre: string;
-  readonly tipo: 'SIMPLE' | 'COMBO';
-  readonly categoria: string | null;
-  readonly estado: 'ACTIVE' | 'INACTIVE';
-  readonly empaqueItemId: string | null;
-}
-
-interface Configuracion {
-  readonly locationId: string;
-  readonly activo: boolean;
-  readonly pvp: string | null;
-  readonly rendimientoPorciones: string | null;
-}
-
-interface ProductoLeido {
-  readonly ficha: FichaDeProducto;
-  readonly configuraciones: readonly Configuracion[];
-  readonly sucursales: ReadonlyMap<string, string>;
-  /** El nombre del insumo de empaque, o `null` si no lleva. */
-  readonly empaque: string | null;
-}
-
-async function nombreDelEmpaque(ficha: FichaDeProducto): Promise<string | null> {
-  if (ficha.empaqueItemId === null) return null;
-  return (await llamar<{ readonly nombre: string }>({ ruta: `/catalogo/items/${ficha.empaqueItemId}` })).nombre;
-}
-
-function useProducto(id: string): Lectura<ProductoLeido> {
-  const leer = useMemo(
-    () => async (): Promise<ProductoLeido> => {
-      const [ficha, configuraciones, sucursales] = await Promise.all([
-        llamar<FichaDeProducto>({ ruta: `/productos/${id}` }),
-        llamar<readonly Configuracion[]>({ ruta: `/productos/${id}/ubicaciones` }),
-        llamar<readonly Sucursal[]>({ ruta: '/ubicaciones' }),
-      ]);
-      const empaque = await nombreDelEmpaque(ficha);
-      return { ficha, configuraciones, sucursales: new Map(sucursales.map((s) => [s.id, s.nombre])), empaque };
-    },
-    [id],
-  );
-  return useCarga(leer);
-}
 
 export default function FichaDelProducto(): ReactNode {
   const { id } = useParams<{ id: string }>();
@@ -85,14 +52,32 @@ export default function FichaDelProducto(): ReactNode {
       acciones={<Volver href="/productos" />}
     >
       <Vista lectura={lectura} vacio="nunca">
-        {(leido) => (
-          <div className="pila">
-            <DatosDelProducto leido={leido} />
-            <DondeSeVende leido={leido} />
-          </div>
-        )}
+        {(leido) => <Bloques leido={leido} recargar={lectura.recargar} />}
       </Vista>
     </Marco>
+  );
+}
+
+function Bloques({ leido, recargar }: { readonly leido: ProductoLeido; readonly recargar: () => void }): ReactNode {
+  const { tiene } = usePermisos();
+  const { sucursal } = useSucursal();
+  // Una clave por bloque: con la misma en los tres hermanos, React no desmonta los
+  // viejos y la ficha acaba con dos costos, uno con la versión anterior.
+  const clave = `${sucursal ?? ''}-${String(leido.ficha.version)}`;
+  const escribe = tiene('product.write');
+
+  return (
+    <div className="pila">
+      <DatosDelProducto leido={leido} />
+      {sucursal !== null && tiene('costing.read') && (
+        <CostoDelProducto key={`costo-${clave}`} productId={leido.ficha.id} sucursal={sucursal} insumos={leido.insumos} />
+      )}
+      {sucursal !== null && escribe && (
+        <ConfiguracionEnSucursal key={`configuracion-${clave}`} leido={leido} sucursal={sucursal} recargar={recargar} />
+      )}
+      {escribe && <EmpaqueDelProducto key={`empaque-${clave}`} leido={leido} recargar={recargar} />}
+      <DondeSeVende leido={leido} />
+    </div>
   );
 }
 
@@ -104,13 +89,14 @@ function resumenDe(ficha: FichaDeProducto): string {
 
 function DatosDelProducto({ leido }: { readonly leido: ProductoLeido }): ReactNode {
   const { productoDeVenta: producto, productos } = TEXTOS;
+  const empaque = leido.insumos.find((insumo) => insumo.id === leido.ficha.empaqueItemId);
 
   return (
     <section className="panel panel--relleno">
       <dl className="datos">
         <Dato etiqueta={producto.tipo} valor={productos.tipos[leido.ficha.tipo]} />
         <Dato etiqueta={producto.categoria} valor={leido.ficha.categoria ?? productos.sinCategoria} />
-        <Dato etiqueta={producto.empaque} valor={leido.empaque ?? producto.sinEmpaque} />
+        <Dato etiqueta={producto.empaque} valor={empaque?.nombre ?? producto.sinEmpaque} />
       </dl>
     </section>
   );
