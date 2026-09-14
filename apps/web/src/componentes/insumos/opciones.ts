@@ -9,9 +9,6 @@
 import type { Opcion } from '../ui/Selector';
 import { TEXTOS } from '../../textos/es';
 
-/** Un porcentaje con hasta tres cifras enteras y dos decimales, con coma o punto. */
-export const PORCENTAJE = /^\d{0,3}(?:[.,]\d{0,2})?$/u;
-
 /** El valor del selector de grupo que significa «ninguno»: la API recibe `null`. */
 export const SIN_GRUPO = '';
 

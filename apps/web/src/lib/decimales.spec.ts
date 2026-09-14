@@ -16,6 +16,7 @@ import {
   comoCostoDeUso,
   comoImporte,
   comoPorcentaje,
+  conPuntoDecimal,
   enPuntos,
   fraccionDePorcentaje,
   porcentajeDeFraccion,
@@ -125,6 +126,13 @@ describe('porcentajeDeFraccion — lo que precarga un campo de porcentaje', () =
     assert.equal(porcentajeDeFraccion('0.925000000000'), '92,5');
     assert.equal(porcentajeDeFraccion('1.000000000000'), '100');
     assert.equal(fraccionDePorcentaje(porcentajeDeFraccion('0.9025')), '0.9025');
+  });
+});
+
+describe('conPuntoDecimal', () => {
+  it('cambia la coma de es-EC por el punto y quita espacios', () => {
+    assert.equal(conPuntoDecimal(' 2,5 '), '2.5');
+    assert.equal(conPuntoDecimal('10'), '10');
   });
 });
 

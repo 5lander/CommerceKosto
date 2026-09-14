@@ -260,3 +260,12 @@ export function fraccionDePorcentaje(porcentaje: string): string {
 export function porcentajeDeFraccion(fraccion: string): string {
   return sinCerosDeSobra(conSigno(fraccion, (absoluto) => moverComa(absoluto, POSICIONES_DEL_PORCENTAJE))).replace('.', ',');
 }
+
+/**
+ * `2,5` a `2.5`: una cantidad escrita con la coma de es-EC, al punto que la API
+ * entiende. Solo cambia el separador y quita los espacios; la forma la filtra el
+ * campo (`CampoDeCantidad`) y el valor lo valida la API.
+ */
+export function conPuntoDecimal(texto: string): string {
+  return texto.trim().replace(',', '.');
+}

@@ -704,3 +704,34 @@ gerente     { nuevo: false, enlaces: 0, filas: 6 }
 ### Decisiones
 
 D-16.168 y D-16.169 en `ESTADO.md`.
+
+---
+
+## Pantalla 8 — Artículo: alta y editar · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/[id]/articulos/nuevo/page.tsx` | `POST /catalogo/articulos`: nombre, marca, proveedor, **cuánto trae y en qué unidad**, factor **solo si la unidad de la presentación es de otra dimensión que la de uso** (dato de `GET /catalogo/unidades`), y la **tarifa de IVA de la factura, obligatoria**, precargada con la del grupo del insumo si la define |
+| `app/(app)/insumos/[id]/articulos/[articuloId]/editar/page.tsx` | `PUT /catalogo/articulos/:id`: nombre, marca, proveedor, IVA y estado; **presentación, unidad y factor a la vista como no editables** («1 unid = 0.08 kg») |
+| `componentes/ui/CampoNumerico.tsx` | **`CampoDePorcentaje` y `CampoDeCantidad`**: un campo que solo deja escribir la forma de un número. Sustituye al patrón repetido en el alta y edición de insumos y en grupos (cuarta y quinta aparición) |
+| `lib/decimales.ts` | `conPuntoDecimal` (+1 prueba); la pantalla de inventario deja su copia local |
+| `app/(app)/insumos/[id]/page.tsx` | «Nueva presentación» con `catalog.create`; cada presentación lleva a su edición con `catalog.update` y dice «Archivada» si lo está |
+
+### Cómo se verificó
+
+```
+mismaDimension        Arroz, 5 kg        → sin campo de factor; creada: «5 kg | 0,0 %»
+otraDimension         Limón, 1 unid      → al elegir «unid» aparece el factor; «0,08» → «1 unid = 0.08 kg»
+editarPrecarga        { iva: "0", nota: "No se pueden cambiar: 1 unid = 0.08 kg" }
+trasEditar            «Limon por unidad … | Archivada | 1 unid | 15,0 %»
+gerente               { nueva: false, editar: 0 }
+```
+
+La precarga del IVA salió vacía en los dos: sus grupos no definen tarifa (`—` en la ficha), que es lo que
+debe hacer.
+
+### Decisiones
+
+D-16.170…D-16.172 en `ESTADO.md`.

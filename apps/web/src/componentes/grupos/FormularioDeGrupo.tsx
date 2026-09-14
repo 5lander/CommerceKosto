@@ -18,8 +18,8 @@ import { llamar } from '../../lib/api';
 import { fraccionDePorcentaje, porcentajeDeFraccion } from '../../lib/decimales';
 import { useEnvio } from '../../lib/useEnvio';
 import { TEXTOS } from '../../textos/es';
-import { PORCENTAJE } from '../insumos/opciones';
 import { CampoDeTexto } from '../ui/Campo';
+import { CampoDePorcentaje } from '../ui/CampoNumerico';
 import { Formulario } from '../ui/Formulario';
 
 export interface Grupo {
@@ -55,14 +55,7 @@ export function FormularioDeGrupo({ grupo }: { readonly grupo: Grupo | null }): 
       textoEnviando={grupos.guardando}
     >
       <CampoDeTexto etiqueta={grupos.nombre} nombre="nombre" requerido valor={nombre} cambiar={setNombre} />
-      <CampoDeTexto
-        etiqueta={grupos.iva}
-        nombre="iva"
-        valor={iva}
-        cambiar={(crudo) => {
-          if (PORCENTAJE.test(crudo)) setIva(crudo);
-        }}
-      />
+      <CampoDePorcentaje etiqueta={grupos.iva} nombre="iva" valor={iva} cambiar={setIva} />
       <p className="nota">{grupos.ivaAyuda}</p>
     </Formulario>
   );

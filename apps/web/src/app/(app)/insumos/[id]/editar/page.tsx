@@ -21,7 +21,6 @@ import { Permitido } from '../../../../../componentes/armazon/Permitido';
 import { cambioDe, guardarItem, type FichaDeItem } from '../../../../../componentes/insumos/ficha';
 import {
   CONFIANZAS,
-  PORCENTAJE,
   SI,
   SI_NO,
   SIN_GRUPO,
@@ -29,6 +28,7 @@ import {
 } from '../../../../../componentes/insumos/opciones';
 import { Marco } from '../../../../../componentes/Marco';
 import { CampoDeTexto } from '../../../../../componentes/ui/Campo';
+import { CampoDePorcentaje } from '../../../../../componentes/ui/CampoNumerico';
 import { Formulario } from '../../../../../componentes/ui/Formulario';
 import { Selector, type Opcion } from '../../../../../componentes/ui/Selector';
 import { Vista } from '../../../../../componentes/ui/Vista';
@@ -134,14 +134,12 @@ function FormularioDeEdicion({ datos, recargar }: { readonly datos: ParaEditar; 
     <Formulario envio={envio} alEnviar={guardar} textoDelBoton={insumo.guardar} textoEnviando={insumo.guardando}>
       <p className="nota">{`${insumo.fijos} ${TEXTOS.insumos.tipos[ficha.tipo]} · ${ficha.unidadDeUso}`}</p>
       <CampoDeTexto etiqueta={insumo.nombre} nombre="nombre" requerido valor={borrador.nombre} cambiar={cambiar('nombre')} />
-      <CampoDeTexto
+      <CampoDePorcentaje
         etiqueta={insumo.rendimiento}
         nombre="rendimiento"
         requerido
         valor={borrador.rendimiento}
-        cambiar={(crudo) => {
-          if (PORCENTAJE.test(crudo)) cambiar('rendimiento')(crudo);
-        }}
+        cambiar={cambiar('rendimiento')}
       />
       <Selector etiqueta={insumo.grupo} valor={borrador.grupoId} opciones={datos.grupos} cambiar={cambiar('grupoId')} />
       <Selector etiqueta={insumo.confianza} valor={borrador.confianzaDePrecio} opciones={CONFIANZAS} cambiar={cambiar('confianzaDePrecio')} />

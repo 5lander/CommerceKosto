@@ -79,6 +79,29 @@ export const TEXTOS = {
     operacion: 'Operación diaria',
   },
 
+  /** Pantalla 8: las presentaciones de compra de un insumo. */
+  articulo: {
+    nuevo: 'Nueva presentación',
+    nuevoTitulo: 'Nueva presentación de compra',
+    editarTitulo: 'Editar presentación',
+    nombre: 'Nombre',
+    marca: 'Marca',
+    proveedor: 'Proveedor',
+    presentacion: 'Cuánto trae',
+    unidad: 'En qué unidad',
+    factor: 'Cuántas unidades de uso trae una:',
+    fijos: 'Lo que trae y su unidad no se pueden cambiar después: convierten cada compra a unidades de uso. Si cambia la presentación, es otra.',
+    noEditables: 'No se pueden cambiar:',
+    iva: 'IVA de compra de la factura (%)',
+    estado: 'Estado',
+    activo: 'Activa',
+    archivado: 'Archivada',
+    crear: 'Crear presentación',
+    creando: 'Creando…',
+    guardar: 'Guardar cambios',
+    guardando: 'Guardando…',
+  },
+
   /** Pantalla 7: los grupos de insumos y su tarifa de IVA. */
   grupos: {
     titulo: 'Grupos',

@@ -495,3 +495,38 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 8 — Artículo: alta y editar · 2026-09-14
+
+**Alcance del diff:** `apps/web` (alta y edición de artículos, `CampoNumerico`, `conPuntoDecimal` y su
+prueba, enlaces en la ficha, sustitución del campo de porcentaje en insumos y grupos, textos),
+`ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | El factor lo calcula o exige la API; la pantalla solo enseña el campo cuando la dimensión difiere |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 534 archivos** (+3) |
+| C · Seguridad | ✅ | Sin `catalog.create`/`catalog.update`, ni botón ni enlaces (gerente verificado) |
+| G · Pruebas | ✅ | **41 del web** (+1) |
+| I · Duplicación | ✅ | `Found 0 clones`; el filtro de forma de número vive una vez |
+| I9 · Bundle | ✅ | la mayor `/insumos/[id]` **145,7 KiB** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 534 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  894 passed (894)
+ℹ tests 41
+ℹ pass 41
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

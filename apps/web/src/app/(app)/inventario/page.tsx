@@ -34,7 +34,7 @@ import { Error as Fallo } from '../../../componentes/ui/Estados';
 import { Tabla } from '../../../componentes/ui/Tabla';
 import { Vista } from '../../../componentes/ui/Vista';
 import { ErrorDeApi, llamar } from '../../../lib/api';
-import { sinCerosDeSobra } from '../../../lib/decimales';
+import { conPuntoDecimal, sinCerosDeSobra } from '../../../lib/decimales';
 import type { Mes } from '../../../lib/fechas';
 import { usePeriodo } from '../../../lib/periodo';
 import { useRejilla, type CeldaDeRejilla } from '../../../lib/rejilla';
@@ -88,11 +88,6 @@ interface Conciliacion {
 interface ConteoLeido {
   readonly hoja: Hoja;
   readonly conciliacion: Conciliacion | null;
-}
-
-/** El punto decimal es el que la API entiende; la coma es la que se teclea. */
-function conPunto(valor: string): string {
-  return valor.replace(',', '.');
 }
 
 /** El conteo del mes; si no hay, se crea. Crearlo no cuenta nada: es abrir la hoja. */
@@ -170,7 +165,7 @@ function contadas(filas: readonly FilaDeHoja[]): ReadonlyMap<string, string> {
 function lineasDe(valores: ReadonlyMap<string, string>): readonly { itemId: string; cantidad: string }[] {
   return [...valores]
     .filter(([, cantidad]) => cantidad.trim() !== '')
-    .map(([itemId, cantidad]) => ({ itemId, cantidad: conPunto(cantidad) }));
+    .map(([itemId, cantidad]) => ({ itemId, cantidad: conPuntoDecimal(cantidad) }));
 }
 
 function ConteoAbierto({ leido, recargar }: { readonly leido: ConteoLeido; readonly recargar: () => void }): ReactNode {

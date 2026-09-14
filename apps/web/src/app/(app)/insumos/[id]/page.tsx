@@ -13,6 +13,7 @@
  * responde 409 y la ficha se vuelve a leer.
  */
 
+import type { Route } from 'next';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -48,7 +49,11 @@ export default function FichaDelInsumo(): ReactNode {
           <div className="pila">
             <DatosDelInsumo ficha={leido.ficha} />
             {leido.precios !== null && <CostoDelInsumo ficha={leido.ficha} precios={leido.precios} />}
-            <ArticulosDelInsumo articulos={leido.ficha.articulos} />
+            <ArticulosDelInsumo
+              ficha={leido.ficha}
+              puedeCrear={tiene('catalog.create')}
+              puedeEditar={tiene('catalog.update')}
+            />
             {leido.precios !== null && <HistorialDePrecios precios={leido.precios} />}
             {tiene('catalog.update') && <ArchivarInsumo ficha={leido.ficha} recargar={lectura.recargar} />}
           </div>
@@ -131,12 +136,25 @@ function CostoDelInsumo({ ficha, precios }: { readonly ficha: FichaDeItem; reado
   );
 }
 
-function ArticulosDelInsumo({ articulos }: { readonly articulos: readonly Articulo[] }): ReactNode {
+function ArticulosDelInsumo({
+  ficha,
+  puedeCrear,
+  puedeEditar,
+}: {
+  readonly ficha: FichaDeItem;
+  readonly puedeCrear: boolean;
+  readonly puedeEditar: boolean;
+}): ReactNode {
   const { insumo } = TEXTOS;
+  const { articulos } = ficha;
 
   return (
     <section className="pila pila--apretada">
-      <h2 className="subtitulo">{insumo.articulos}</h2>
+      <TituloConAccion
+        titulo={insumo.articulos}
+        accion={TEXTOS.articulo.nuevo}
+        href={puedeCrear ? `/insumos/${ficha.id}/articulos/nuevo` : null}
+      />
       {articulos.length === 0 ? (
         <p className="nota">{insumo.sinArticulos}</p>
       ) : (
@@ -150,19 +168,63 @@ function ArticulosDelInsumo({ articulos }: { readonly articulos: readonly Articu
           </thead>
           <tbody>
             {articulos.map((articulo) => (
-              <tr key={articulo.id}>
-                <td>
-                  {articulo.nombre}
-                  <span className="bloque tenue">{[articulo.marca, articulo.proveedor].filter(Boolean).join(' · ')}</span>
-                </td>
-                <td className="numero">{`${sinCerosDeSobra(articulo.presentacion)} ${articulo.unidadDePresentacion}`}</td>
-                <td className="numero">{comoPorcentaje(articulo.ivaTarifa)}</td>
-              </tr>
+              <FilaDeArticulo key={articulo.id} itemId={ficha.id} articulo={articulo} editable={puedeEditar} />
             ))}
           </tbody>
         </Tabla>
       )}
     </section>
+  );
+}
+
+/** Un título de sección con su acción al lado, si la sesión puede hacerla. */
+function TituloConAccion<T extends string>({
+  titulo,
+  accion,
+  href,
+}: {
+  readonly titulo: string;
+  readonly accion: string;
+  readonly href: Route<T> | null;
+}): ReactNode {
+  return (
+    <div className="linea linea--separada">
+      <h2 className="subtitulo">{titulo}</h2>
+      {href !== null && (
+        <Link href={href} className="boton">
+          {accion}
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function FilaDeArticulo({
+  itemId,
+  articulo,
+  editable,
+}: {
+  readonly itemId: string;
+  readonly articulo: Articulo;
+  readonly editable: boolean;
+}): ReactNode {
+  const detalle = [articulo.marca, articulo.proveedor, articulo.estado === 'INACTIVE' ? TEXTOS.articulo.archivado : null];
+
+  return (
+    <tr>
+      <td>
+        {editable ? (
+          <Link href={`/insumos/${itemId}/articulos/${articulo.id}/editar`} className="enlace-de-fila">
+            {articulo.nombre}
+          </Link>
+        ) : (
+          articulo.nombre
+        )}
+        <span className="bloque tenue">{detalle.filter(Boolean).join(' · ')}</span>
+      </td>
+      <td className="numero">{`${sinCerosDeSobra(articulo.presentacion)} ${articulo.unidadDePresentacion}`}</td>
+      <td className="numero">{comoPorcentaje(articulo.ivaTarifa)}</td>
+    </tr>
   );
 }
 

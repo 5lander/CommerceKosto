@@ -4,6 +4,18 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 8 — Las presentaciones de compra de un insumo · 2026-09-14
+
+> Noveno commit de pantallas. Sin cambios en `apps/api`.
+
+**Alta y edición de presentaciones desde la ficha del insumo.** Cuánto trae y en qué unidad; el factor de
+conversión solo cuando la física no lo da —«un limón pesa 80 g»—; y la **tarifa de IVA de la factura,
+obligatoria**, precargada con la del grupo si la define. Al editar, la presentación y su factor se ven y
+no se tocan, y la tarifa sí se corrige: es donde se arregla la semilla 0.15 de los artículos anteriores a
+P16-A1.
+
+---
+
 ## P16 · Pantalla 7 — Grupos y la tarifa de IVA que heredan · 2026-09-14
 
 > Octavo commit de pantallas. Sin cambios en `apps/api`.

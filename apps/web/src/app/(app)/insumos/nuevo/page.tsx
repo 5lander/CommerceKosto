@@ -28,7 +28,6 @@ import type { ReactNode } from 'react';
 import { Permitido } from '../../../../componentes/armazon/Permitido';
 import {
   CONFIANZAS,
-  PORCENTAJE,
   SI,
   SI_NO,
   SIN_GRUPO,
@@ -37,6 +36,7 @@ import {
 } from '../../../../componentes/insumos/opciones';
 import { Marco } from '../../../../componentes/Marco';
 import { CampoDeTexto } from '../../../../componentes/ui/Campo';
+import { CampoDePorcentaje } from '../../../../componentes/ui/CampoNumerico';
 import { Formulario } from '../../../../componentes/ui/Formulario';
 import { Selector, type Opcion } from '../../../../componentes/ui/Selector';
 import { Vista } from '../../../../componentes/ui/Vista';
@@ -192,15 +192,7 @@ function CampoDeRendimiento({
 }): ReactNode {
   return (
     <>
-      <CampoDeTexto
-        etiqueta={TEXTOS.insumo.rendimiento}
-        nombre="rendimiento"
-        requerido
-        valor={valor}
-        cambiar={(crudo) => {
-          if (PORCENTAJE.test(crudo)) cambiar(crudo);
-        }}
-      />
+      <CampoDePorcentaje etiqueta={TEXTOS.insumo.rendimiento} nombre="rendimiento" requerido valor={valor} cambiar={cambiar} />
       <p className="nota">{TEXTOS.insumo.rendimientoAyuda}</p>
     </>
   );
