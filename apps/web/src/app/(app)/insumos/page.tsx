@@ -28,6 +28,7 @@ import { Selector } from '../../../componentes/ui/Selector';
 import { Tabla } from '../../../componentes/ui/Tabla';
 import { Vista } from '../../../componentes/ui/Vista';
 import { llamar } from '../../../lib/api';
+import { coincide } from '../../../lib/busqueda';
 import { comoCostoDeUso, comoPorcentaje } from '../../../lib/decimales';
 import { usePermisos } from '../../../lib/permisos';
 import { useCarga, type Lectura } from '../../../lib/useLectura';
@@ -118,17 +119,11 @@ export default function Insumos(): ReactNode {
   );
 }
 
-/** Sin tildes ni mayúsculas: «limon» encuentra «Limón sutil». */
-function paraBuscar(texto: string): string {
-  return texto.normalize('NFD').replaceAll(/\p{Diacritic}/gu, '').toLowerCase();
-}
-
 function CatalogoFiltrado({ catalogo }: { readonly catalogo: Catalogo }): ReactNode {
   const [texto, setTexto] = useState('');
   const [grupo, setGrupo] = useState(TODOS);
-  const buscado = paraBuscar(texto.trim());
   const visibles = catalogo.items.filter(
-    (item) => paraBuscar(item.nombre).includes(buscado) && (grupo === TODOS || item.grupoId === grupo),
+    (item) => coincide(item.nombre, texto) && (grupo === TODOS || item.grupoId === grupo),
   );
   const opciones = [
     { valor: TODOS, texto: TEXTOS.insumos.todosLosGrupos },

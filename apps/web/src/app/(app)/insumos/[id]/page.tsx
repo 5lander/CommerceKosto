@@ -22,6 +22,7 @@ import type { ReactNode } from 'react';
 import { cambioDe, guardarItem, useInsumo, type Articulo, type FichaDeItem, type Precios } from '../../../../componentes/insumos/ficha';
 import { Marco } from '../../../../componentes/Marco';
 import { Confirmar } from '../../../../componentes/ui/Confirmar';
+import { Dato } from '../../../../componentes/ui/Dato';
 import { Pildora } from '../../../../componentes/ui/Pildora';
 import { Tabla } from '../../../../componentes/ui/Tabla';
 import { Vista } from '../../../../componentes/ui/Vista';
@@ -113,15 +114,6 @@ function DatosDelInsumo({ ficha }: { readonly ficha: FichaDeItem }): ReactNode {
         )}
       </dl>
     </section>
-  );
-}
-
-function Dato({ etiqueta, valor }: { readonly etiqueta: string; readonly valor: string }): ReactNode {
-  return (
-    <div className="dato">
-      <dt className="etiqueta">{etiqueta}</dt>
-      <dd>{valor}</dd>
-    </div>
   );
 }
 

@@ -821,3 +821,41 @@ movil 360       { desborda: false, px: 360 } (formulario y alta de insumo)
 ### Decisiones
 
 D-16.176…D-16.179 en `ESTADO.md`.
+
+---
+
+## Pantalla 11 — Productos: listado, alta y ficha · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/productos/page.tsx` | `GET /productos` (el maestro de la empresa) junto a `GET /productos/ubicaciones` de la sucursal del selector: **se vende / no se vende / sin configurar** y el PVP. Buscar sin tildes, categoría (de las que hay) e «Incluir archivados», sobre la lista leída |
+| `app/(app)/productos/nuevo/page.tsx` | `POST /productos`: nombre, tipo (con receta / combo) y categoría opcional; lleva a la ficha. 409 por nombre repetido junto al botón |
+| `app/(app)/productos/[id]/page.tsx` | `GET /productos/:id` y `GET /productos/:id/ubicaciones` (filtrado por alcance en la API) con los nombres de `GET /ubicaciones`; el empaque por su nombre de catálogo. **Solo lectura**: PVP, activación y empaque se editan en la pantalla 12 |
+| `app/(app)/productos/layout.tsx` | `seccion('product.read')` |
+| `componentes/armazon/navegacion.ts` | grupo **Carta** con «Productos» |
+| `lib/busqueda.ts` | `coincide`: buscar sin tildes ni mayúsculas, que vivía en insumos (segundo uso). +3 pruebas |
+| `componentes/ui/Dato.tsx` | el dato de una ficha, que vivía en la de insumos (segundo uso) |
+
+### Cómo se verificó
+
+```
+navegación      … Precios por confirmar · Productos · Costeo por producto …   (grupo «Carta»)
+Local Centro    «Arroz marinero | Con receta · Fuertes | Se vende | 7.90» · «Ceviche mixto | … | 6.50»
+                categorías [Todas, Entradas, Fuertes]; «ARROZ» → 1 fila; «Entradas» → 1 fila
+Bodega Norte    las mismas filas «Sin configurar | —»
+ficha           «Arroz marinero» · Tipo Con receta · Categoría Fuertes · Sin empaque · «Local Centro | Se vende | 7.90 | 1»
+alta            → /productos/01a0a164-… «Producto de ensayo P11 (sintetico)» · «Todavía no está configurado en ninguna sucursal»
+repetido        409 «Ya existe un producto con ese nombre.» sin salir del formulario
+gerente         lista sí, «Nuevo producto» no, /productos/nuevo «sin acceso», ficha solo con Local Centro
+bodega          «sin acceso»; sin «Productos» en la navegación
+360 px          lista y ficha { desborda: false }
+```
+
+**El producto de ensayo se queda** en el tenant sintético: **no hay forma de archivarlo ni de renombrarlo**,
+porque la API no tiene `PUT /productos/:id` (duda #14).
+
+### Decisiones
+
+D-16.180…D-16.182 en `ESTADO.md`; duda #14.

@@ -4,6 +4,18 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 11 — Los productos de la carta · 2026-09-14
+
+> Duodécimo commit de pantallas. Sin cambios en `apps/api`.
+
+**La carta de la empresa, vista desde la sucursal elegida**: cada producto dice si ahí se vende, no se vende
+o todavía no está configurado, y a qué PVP. Alta de productos —la porción, no el plato— y su ficha, con
+dónde se vende. La navegación gana el grupo «Carta».
+
+**Pendiente, y dicho (duda #14):** la API no permite renombrar ni archivar un producto.
+
+---
+
 ## P16 · Pantalla 10 — Sugerir un precio · 2026-09-14
 
 > Undécimo commit de pantallas. Sin cambios en `apps/api`.
