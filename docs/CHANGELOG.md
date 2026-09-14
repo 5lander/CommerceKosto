@@ -4,6 +4,17 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 9 — La bandeja de precios por confirmar · 2026-09-14
+
+> Décimo commit de pantallas. Sin cambios en `apps/api`.
+
+**R5 con pantalla: ningún precio se mueve solo.** La bandeja enseña cada precio sugerido junto al que manda
+hoy —«de 54.00 a 3.10» y no un «3.10» suelto—, con su presentación, fecha, nota y tarifa de IVA. Quien tiene
+`pricing.confirm` lo confirma o lo rechaza ahí; quien solo puede leer ve la bandeja sin botones. Si otra
+persona ya lo decidió, la fila lo dice con el mensaje de la API.
+
+---
+
 ## P16 · Pantalla 8 — Las presentaciones de compra de un insumo · 2026-09-14
 
 > Noveno commit de pantallas. Sin cambios en `apps/api`.

@@ -735,3 +735,43 @@ debe hacer.
 ### Decisiones
 
 D-16.170…D-16.172 en `ESTADO.md`.
+
+---
+
+## Pantalla 9 — Precios: bandeja y decidir · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/precios/page.tsx` | `GET /precios/pendientes` por cursor («Ver más» con `despuesDe`); cada sugerido **junto al vigente** que devuelve la API, con su artículo, fecha, nota y tarifa de IVA; **Confirmar / Rechazar** (`POST /precios/:id/decision`) solo con `pricing.confirm` |
+| `app/(app)/precios/layout.tsx` | `seccion('pricing.read')` |
+| `componentes/armazon/navegacion.ts` | «Precios por confirmar» en el grupo Catálogo, con `pricing.read` |
+| `textos/es.ts` | bloque `precios` |
+
+La bandeja se monta con clave = ids de la primera página: tras una decisión se vuelve a leer y lo añadido con
+«Ver más» se descarta, en vez de seguir enseñando una fila que ya se decidió.
+
+### Cómo se verificó
+
+Tres sugeridos sintéticos (`POST /precios` como dueña, `ivaCompra: null`, nota «Sugerido sintetico de la
+pantalla 9») sobre el tenant de ensayo:
+
+```
+bandejaDuena    «Arroz | Arroz funda 5 kg · desde 14 sept 2026 · … | 54.00  3.10 | IVA 0,0 % | Confirmar | Rechazar»
+                «Limon sutil | … | 7.50  3.10 | IVA 0,0 %» · «Aceite de girasol | … | 28.00  3.10 | IVA 15,0 %»
+movil 360       { desborda: false, px: 360 }  — la decisión se alcanza desplazando la tabla en su marco
+trasConfirmar   [Limon sutil, Aceite de girasol]
+trasRechazar    [Aceite de girasol]
+segunda decisión sobre el confirmado  → 409 CONFLICTO «Ese precio ya fue confirmado o rechazado.»
+gerente         { filas: 1, botones: 0, cabeceras: [Insumo, Vigente hoy, Sugerido] }
+bodega          «Tu usuario no tiene acceso a esta pantalla.»; sin enlace en la navegación
+```
+
+La tarifa `null` tomó la del artículo (0 % el arroz y el limón, 15 % el aceite): D-16.9 visto desde la
+bandeja. **Lo sintético se deshizo**: un sugerido de 54 para el arroz, confirmado (en la base, el vigente
+vuelve a ser `54.000000000000`, por `created_at` a igual `valid_from`), y el aceite rechazado; bandeja vacía.
+
+### Decisiones
+
+D-16.173…D-16.175 en `ESTADO.md`.

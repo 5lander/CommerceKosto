@@ -530,3 +530,39 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 9 — Precios: bandeja y decidir · 2026-09-14
+
+**Alcance del diff:** `apps/web` (bandeja de precios, su sección, la entrada de navegación y los textos),
+`ESTADO.md`, `CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Ni la variación ni si se puede decidir se calculan en la pantalla: el vigente y el 409 son de la API |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 536 archivos** (+2) |
+| C · Seguridad | ✅ | Sin `pricing.confirm`, sin botones (gerente verificado); sin `pricing.read`, «sin acceso» y sin enlace (bodega verificado); la frontera sigue siendo el 403 |
+| D · Base de datos | ✅ | Paginación por cursor (`despuesDe`), nunca `OFFSET` |
+| G · Pruebas | ✅ | Sin lógica nueva que probar en `lib/`; **41 del web** |
+| I · Duplicación | ✅ | `Found 0 clones` |
+| I9 · Bundle | ✅ | `/precios` **144,8 KiB** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 536 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 527 skipped (546)
+      Tests  894 passed (894)
+ℹ tests 41
+ℹ pass 41
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

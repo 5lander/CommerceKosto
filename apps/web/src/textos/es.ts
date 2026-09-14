@@ -79,6 +79,24 @@ export const TEXTOS = {
     operacion: 'Operación diaria',
   },
 
+  /** Pantalla 9: la bandeja de precios sugeridos (R5). */
+  precios: {
+    titulo: 'Precios por confirmar',
+    ayuda: 'Ningún precio cuenta para un costo hasta que alguien lo confirma. Cada sugerido, junto al que manda hoy.',
+    insumo: 'Insumo',
+    vigente: 'Vigente hoy',
+    sugerido: 'Sugerido',
+    decision: 'Decisión',
+    desde: 'desde',
+    iva: 'IVA',
+    sinVigente: 'Sin precio vigente',
+    confirmar: 'Confirmar',
+    rechazar: 'Rechazar',
+    verMas: 'Ver más',
+    vacio: 'No hay precios esperando confirmación.',
+    vacioAyuda: 'Cuando alguien sugiera un precio nuevo, aparecerá aquí para decidirlo.',
+  },
+
   /** Pantalla 8: las presentaciones de compra de un insumo. */
   articulo: {
     nuevo: 'Nueva presentación',
