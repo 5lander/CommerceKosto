@@ -106,7 +106,9 @@ export interface ProductoCosteadoDto {
   readonly venta: VentaDto | SinVentaDto;
   /** Ítems del plato sin precio confirmado a esa fecha. Vacío es lo normal. */
   readonly itemsSinCosto: readonly string[];
-  /** El color lo decide la API con los umbrales de la company (D-16.105). */
+  /** Sin ninguna línea activa (o, en un combo, sin componentes): los costos cero no son un costo (D-16.146). */
+  readonly sinReceta: boolean;
+  /** El color lo decide la API con los umbrales de la company (D-16.105). `SIN_DATO` sin venta o sin receta. */
   readonly semaforoFoodCost: Semaforo;
 }
 

@@ -89,6 +89,7 @@ interface ProductoCosteado {
       }
     | { readonly vendible: false; readonly motivo: string };
   readonly itemsSinCosto: readonly string[];
+  readonly sinReceta: boolean;
   readonly semaforoFoodCost: string;
   readonly pvpSimulado: string | null;
 }
@@ -559,6 +560,71 @@ describe('costeo', () => {
   });
 
   describe('lo que el motor NO se calla', () => {
+    it('un plato SIN receta en esta sucursal sale marcado, y su semáforo no es verde (duda #12)', async () => {
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+
+      const costeado = await costearUno(producto);
+
+      // El lote cuesta cero, que es aritméticamente cierto. Sin la marca, la
+      // pantalla enseñaba «0.00» y un food cost del 0 % en verde.
+      expect(costeado.costos.costoNetoLote.mostrar).toBe('0.00');
+      expect(costeado.sinReceta).toBe(true);
+      expect(costeado.semaforoFoodCost).toBe('SIN_DATO');
+    });
+
+    it('una receta con todas sus líneas excluidas tampoco es receta', async () => {
+      const item = await itemConPrecio({ rendimiento: '1', precio: '3.00', iva: '0.00' });
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+      await guardarReceta({ clase: 'producto', productId: producto }, centro, [
+        { itemId: item.itemId, cantidad: '1', base: 'EP', estado: 'INACTIVA' },
+      ]);
+
+      expect((await costearUno(producto)).sinReceta).toBe(true);
+    });
+
+    it('con una línea activa hay receta, y el semáforo vuelve a juzgar', async () => {
+      const item = await itemConPrecio({ rendimiento: '1', precio: '3.00', iva: '0.00' });
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+      await guardarReceta({ clase: 'producto', productId: producto }, centro, [
+        { itemId: item.itemId, cantidad: '1', base: 'EP', estado: 'ACTIVA' },
+      ]);
+
+      const costeado = await costearUno(producto);
+      expect(costeado.sinReceta).toBe(false);
+      expect(costeado.semaforoFoodCost).not.toBe('SIN_DATO');
+    });
+
+    it('el simulador de PVP no le pone color a un plato sin receta', async () => {
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+
+      const simulado = await request(servidor())
+        .get(`/costeo/${producto}`)
+        .query({ locationId: centro, fecha: MARZO, pvp: '9.00' })
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
+
+      expect(simulado.status).toBe(OK);
+      expect((simulado.body as ProductoCosteado).sinReceta).toBe(true);
+      expect((simulado.body as ProductoCosteado).semaforoFoodCost).toBe('SIN_DATO');
+    });
+
+    it('un combo sin componentes sale marcado igual', async () => {
+      const combo = await request(servidor())
+        .post('/productos')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ nombre: `Combo ${randomUUID().slice(0, 8)}`, tipo: 'COMBO', categoria: null });
+      expect(combo.status).toBe(CREADO);
+      const id = (combo.body as { id: string }).id;
+      await activar({ productId: id, locationId: centro, pvp: '9.00', porciones: '1' });
+
+      const costeado = await costearUno(id);
+      expect(costeado.sinReceta).toBe(true);
+      expect(costeado.semaforoFoodCost).toBe('SIN_DATO');
+    });
+
     it('un insumo sin precio confirmado sale listado, no escondido', async () => {
       const item = await request(servidor())
         .post('/catalogo/items')

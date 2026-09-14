@@ -63,6 +63,8 @@ interface ProductoCosteado {
   };
   readonly venta: VentaDto | SinVentaDto;
   readonly itemsSinCosto: readonly string[];
+  /** Sin receta en esta sucursal: sus ceros no son un costo (P16-D, D-16.146). */
+  readonly sinReceta: boolean;
 }
 
 interface CosteoDeCarta {
@@ -71,6 +73,9 @@ interface CosteoDeCarta {
 
 /** Venta neta, margen, food cost y multiplicador: las cuatro que no salen. */
 const COLUMNAS_DE_VENTA = 4;
+
+/** Los tres costos y las cuatro de venta: todo lo que un plato sin receta no tiene. */
+const COLUMNAS_NUMERICAS = 7;
 
 /**
  * El semáforo devuelve una CLASE, no un color, y ya no decide nada.
@@ -138,9 +143,7 @@ function TablaDeCosteo({ productos }: { readonly productos: readonly ProductoCos
   );
 }
 
-function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode {
-  const { venta, costos } = producto;
-  // Una fila por encima del máximo lleva la señal al costado.
+function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode {  // Una fila por encima del máximo lleva la señal al costado.
   const senal = producto.semaforoFoodCost === 'ROJO';
 
   return (
@@ -155,6 +158,25 @@ function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode 
         )}
       </td>
 
+      {producto.sinReceta ? (
+        // Sin receta, los ceros de la API son aritmética sobre nada: enseñarlos
+        // como «0.00» y un food cost del 0 % era el número plausible y falso
+        // que la duda #12 cerró. Se dice lo que falta, en la fila entera.
+        <td colSpan={COLUMNAS_NUMERICAS} className="tenue atencion">
+          {TEXTOS.costeo.sinReceta}
+        </td>
+      ) : (
+        <CeldasDeCosto producto={producto} />
+      )}
+    </tr>
+  );
+}
+
+function CeldasDeCosto({ producto }: { readonly producto: ProductoCosteado }): ReactNode {
+  const { venta, costos } = producto;
+
+  return (
+    <>
       <td className="numero">{costos.costoBrutoLote.mostrar}</td>
       <td className="numero">{costos.costoNetoLote.mostrar}</td>
       <td className="numero">{costos.costoTotalUnidad.mostrar}</td>
@@ -175,6 +197,6 @@ function Fila({ producto }: { readonly producto: ProductoCosteado }): ReactNode 
           {venta.motivo}
         </td>
       )}
-    </tr>
+    </>
   );
 }

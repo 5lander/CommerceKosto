@@ -42,6 +42,7 @@ function producto(): CosteoDelProducto {
     activo: true,
     costeo,
     itemsSinCosto: [],
+    sinReceta: false,
     semaforoFoodCost: 'VERDE',
     lineas: [
       {

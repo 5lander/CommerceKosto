@@ -105,6 +105,11 @@ graph TD
 
 **Ninguno de los dos duplica una regla.** `CostosDeItems` llama a la misma `costoDelItem` de SPEC §12 que usa la consulta de un solo ítem, y cuál precio está vigente lo sigue decidiendo el dominio (R5), no un `DISTINCT ON`. El día que hubiera dos implementaciones, el costo de un plato dependería de por dónde se preguntó.
 
+**Un cero sin receta no es un costo** *(P16-D)*. Un producto sin ninguna línea activa en la ubicación
+—o un combo sin componentes— suma cero, y la respuesta lo marca con `sinReceta` y semáforo `SIN_DATO`.
+La marca sale del dominio (`sinRecetaActiva`) y no entra en ninguna fórmula: los números del motor no
+cambian, cambia que se dice.
+
 **Costear uno pasa por costear todos.** Pedir un solo producto carga la carta entera y se queda con uno. Es deliberado: dos rutas distintas para el mismo número son dos oportunidades de que den respuestas distintas, y en este sistema eso no se ve en pantalla.
 
 

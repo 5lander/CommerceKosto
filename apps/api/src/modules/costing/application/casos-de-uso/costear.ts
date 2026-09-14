@@ -44,6 +44,7 @@ import { costearCombo } from '../../domain/combo';
 import {
   costearProducto,
   ladoDeVenta,
+  sinRecetaActiva,
   type CosteoDeProducto,
   type LineaParaCostear,
   type ResultadoDeVenta,
@@ -73,8 +74,15 @@ export interface CosteoDelProducto {
    */
   readonly itemsSinCosto: readonly ItemId[];
   /**
+   * **Sin receta en esta ubicación** (D-16.146): ninguna línea activa en un
+   * producto simple, ningún componente en un combo. Sus costos salen en cero
+   * porque no hay nada que sumar, y la pantalla no los enseña como costo.
+   */
+  readonly sinReceta: boolean;
+  /**
    * El color del food cost con los umbrales de la company (D-16.105). Lo decide
-   * la API: la pantalla lo pinta y no compara nada. `SIN_DATO` si no hay venta.
+   * la API: la pantalla lo pinta y no compara nada. `SIN_DATO` si no hay venta
+   * **o no hay receta**: un food cost sobre un costo que falta no está en verde.
    */
   readonly semaforoFoodCost: Semaforo;
   /**
@@ -195,12 +203,17 @@ function simular(producto: CosteoDelProducto, pvp: Money, parametros: Parametros
   return {
     ...producto,
     costeo: { ...producto.costeo, venta },
-    semaforoFoodCost: semaforoDe(venta, parametros),
+    semaforoFoodCost: semaforoDe(venta, parametros, producto.sinReceta),
   };
 }
 
-/** `SIN_DATO` cuando no hay venta: un plato sin PVP no está en verde, está sin medir. */
-function semaforoDe(venta: ResultadoDeVenta, parametros: ParametrosDeVenta): Semaforo {
+/**
+ * `SIN_DATO` cuando no hay venta —un plato sin PVP no está en verde, está sin
+ * medir— y cuando no hay receta: el food cost de un costo que falta es 0 %, y
+ * pintarlo de verde sería la mejor noticia posible sobre un dato que no existe.
+ */
+function semaforoDe(venta: ResultadoDeVenta, parametros: ParametrosDeVenta, sinReceta: boolean): Semaforo {
+  if (sinReceta) return 'SIN_DATO';
   return semaforoPorBandas({
     valor: venta.clase === 'vendible' ? venta.foodCostPct : null,
     verde: parametros.umbralVerde,
@@ -282,6 +295,7 @@ function costearSimple(producto: ProductoLeido, contexto: ContextoDeCosteo): Cos
   const enUbicacion = contexto.carta.enUbicacion.get(producto.id);
   const receta = contexto.carta.recetasDeProducto.get(producto.id);
   const lineas = (receta?.lineas ?? []).map((linea) => lineaParaCostear(linea, contexto));
+  const sinReceta = sinRecetaActiva(lineas);
 
   const costeo = costearProducto({
     lineas,
@@ -296,7 +310,8 @@ function costearSimple(producto: ProductoLeido, contexto: ContextoDeCosteo): Cos
     ...identidad(producto, enUbicacion),
     costeo,
     itemsSinCosto: sinCostoDe(receta, contexto),
-    semaforoFoodCost: semaforoDe(costeo.venta, contexto.parametros),
+    sinReceta,
+    semaforoFoodCost: semaforoDe(costeo.venta, contexto.parametros, sinReceta),
     lineas: desglose(receta, costeo, contexto),
   };
 }
@@ -344,6 +359,9 @@ function costearUnCombo(
     pvp: pvpDe(enUbicacion),
     ivaVenta: contexto.ivaVenta,
   });
+  // La «receta» de un combo son sus componentes: sin ninguno, cuesta cero por
+  // la misma razón que un plato sin líneas.
+  const sinReceta = componentes.length === 0;
 
   return {
     ...identidad(producto, enUbicacion),
@@ -363,7 +381,8 @@ function costearUnCombo(
       venta: combo.venta,
     },
     itemsSinCosto: [],
-    semaforoFoodCost: semaforoDe(combo.venta, contexto.parametros),
+    sinReceta,
+    semaforoFoodCost: semaforoDe(combo.venta, contexto.parametros, sinReceta),
     lineas: [],
   };
 }

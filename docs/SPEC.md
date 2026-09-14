@@ -335,6 +335,13 @@ venta_neta_mes = venta_neta × unidades_mes
 mc_mes         = margen_contribucion × unidades_mes
 ```
 
+**Sin receta no hay costo, aunque la suma dé cero** *(P16-D, decisión del usuario)*. Si el producto no
+tiene ninguna línea `ACTIVA` en la ubicación —no hay receta, está vacía o todas sus líneas están
+excluidas— o, en un combo, ningún componente, las fórmulas de arriba dan cero y **eso no es un costo**.
+El resultado lleva la marca `sin_receta` y el semáforo del food cost es «sin dato». Ninguna fórmula
+cambia: cambia que se dice. Qué hacen con esos platos la ingeniería de menú, el food cost real y el
+consolidado está abierto (duda #13 de `ESTADO.md`).
+
 ## 15. Menu engineering (V_MENU_ENGINEERING · Kasavana-Smith)
 
 ```

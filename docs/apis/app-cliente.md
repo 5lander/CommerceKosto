@@ -654,13 +654,20 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
         "sumaControl": "1", "multiplicador": "2.776792187906"
       },
       "itemsSinCosto": [],
+      "sinReceta": false,
       "semaforoFoodCost": "AMBAR"
     }
   ]
 }
 ```
 
-**`semaforoFoodCost` lo decide la API** *(P16-B, D-16.105)*: `VERDE` hasta el `foodCostUmbralVerde` de la company, `AMBAR` hasta el `foodCostMaximo`, `ROJO` por encima. **Los bordes son del lado bueno**: exactamente en el umbral es verde, exactamente en el máximo es ámbar. `SIN_DATO` cuando el producto no es vendible —sin PVP no está en verde, está sin medir—. La pantalla lo pinta y no compara nada (la copia en el navegador fue INC-020).
+**`sinReceta` dice si hay algo que costear** *(P16-D)*. `true` cuando el producto no tiene ninguna línea
+`ACTIVA` en esa ubicación —no hay receta, está vacía o todas sus líneas están excluidas— o, en un
+`COMBO`, ningún componente. Sus costos salen en `"0.00"` porque no hay nada que sumar, y **no son un
+costo**: una pantalla no los enseña como tal. `semaforoFoodCost` es entonces `SIN_DATO`, también con
+`?pvp=`.
+
+**`semaforoFoodCost` lo decide la API** *(P16-B, D-16.105)*: `VERDE` hasta el `foodCostUmbralVerde` de la company, `AMBAR` hasta el `foodCostMaximo`, `ROJO` por encima. **Los bordes son del lado bueno**: exactamente en el umbral es verde, exactamente en el máximo es ámbar. `SIN_DATO` cuando el producto no es vendible —sin PVP no está en verde, está sin medir— **o no tiene receta** (`sinReceta`, P16-D). La pantalla lo pinta y no compara nada (la copia en el navegador fue INC-020).
 
 **`costos.lineas` es el desglose de SPEC §13**, una entrada por línea de la receta y en su orden: el ítem, cuánto lleva, su costo y cuánto pesa en el costo neto del lote. **Sale solo si la sesión tiene `recipe.read`; si no, `null`** (D-16.106): hoy los cuatro roles con `costing.read` también leen recetas, y la regla es para el rol que algún día no lo haga — las cantidades son la receta misma (§4.3).
 

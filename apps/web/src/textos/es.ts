@@ -102,6 +102,9 @@ export const TEXTOS = {
     // Estaba escrito dentro de la pantalla hasta P14, contra D11. Un texto
     // visible que no vive aquí es un texto que nadie revisa.
     sinPrecio: 'Sin precio:',
+    // P16-D: un plato sin receta en esta sucursal no cuesta cero, le falta la
+    // receta. Dos frases: qué pasa y qué hacer.
+    sinReceta: 'Sin receta en esta sucursal: el costo no se puede calcular. Escribe su receta para verlo.',
   },
 
   menu: {

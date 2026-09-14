@@ -4,6 +4,23 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-D — El costeo dice «sin receta» en vez de cero · 2026-09-14
+
+> Paquete de API corto, abierto por decisión del usuario (duda #12, opción (a)). Sin migraciones ni
+> dependencias. Cinco guardianes.
+
+**Un plato sin receta en la sucursal ya no cuesta «0.00».** `GET /costeo` y `GET /costeo/:id` devuelven
+`sinReceta: true` cuando el producto no tiene ninguna línea activa en esa ubicación —no hay receta,
+está vacía o toda excluida— o, en un combo, ningún componente; y el semáforo del food cost es
+`SIN_DATO`, también con un PVP simulado. Hasta ahora la dueña miraba la bodega y leía «0.00 · 0.00 ·
+0.00» con un food cost del 0 % en verde. La pantalla de costeo lo pinta como estado en la fila entera.
+**Ningún número del motor cambia**: la marca sale del dominio y no entra en ninguna fórmula.
+
+**Pendiente:** duda #13 —qué hacen la ingeniería de menú, el food cost real y el consolidado con un
+plato vendido sin receta—.
+
+---
+
 ## P16 · Armazón (pantalla 1) — La aplicación gana su esqueleto, y entrar vuelve a funcionar · 2026-09-13
 
 > Primer commit de pantallas de la pasada. Sin cambios en `apps/api`. **ADR-020** y **ADR-022**, una

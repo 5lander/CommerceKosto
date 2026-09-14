@@ -64,6 +64,7 @@ export function comoProducto(producto: CosteoDelProducto, conLineas: boolean): P
     costos: comoCostos(producto.costeo.costos, conLineas ? producto.lineas.map(comoLinea) : null),
     venta: comoVenta(producto.costeo.venta),
     itemsSinCosto: [...producto.itemsSinCosto],
+    sinReceta: producto.sinReceta,
     semaforoFoodCost: producto.semaforoFoodCost,
   };
 }
