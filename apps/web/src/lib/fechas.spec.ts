@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { consultaDelMes, mesAnterior, mesDeHoy, mesDeTexto } from './fechas.ts';
+import { comoFecha, consultaDelMes, mesAnterior, mesDeHoy, mesDeTexto } from './fechas.ts';
 
 describe('mesDeTexto', () => {
   it('lee un año y un mes con forma de año y mes', () => {
@@ -41,6 +41,19 @@ describe('mesDeHoy', () => {
   it('es un mes válido', () => {
     const { anio, mes } = mesDeHoy();
     assert.ok(mesDeTexto(String(anio), String(mes)) !== null);
+  });
+});
+
+describe('comoFecha', () => {
+  it('lee el instante en la zona del negocio, no en UTC', () => {
+    // 02:00 UTC del día 15 son las 21:00 del 14 en Guayaquil.
+    const enGuayaquil = comoFecha('2026-01-15T02:00:00.000Z');
+    assert.ok(enGuayaquil.startsWith('14'), enGuayaquil);
+    assert.ok(enGuayaquil.endsWith('2026'), enGuayaquil);
+  });
+
+  it('el mediodía UTC con el que se fechan las vigencias cae en su día', () => {
+    assert.ok(comoFecha('2026-09-13T12:00:00.000Z').startsWith('13'));
   });
 });
 

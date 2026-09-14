@@ -197,7 +197,9 @@ function FilaDeInsumo({
   return (
     <tr>
       <td>
-        {item.nombre}
+        <Link href={`/insumos/${item.id}`} className="enlace-de-fila">
+          {item.nombre}
+        </Link>
         <span className="bloque tenue">
           {TEXTOS.insumos.tipos[item.tipo]} · {item.unidadDeUso}
           {item.estado === 'INACTIVE' && ` · ${TEXTOS.insumos.archivado}`}

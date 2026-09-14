@@ -4,6 +4,21 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Pantalla 6 — La ficha del insumo: lo que cuesta, su historia, editarlo y archivarlo · 2026-09-14
+
+> Séptimo commit de pantallas. Sin cambios en `apps/api`.
+
+**`/insumos/[id]`.** Los datos del insumo, **lo que cuesta** por unidad de uso (neto, bruto, sobrecosto de
+merma y desde cuándo) o que todavía no tiene precio confirmado, sus presentaciones de compra y la historia
+de su precio con el vigente marcado por la API. Archivar y reactivar con confirmación en línea. `BODEGA`
+la ve sin precios ni botones.
+
+**`/insumos/[id]/editar`.** Nombre, rendimiento, grupo, origen del precio y lote; tipo y unidad a la
+vista como no editables. **Si otra persona guardó mientras tanto**, la API responde 409 y «Ver la
+versión actual» trae lo suyo en vez de pisarlo — verificado con un cambio ajeno a mitad de edición.
+
+---
+
 ## P16 · Pantalla 5 — Dar de alta un insumo desde la aplicación · 2026-09-14
 
 > Sexto commit de pantallas. Sin cambios en `apps/api`.

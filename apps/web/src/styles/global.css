@@ -240,6 +240,51 @@ p {
 }
 
 /*
+ * Los datos de una ficha: etiqueta encima y valor debajo, en columnas que bajan
+ * de fila cuando no caben.
+ */
+.datos {
+  display: grid;
+  gap: var(--f2);
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  margin: 0;
+}
+
+.datos dd {
+  margin: 0;
+}
+
+/* El nombre de una fila que lleva a su ficha: se lee como texto, se ve que se pulsa. */
+.enlace-de-fila {
+  color: var(--color-texto);
+  text-decoration: underline;
+  text-decoration-color: var(--color-borde-fuerte);
+  text-underline-offset: 0.2em;
+}
+
+/* Un estado corto en una tabla. El color sale del tono, como el semáforo. */
+.pildora {
+  display: inline-block;
+  padding: 0 var(--f-menos1);
+  border: 1px solid currentColor;
+  border-radius: var(--radio);
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}
+
+.pildora[data-tono='bien'] {
+  color: var(--color-bien);
+}
+
+.pildora[data-tono='atencion'] {
+  color: var(--color-atencion);
+}
+
+.pildora[data-tono='mal'] {
+  color: var(--color-mal);
+}
+
+/*
  * Un formulario de alta o edición: una columna de ancho de lectura, también en
  * escritorio. Un campo de nombre de 70 caracteres de ancho no ayuda a nadie.
  */

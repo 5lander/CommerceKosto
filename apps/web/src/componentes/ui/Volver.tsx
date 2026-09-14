@@ -10,7 +10,7 @@ import { TEXTOS } from '../../textos/es';
  * **UN ENLACE A UNA RUTA, NO `history.back()`**: quien abrió la ficha desde un
  * enlace guardado no tiene «atrás», y volver tiene que llevar al listado igual.
  */
-export function Volver({ href }: { readonly href: Route }): ReactNode {
+export function Volver<T extends string>({ href }: { readonly href: Route<T> }): ReactNode {
   return (
     <Link href={href} className="enlace">
       ← {TEXTOS.comun.volver}

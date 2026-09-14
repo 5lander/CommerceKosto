@@ -62,3 +62,19 @@ export function mesAnterior({ anio, mes }: Mes): Mes {
 export function consultaDelMes({ anio, mes }: Mes): string {
   return `anio=${String(anio)}&mes=${String(mes)}`;
 }
+
+const FORMATO_DE_FECHA = new Intl.DateTimeFormat('es-EC', {
+  timeZone: ZONA_DEL_NEGOCIO,
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+});
+
+/**
+ * Un instante de la API como fecha que se lee —«15 ene 2026»— **en la zona del
+ * negocio**. Enseñarlo en UTC pondría la vigencia de las 19:00 del día 14 en el
+ * 15, que es INC-013 visto desde la pantalla.
+ */
+export function comoFecha(instante: string): string {
+  return FORMATO_DE_FECHA.format(new Date(instante));
+}

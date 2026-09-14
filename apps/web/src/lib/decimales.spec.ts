@@ -18,6 +18,7 @@ import {
   comoPorcentaje,
   enPuntos,
   fraccionDePorcentaje,
+  porcentajeDeFraccion,
   redondear,
   sinCerosDeSobra,
 } from './decimales.ts';
@@ -115,6 +116,15 @@ describe('fraccionDePorcentaje — lo que escribe una persona a lo que espera la
 
   it('no valida el rango: eso lo dice la API', () => {
     assert.equal(fraccionDePorcentaje('150'), '1.50');
+  });
+});
+
+describe('porcentajeDeFraccion — lo que precarga un campo de porcentaje', () => {
+  it('es el inverso de fraccionDePorcentaje, sin redondear', () => {
+    assert.equal(porcentajeDeFraccion('0.850000000000'), '85');
+    assert.equal(porcentajeDeFraccion('0.925000000000'), '92,5');
+    assert.equal(porcentajeDeFraccion('1.000000000000'), '100');
+    assert.equal(fraccionDePorcentaje(porcentajeDeFraccion('0.9025')), '0.9025');
   });
 });
 

@@ -427,3 +427,38 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Pantalla 6 — Insumo: ficha, editar y archivar · 2026-09-14
+
+**Alcance del diff:** `apps/web` (ficha, edición, `componentes/insumos/`, `Confirmar`, `Pildora`, `Volver`,
+`porcentajeDeFraccion`, `comoFecha` y sus pruebas, enlaces, textos, CSS), `ESTADO.md`, `CHANGELOG` y
+`docs/pasos/P16/`. **Ni una línea de `apps/api`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | Qué precio es vigente y cuánto cuesta lo dice la API; archivar es su `PUT` |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 526 archivos** (+6) |
+| C · Seguridad | ✅ | `BODEGA` no pide precios y no ve botones (verificado); la concurrencia con versión (409 verificado) |
+| F · Frontend | ✅ | Confirmación en línea; conflicto accionable; sin desbordes |
+| G · Pruebas | ✅ | **40 del web** (+3), dos guardianes nuevos |
+| I9 · Bundle | ✅ | piso **126,9 KiB**; la mayor `/insumos/[id]` **145,1** |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 526 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  894 passed (894)
+ℹ tests 40
+ℹ pass 40
+ℹ fail 0
+      Tests  541 passed | 5 skipped (546)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

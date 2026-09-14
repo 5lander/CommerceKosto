@@ -26,6 +26,15 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { Permitido } from '../../../../componentes/armazon/Permitido';
+import {
+  CONFIANZAS,
+  PORCENTAJE,
+  SI,
+  SI_NO,
+  SIN_GRUPO,
+  TIPOS,
+  opcionesDeGrupos,
+} from '../../../../componentes/insumos/opciones';
 import { Marco } from '../../../../componentes/Marco';
 import { CampoDeTexto } from '../../../../componentes/ui/Campo';
 import { Formulario } from '../../../../componentes/ui/Formulario';
@@ -38,12 +47,6 @@ import { useEnvio } from '../../../../lib/useEnvio';
 import { useCarga, type Lectura } from '../../../../lib/useLectura';
 import { TEXTOS } from '../../../../textos/es';
 
-/** Un porcentaje con hasta dos decimales, con coma o punto. */
-const PORCENTAJE = /^\d{0,3}(?:[.,]\d{0,2})?$/u;
-
-const SIN_GRUPO = '';
-const SI = 'si';
-const NO = 'no';
 
 interface Unidad {
   readonly codigo: string;
@@ -79,7 +82,7 @@ function useOpciones(): Lectura<Opciones> {
       ]);
       return {
         unidades: unidades.map((u) => ({ valor: u.codigo, texto: `${u.codigo} — ${u.nombre}` })),
-        grupos: [{ valor: SIN_GRUPO, texto: TEXTOS.insumo.sinGrupo }, ...grupos.map((g) => ({ valor: g.id, texto: g.nombre }))],
+        grupos: opcionesDeGrupos(grupos),
       };
     },
     [],
@@ -134,10 +137,13 @@ function useAlta(opciones: Opciones) {
   }
 
   async function guardar(): Promise<void> {
+    // Un objeto y no un `let`: lo escribe la acción, y TypeScript no sigue una
+    // asignación hecha dentro de otra función.
+    const creado: { id: string | null } = { id: null };
     const salio = await envio.enviar(async () => {
-      await llamar({ ruta: '/catalogo/items', metodo: 'POST', cuerpo: cuerpoDe(borrador) });
+      creado.id = (await llamar<{ readonly id: string }>({ ruta: '/catalogo/items', metodo: 'POST', cuerpo: cuerpoDe(borrador) })).id;
     });
-    if (salio) router.push('/insumos');
+    if (salio && creado.id !== null) router.push(`/insumos/${creado.id}`);
   }
 
   return { borrador, cambiar, envio, guardar };
@@ -176,21 +182,6 @@ function FormularioDeAlta({ opciones }: { readonly opciones: Opciones }): ReactN
     </Formulario>
   );
 }
-
-const TIPOS: readonly Opcion[] = [
-  { valor: 'COMPRADO', texto: TEXTOS.insumos.tipos.COMPRADO },
-  { valor: 'PRODUCIDO', texto: TEXTOS.insumos.tipos.PRODUCIDO },
-];
-
-const SI_NO: readonly Opcion[] = [
-  { valor: SI, texto: TEXTOS.insumo.llevaStockSi },
-  { valor: NO, texto: TEXTOS.insumo.llevaStockNo },
-];
-
-const CONFIANZAS: readonly Opcion[] = [
-  { valor: 'FACTURA', texto: TEXTOS.insumo.confianzas.FACTURA },
-  { valor: 'ESTIMADO', texto: TEXTOS.insumo.confianzas.ESTIMADO },
-];
 
 function CampoDeRendimiento({
   valor,

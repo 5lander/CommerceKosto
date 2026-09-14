@@ -251,3 +251,12 @@ export function fraccionDePorcentaje(porcentaje: string): string {
   const nuevaEntera = digitos.slice(0, corte).replace(CEROS_A_LA_IZQUIERDA, '');
   return `${nuevaEntera}.${digitos.slice(corte)}`;
 }
+
+/**
+ * `0.850000000000` a `85`, `0.925000000000` a `92,5`: la fracción de la API a lo que
+ * se escribe en un campo de porcentaje. El inverso de `fraccionDePorcentaje`, sin
+ * redondear: el campo precarga lo que hay, no una aproximación.
+ */
+export function porcentajeDeFraccion(fraccion: string): string {
+  return sinCerosDeSobra(conSigno(fraccion, (absoluto) => moverComa(absoluto, POSICIONES_DEL_PORCENTAJE))).replace('.', ',');
+}

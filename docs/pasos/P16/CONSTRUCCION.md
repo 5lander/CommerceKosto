@@ -630,3 +630,49 @@ es-EC» en rojo; restaurado → verde.
 ### Decisiones
 
 D-16.161…D-16.163 en `ESTADO.md`.
+
+---
+
+## Pantalla 6 — Insumo: ficha, editar y archivar · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/[id]/page.tsx` | La ficha: rendimiento, grupo y su IVA, origen del precio, «¿se produce en lote?» si aplica; **lo que cuesta** (`GET /precios/costo/:itemId`: neto, bruto, sobrecosto de merma y vigencia, o «todavía no tiene precio confirmado» cuando la API responde `RECURSO_NO_ENCONTRADO`); **presentaciones de compra** (contenido e IVA); **historia del precio** con la píldora «Vigente» que decide la API. «Editar» con `catalog.update`. **Archivar / reactivar** con confirmación en línea y la versión leída |
+| `app/(app)/insumos/[id]/editar/page.tsx` | Nombre, rendimiento (precargado con `porcentajeDeFraccion`), grupo, origen del precio y lote si es preparación; **tipo y unidad a la vista como no editables**. 409 `CONFLICTO_DE_VERSION` → «Ver la versión actual», que vuelve a leer y **monta el formulario de nuevo** (la clave es la versión) |
+| `componentes/insumos/ficha.ts` · `opciones.ts` | La lectura de la ficha (precios solo con `pricing.read`), `guardarItem` y `cambioDe` para el `PUT` de estado completo; las opciones compartidas por alta y edición (sin copiarlas: `jscpd`) |
+| `componentes/ui/Confirmar.tsx` · `Pildora.tsx` | Primitivas con su primer consumidor |
+| `componentes/ui/Volver.tsx` | Genérico sobre `Route<T>`: con `typedRoutes`, un `Route` sin parámetro solo acepta rutas estáticas |
+| `lib/decimales.ts` · `lib/fechas.ts` | `porcentajeDeFraccion` (inverso de `fraccionDePorcentaje`, sin redondear) y **`comoFecha`** en la zona del negocio |
+| `app/(app)/insumos/page.tsx` · `nuevo/page.tsx` | El nombre de cada fila lleva a su ficha; tras crear, a la ficha nueva (D-16.163 se cumple) |
+
+### Cómo se verificó — en el navegador
+
+```
+ficha         Aceite de girasol | Comprado · lt | ← Volver | Editar | RENDIMIENTO 100,0 % | GRUPO Abarrotes |
+              IVA DE COMPRA DEL GRUPO — | ORIGEN DEL PRECIO Estimado, sin factura | Lo que cuesta | COSTO NETO
+              POR UNIDAD DE USO 2.43 / lt | … | VIGENTE DESDE 13 sept 2026 | Presentaciones de compra | Aceite
+              bidon 10 lt | La Favorita | 10 lt | 15,0 % | Historia del precio | 13 sept 2026 | 28.00 | Vigente | Archivar
+precargado    "100"
+trasEditar    RENDIMIENTO 95,0 %
+cambioAjeno   200            ← otro PUT con la versión vigente mientras el formulario estaba abierto
+conflicto     «Alguien más cambió este ítem mientras lo editabas. Recarga para ver lo que hay ahora…»
+trasRecargar  "90"           ← «Ver la versión actual» trae lo del otro, no lo escrito
+pregunta      «Al archivarlo deja de aparecer en el listado de insumos. Sus recetas, precios y movimientos no se tocan…»
+trasArchivar  Aceite de girasol | Comprado · lt · Archivado
+enElListado   false          ← y reactivado después
+bodega        la ficha sin «Lo que cuesta» ni «Historia del precio»; botones: []
+```
+
+El insumo quedó como estaba (`1.000000000000`, `ACTIVE`). La etiqueta «Rendimiento (%)» de la primera pasada
+en la ficha era la del formulario; se cambió por la del listado.
+
+### Guardianes
+
+- `comoFecha` con `timeZone: 'UTC'` → «lee el instante en la zona del negocio, no en UTC» en rojo.
+- `porcentajeDeFraccion` sin `sinCerosDeSobra` → «es el inverso de fraccionDePorcentaje» en rojo.
+
+### Decisiones
+
+D-16.164…D-16.167 en `ESTADO.md`.
