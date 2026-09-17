@@ -171,12 +171,15 @@ describe('autenticacion y autorizacion', () => {
 
     // SE LIMPIA `login_attempt` A PROPOSITO, y no es maquillaje.
     //
-    // La politica anti fuerza bruta cuenta tambien POR IP, y todas las pruebas
-    // salen de 127.0.0.1. Los fallos deliberados de una corrida —el login con
-    // contrasena incorrecta, el activar con token usado— se acumulan y a la
-    // enesima corrida bloquean la IP entera, con lo que la suite empieza a
-    // fallar por una razon que no tiene que ver con lo que mide. Cada corrida
-    // parte de cero, como parte de cero su tenant.
+    // Los fallos deliberados de una corrida —el login con contrasena
+    // incorrecta, el activar con token usado— se acumulan por cuenta y por IP.
+    // Cada corrida parte de cero, como parte de cero su tenant.
+    //
+    // HASTA P16-F ESTE COMENTARIO DECIA ALGO PEOR, y tenia razon: «a la enesima
+    // corrida bloquean la IP entera». Era INC-027 visto desde las pruebas — el
+    // eje de IP contaba fallos y escalaba— y ya no pasa: ese eje cuenta cuentas
+    // distintas y solo limita (D-16.196, ADR-028). El borrado se queda por el
+    // eje de CUENTA, que sigue acumulando entre corridas.
     await duena.query('DELETE FROM login_attempt');
     // Y `rate_limit_hit` por lo mismo: `POST /usuarios` cuenta por IP (D-16.50).
     await duena.query('DELETE FROM rate_limit_hit');

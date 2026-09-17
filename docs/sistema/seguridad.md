@@ -331,3 +331,22 @@ Lista local y no HIBP: la comprobación por k-anonimato mete una llamada de red 
 **Dos escalas, dos mecanismos.** La vertical la corta `PermisosGuard`; la horizontal —ver una ubicación que no es la tuya— la corta el caso de uso con `sesion.alcance`, que es una **unión** (`company` o lista de ubicaciones) y no una lista con un caso especial. Un `[]` que significara «todas» es la clase de convención que alguien lee al revés una vez y convierte en fuga.
 
 **Dos reglas que la base no puede expresar**, y por eso viven en `politica-de-roles.ts`: nadie modifica sus propios roles, y nadie toca los del `OWNER`. La base impide **dos** owners; no impide quitarle el suyo al que hay.
+
+---
+
+## El login tiene dos ejes y hacen cosas distintas (P16-F)
+
+| Eje | Cuenta | Umbral | Al exceder |
+|---|---|---|---|
+| **Cuenta** | fallos de ese correo desde el último acceso correcto | 5 / 15 min | **Bloqueo** escalonado 1 → 5 → 15 → 60 min, y aviso al titular en la transición |
+| **IP** | **cuentas distintas** tanteadas desde esa dirección | 10 / 60 min | **429 `LIMITE_DE_SOLICITUDES`** con `Retry-After`; **15 min fijos** desde el último fallo, sin escalada |
+
+**El eje de IP no bloquea a nadie**, y es deliberado (D-16.196, ADR-028, INC-027): detrás de una IP
+hay una cocina entera —o, con CGNAT, medio barrio—, así que dejar la dirección fuera por los fallos
+de una sola cuenta convierte la defensa en una denegación de servicio que cualquiera dispara desde el
+wifi del local. Lo que ese eje corta es el **rociado de contraseñas**, y un rociado son muchos
+correos, no muchos intentos: por eso cuenta cuentas.
+
+La IP es la del cliente y no la del proxy (`ipDelCliente` + `PROXY_DE_CONFIANZA`, INC-022), y los dos
+ejes se evalúan **antes** de verificar la contraseña: ni un bloqueo ni un límite deben conseguir que
+el servidor gaste 64 MiB de Argon2id.

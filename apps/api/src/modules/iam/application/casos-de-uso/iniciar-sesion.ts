@@ -40,6 +40,7 @@ import type { CompanyId, UserId } from '../../../../shared/domain/identity/ident
 import {
   AccesoBloqueadoError,
   CredencialesInvalidasError,
+  RociadoDeContrasenasError,
   type MotivoDelRechazo,
 } from '../../domain/errores';
 import {
@@ -47,6 +48,8 @@ import {
   bloqueoEfectivo,
   cruzaUmbralDeBloqueo,
   evaluarIntentos,
+  evaluarRociadoPorIp,
+  type FalloPorIp,
 } from '../../domain/politica-de-intentos';
 import { caducidadDesde } from '../../domain/politica-de-sesion';
 import type { GeneradorDeTokens } from '../ports/generador-de-tokens.port';
@@ -149,12 +152,15 @@ export class IniciarSesion {
       desde,
     });
 
+    // Los dos ejes son distintos a proposito (D-16.196): la CUENTA se bloquea
+    // con escalada; la IP solo se limita, y nunca por lo que haga una sola
+    // cuenta. Se mira primero el bloqueo, que es el que protege la credencial.
     const bloqueado = bloqueoEfectivo([
-      evaluarIntentos({ fallos: fallos.porCuenta, ahora: intento.ahora, eje: 'cuenta' }),
-      evaluarIntentos({ fallos: fallos.porIp, ahora: intento.ahora, eje: 'ip' }),
+      evaluarIntentos({ fallos: fallos.porCuenta, ahora: intento.ahora }),
     ]);
 
     if (bloqueado === null) {
+      await this.exigirSinRociado(intento, fallos.porIp);
       return fallos.porCuenta.length;
     }
 
@@ -172,6 +178,36 @@ export class IniciarSesion {
     });
 
     throw new AccesoBloqueadoError(bloqueado);
+  }
+
+  /**
+   * El eje de IP: rociado de contrasenas, no bloqueo (D-16.196, ADR-028).
+   *
+   * Se comprueba DESPUES del bloqueo por cuenta y ANTES de tocar la contrasena:
+   * un barrido tampoco debe conseguir que el servidor gaste 64 MiB por intento.
+   *
+   * @throws {RociadoDeContrasenasError}
+   */
+  private async exigirSinRociado(intento: Intento, fallosPorIp: readonly FalloPorIp[]): Promise<void> {
+    const limite = evaluarRociadoPorIp({ fallos: fallosPorIp, ahora: intento.ahora });
+    if (limite.permitido || limite.hasta === null) {
+      return;
+    }
+
+    await this.deps.repositorio.registrarIntento({
+      email: intento.email,
+      ip: intento.ip,
+      outcome: 'blocked',
+    });
+    await this.registrar({
+      intento,
+      eventType: 'auth.login.ip_limited',
+      outcome: 'blocked',
+      credencial: null,
+      detail: { hasta: limite.hasta.toISOString(), cuentasDistintas: limite.cuentasDistintas },
+    });
+
+    throw new RociadoDeContrasenasError(limite.hasta, intento.ahora);
   }
 
   /**

@@ -40,7 +40,7 @@
 | `LIMITE_DEL_PLAN` | 409 | El permiso está bien; lo que no da es el plan |
 | `CONFLICTO` | 409 | La petición está bien formada; lo que choca es el estado que ya hay (un nombre repetido) |
 | `CONFLICTO_DE_VERSION` | 409 | Alguien guardó este mismo producto, ítem o receta **después de que tú lo leyeras**. Recarga y vuelve a decidir: reenviar lo tuyo pisaría lo suyo *(P16-B, ADR-023)* |
-| `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos. Escala: 1 → 5 → 15 → 60 min |
+| `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos **de esa cuenta**. Escala: 1 → 5 → 15 → 60 min |
 | `TOO_MANY_REQUESTS` | 429 | El limitador de peticiones. **No es lo mismo** que el anterior |
 | `LIMITE_DE_SOLICITUDES` | 429 | Demasiadas veces la **misma solicitud**: olvido, restablecimiento, invitar o reenviar, por IP o por destinatario. Trae `Retry-After` en segundos y el minuto en el mensaje *(P16-A1)* |
 | `INTERNAL_ERROR` | 5xx | Fallo inesperado. Cita `x-correlation-id` en el ticket |
@@ -73,7 +73,9 @@ Los tres 429 son mecanismos distintos y el `code` es cómo se distinguen: uno di
 
 **`csrf` sí, y no es lo mismo** *(P16-A2)*. Es el token anti-CSRF de la sesión recién abierta, y **tiene** que ser legible por la página: su trabajo es que la página lo ponga en la cabecera `X-CSRF-Token` de cada mutación, algo que un sitio cruzado no puede hacer. No es una credencial: sin la cookie no sirve para nada. Guárdalo en memoria; si se pierde, `GET /auth/sesion` lo devuelve.
 
-**401** con el mismo cuerpo exista o no la cuenta, y con el mismo coste en tiempo. **429** `ACCESO_BLOQUEADO` tras cinco fallos de la cuenta en quince minutos. Con el quinto fallo se **encola** un aviso al titular (`email_outbox`, plantilla `BLOQUEO`, sin enlace y sin datos); lo entrega el despachador, como los demás correos *(P16-A1; antes salía de la API por `MailerPort`, que en producción es `fake`)*.
+**401** con el mismo cuerpo exista o no la cuenta, y con el mismo coste en tiempo. **429** `ACCESO_BLOQUEADO` tras cinco fallos de la cuenta en quince minutos.
+
+**Y un segundo 429, con OTRO código: `LIMITE_DE_SOLICITUDES`** *(P16-F, ADR-028)*, cuando la **IP** ha tanteado **10 cuentas distintas** en la última hora — la firma del rociado de contraseñas. Dura **15 minutos fijos** (`Retry-After`), no escala y **no bloquea ninguna cuenta**: los fallos de una sola cuenta, por muchos que sean, nunca lo disparan. Un cliente tiene que distinguir los dos: «tu cuenta está bloqueada» y «esta conexión tiene que esperar» se arreglan de formas distintas. Con el quinto fallo se **encola** un aviso al titular (`email_outbox`, plantilla `BLOQUEO`, sin enlace y sin datos); lo entrega el despachador, como los demás correos *(P16-A1; antes salía de la API por `MailerPort`, que en producción es `fake`)*.
 
 ### `GET /auth/sesion` — sesión *(P16-A2)*
 

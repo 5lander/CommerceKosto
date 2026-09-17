@@ -32,7 +32,8 @@
 ### 2.1 Anti fuerza bruta (login, códigos, tokens)
 | Superficie | Límite | Acción al exceder |
 |---|---|---|
-| Login de la app cliente | 5 intentos / 15 min por cuenta **y** por IP | Bloqueo incremental: 1 min → 5 → 15 → 60; aviso por correo al titular |
+| Login de la app cliente | 5 intentos / 15 min **por cuenta** | Bloqueo incremental: 1 min → 5 → 15 → 60; aviso por correo al titular |
+| Login — eje de IP *(P16-F, ADR-028)* | **10 cuentas distintas / 60 min** desde la misma IP | **429 con `Retry-After`, 15 min fijos**. No bloquea y no escala |
 | Código de verificación (correo) | 5 intentos por código | El código se **invalida**; hay que pedir otro |
 | Solicitud de códigos | 3 por hora por usuario | Rechazo con espera |
 | Token de invitación de usuario y de restablecimiento de contraseña | Es de 256 bits — infuerzabrutable — pero: | 10 tokens inválidos desde una IP / hora → bloqueo de IP en esa ruta |
@@ -40,6 +41,8 @@
 | Back office | 3 intentos → bloqueo + alerta al equipo | 2FA obligatorio siempre |
 
 - Contador de intentos en **Redis con TTL**, por cuenta y por IP simultáneamente (evita que una botnet distribuya intentos)
+
+> **El eje de IP se apartó de esta tabla en P16-F (D-16.196, ADR-028, INC-027).** Contaba *fallos* —25 en una hora— y abría el mismo bloqueo escalonado que el eje de cuenta, así que **veinticinco fallos de una sola cuenta dejaban fuera a todo el que saliera por esa IP**: el resto del personal del local con sus credenciales buenas, o cientos de abonados ajenos si el operador usa CGNAT. Cualquiera podía dispararlo desde la acera sin acertar una contraseña. Ahora cuenta **cuentas distintas** —que es la firma del rociado, no el síntoma— y responde **429 con espera fija**, nunca un bloqueo escalonado. El eje de cuenta no cambia: es el que protege la credencial.
 - Respuesta de login fallido **idéntica** exista o no la cuenta, y con **tiempo constante** (comparación con `timingSafeEqual`, hash dummy cuando el usuario no existe) — corta la enumeración de usuarios y los timing attacks
 - CAPTCHA (o proof-of-work) a partir del tercer fallo en superficies públicas
 

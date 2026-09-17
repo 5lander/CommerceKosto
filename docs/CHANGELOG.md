@@ -4,6 +4,20 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-F · El eje de IP del login limita, no bloquea · 2026-09-17
+
+> API y documentación. Una migración: un tipo de evento de auditoría.
+
+**Veinticinco fallos de una sola cuenta dejaban fuera del login a toda su IP, hasta una hora.** En un
+restaurante eso es el personal entero con sus credenciales buenas mirando la pantalla; con CGNAT, gente
+que ni siquiera es cliente. Y cualquiera podía dispararlo desde la acera sin acertar una contraseña.
+
+Desde este commit el eje de IP **cuenta cuentas distintas** —que es la firma del rociado de
+contraseñas— y responde con un **429 de quince minutos fijos**, sin escalada y sin bloquear ninguna
+cuenta. El bloqueo por cuenta, que es el que protege la credencial, no cambia. ADR-028 · INC-027.
+
+---
+
 ## P16 · Verificación multi-tenant — dos companies en el entorno sintético · 2026-09-17
 
 > Sin pantallas nuevas. `apps/api` y documentación.

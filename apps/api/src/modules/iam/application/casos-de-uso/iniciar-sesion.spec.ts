@@ -24,7 +24,7 @@ import {
   userId,
   type SessionId,
 } from '../../../../shared/domain/identity/identificadores';
-import { AccesoBloqueadoError, CredencialesInvalidasError } from '../../domain/errores';
+import { AccesoBloqueadoError, CredencialesInvalidasError, RociadoDeContrasenasError } from '../../domain/errores';
 import type { GeneradorDeTokens, TokenDeSesion } from '../ports/generador-de-tokens.port';
 import type { HasherDeContrasenas } from '../ports/hasher-de-contrasenas.port';
 import type {
@@ -188,6 +188,16 @@ describe('IniciarSesion', () => {
     return Array.from({ length: cuantos }, () => new Date(AHORA.getTime() - 10 * SEGUNDO_MS));
   }
 
+  /** Fallos desde una IP contra `cuentas` correos distintos, `porCuenta` veces cada uno. */
+  function fallosDeIp(cuentas: number, porCuenta = 1): { at: Date; email: string }[] {
+    return Array.from({ length: cuentas }, (_, n) =>
+      Array.from({ length: porCuenta }, () => ({
+        at: new Date(AHORA.getTime() - 10 * SEGUNDO_MS),
+        email: `empleado${String(n)}@snacklab.ec`,
+      })),
+    ).flat();
+  }
+
   describe('camino correcto', () => {
     it('abre sesion y devuelve el token en claro una sola vez', async () => {
       const abierta = await entrar();
@@ -338,21 +348,61 @@ describe('IniciarSesion', () => {
       await expect(entrar()).rejects.toBeInstanceOf(AccesoBloqueadoError);
     });
 
-    it('el eje de IP aguanta mas: cinco fallos de la cocina NO bloquean el local', async () => {
+    it('el eje de IP aguanta mas: cinco empleados equivocados NO paran el local', async () => {
       // Detras de una IP hay un restaurante entero saliendo por el mismo NAT.
       // Con el umbral de cuenta, cinco errores de cinco empleados distintos
       // dejarian al local completo fuera durante una hora.
-      repositorio.fallos = { porCuenta: [], porIp: fallosRecientes(5) };
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(5) };
 
       await expect(entrar()).resolves.toBeDefined();
     });
 
-    it('veinticinco fallos por IP si bloquean: eso ya es rociado de contrasenas', async () => {
-      // Una IP probando la misma contrasena contra cien correos distintos:
-      // ninguna cuenta llega a cinco fallos, y sin el eje de IP pasaria entera.
-      repositorio.fallos = { porCuenta: [], porIp: fallosRecientes(25) };
+    /**
+     * 🔴 D-16.196, INC-027. El eje de IP contaba FALLOS: veinticinco de la misma
+     * cuenta —un cocinero con la contrasena vieja, o un atacante apuntandole a
+     * el— dejaban fuera a todos los demas, con credenciales buenas, hasta una
+     * hora. Su cuenta ya estaba bloqueada al quinto fallo; la IP solo anadia
+     * victimas. Y con CGNAT esas victimas pueden no ser ni del mismo negocio.
+     */
+    it('🔴 mil fallos de UNA sola cuenta no tocan a las demas de esa IP', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(1, 1000) };
 
-      await expect(entrar()).rejects.toBeInstanceOf(AccesoBloqueadoError);
+      await expect(entrar()).resolves.toBeDefined();
+    });
+
+    it('🔴 diez cuentas distintas desde la misma IP si limitan: eso ya es rociado', async () => {
+      // Ninguna cuenta llega a cinco fallos; sin este eje el barrido pasaria entero.
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(10) };
+
+      await expect(entrar()).rejects.toBeInstanceOf(RociadoDeContrasenasError);
+    });
+
+    it('🔴 el limite de IP NO escala: el doble de cuentas espera lo mismo', async () => {
+      const espera = async (cuentas: number): Promise<number> => {
+        repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(cuentas) };
+        try {
+          await entrar();
+          return 0;
+        } catch (error) {
+          return error instanceof RociadoDeContrasenasError ? error.reintentarEnSegundos : -1;
+        }
+      };
+
+      expect(await espera(10)).toBe(await espera(40));
+    });
+
+    it('y limitar por IP no es bloquear una cuenta: 429 con espera, no ACCESO_BLOQUEADO', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(10) };
+
+      await expect(entrar()).rejects.not.toBeInstanceOf(AccesoBloqueadoError);
+    });
+
+    it('limitado por IP tampoco gasta un hash', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(10) };
+
+      await expect(entrar()).rejects.toThrow();
+
+      expect(verificados).toEqual([]);
     });
 
     it('bloqueado NO gasta un hash: seria una denegacion de servicio barata', async () => {

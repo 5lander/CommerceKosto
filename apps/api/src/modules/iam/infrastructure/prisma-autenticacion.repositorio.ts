@@ -247,10 +247,13 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
           ? []
           : await tx.loginAttempt.findMany({
               where: { ip, outcome: RESULTADO_FALLIDO, at: { gte: desde } },
-              select: { at: true },
+              select: { at: true, email: true },
             });
 
-      return { porCuenta: porCuenta.map((f) => f.at), porIp: porIp.map((f) => f.at) };
+      return {
+        porCuenta: porCuenta.map((f) => f.at),
+        porIp: porIp.map((f) => ({ at: f.at, email: f.email })),
+      };
     });
   }
 

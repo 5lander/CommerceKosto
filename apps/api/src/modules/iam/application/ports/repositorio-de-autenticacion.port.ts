@@ -17,6 +17,7 @@ import type {
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { VigenciaDeSesion } from '../../domain/politica-de-sesion';
+import type { FalloPorIp } from '../../domain/politica-de-intentos';
 
 export const REPOSITORIO_DE_AUTENTICACION = 'REPOSITORIO_DE_AUTENTICACION';
 
@@ -40,7 +41,11 @@ export interface CredencialDeLogin {
  */
 export interface FallosRecientes {
   readonly porCuenta: readonly Date[];
-  readonly porIp: readonly Date[];
+  /**
+   * Los fallos de esa IP, CON LA CUENTA de cada uno: el eje de IP cuenta
+   * cuentas distintas —la firma del rociado—, no fallos (D-16.196).
+   */
+  readonly porIp: readonly FalloPorIp[];
 }
 
 export interface NuevaSesion {

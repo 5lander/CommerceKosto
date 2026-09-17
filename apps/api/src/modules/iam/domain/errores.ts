@@ -16,6 +16,9 @@ import { ErrorDeDominio, type CodigoDeDominio } from '../../../shared/domain/err
 
 const MENSAJE_UNICO = 'Correo o contrasena incorrectos.';
 
+const MILISEGUNDOS_POR_SEGUNDO = 1_000;
+const SEGUNDOS_POR_MINUTO = 60;
+
 /** Causa real del fallo. Va al log de auditoria; jamas a la respuesta. */
 export type MotivoDelRechazo =
   | 'correo_desconocido'
@@ -47,6 +50,33 @@ export class AccesoBloqueadoError extends ErrorDeDominio {
     super('Demasiados intentos fallidos. Vuelve a intentarlo más tarde.', {
       bloqueadoHasta: bloqueadoHasta.toISOString(),
     });
+  }
+}
+
+/**
+ * Una IP que esta tanteando muchas cuentas distintas — D-16.196, ADR-028.
+ *
+ * NO ES UN BLOQUEO, y por eso no es `AccesoBloqueadoError`: no hay ninguna
+ * cuenta bloqueada, hay una direccion que tiene que esperar. La diferencia le
+ * importa a quien la lee —detras de una IP compartida puede estar alguien que
+ * no ha hecho nada— y le importa al cliente HTTP: 429 con `Retry-After`, no un
+ * 423 sobre una cuenta que esta perfectamente bien.
+ */
+export class RociadoDeContrasenasError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'LIMITE_DE_SOLICITUDES';
+
+  /** Nunca menor que 1: un `Retry-After: 0` no es una espera. */
+  public readonly reintentarEnSegundos: number;
+
+  public constructor(hasta: Date, ahora: Date) {
+    const segundos = Math.max(1, Math.ceil((hasta.getTime() - ahora.getTime()) / MILISEGUNDOS_POR_SEGUNDO));
+    const minutos = Math.max(1, Math.ceil(segundos / SEGUNDOS_POR_MINUTO));
+
+    super(
+      `Demasiados intentos desde esta conexión. Vuelve a intentarlo en ${String(minutos)} ${minutos === 1 ? 'minuto' : 'minutos'}.`,
+      { hasta: hasta.toISOString() },
+    );
+    this.reintentarEnSegundos = segundos;
   }
 }
 

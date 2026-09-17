@@ -32,37 +32,43 @@ import {
 export { bloqueoEfectivo, type DecisionDeAcceso } from '../../../shared/domain/acceso/politica-de-intentos';
 
 /**
- * El umbral depende del EJE que se este contando, y la diferencia es
- * deliberada.
+ * CINCO FALLOS BLOQUEAN UNA CUENTA. Es el numero de SEGURIDAD.md §2.1: una
+ * persona que falla cinco veces seguidas su propia contrasena o se equivoco de
+ * cuenta o no es ella. El bloqueo es de ESA cuenta y no alcanza a nadie mas.
+ */
+const UMBRAL_POR_CUENTA = 5;
+
+/**
+ * EL EJE DE IP LIMITA, NO BLOQUEA — D-16.196, ADR-028, INC-027.
  *
- *   CUENTA (5)   es el numero de SEGURIDAD.md §2.1. Una persona que falla cinco
- *                veces seguidas su propia contrasena o se equivoco de cuenta o
- *                no es ella.
+ * Contaba FALLOS (25 en una hora) y abria un bloqueo escalonado igual que el de
+ * cuenta, hasta sesenta minutos. Dos cosas iban mal, y las dos se ven desde una
+ * cocina:
  *
- *   IP (25)      cinco veces mas. Detras de una IP no hay una persona: hay una
- *                cocina entera. En un restaurante todo el personal sale por el
- *                mismo NAT, asi que con el umbral de cuenta cinco errores
- *                repartidos entre cinco empleados distintos bloquearian el
- *                LOCAL COMPLETO — y la escalada lo dejaria una hora fuera. Eso
- *                no es seguridad: es una denegacion de servicio que cualquiera
- *                puede disparar desde la acera con el wifi del sitio.
+ *   1. UNA SOLA CUENTA PODIA DEJAR FUERA A TODO EL MUNDO. Un cocinero que
+ *      insiste veinticinco veces con la contrasena vieja —o un atacante que le
+ *      apunta a el— bloqueaba la IP entera: el resto del personal, con sus
+ *      credenciales buenas, se quedaba fuera una hora. Su cuenta ya estaba
+ *      bloqueada al quinto fallo; el eje de IP solo anadia victimas.
  *
- * Lo que el eje de IP tiene que cortar es el ROCIADO DE CONTRASENAS —una IP
- * probando "Verano2026" contra cien correos distintos— y para eso veinticinco
- * fallos en una hora sigue siendo un techo bajisimo: ningun uso legitimo se
- * acerca.
+ *   2. DETRAS DE UNA IP PUEDE NO HABER UN LOCAL, SINO UN BARRIO. Con CGNAT el
+ *      operador mete cientos de abonados tras la misma direccion publica: la
+ *      IP no identifica a un cliente, y bloquearla castiga a desconocidos.
+ *
+ * Lo que este eje tiene que cortar es el ROCIADO DE CONTRASENAS: una IP
+ * probando "Verano2026" contra cien correos. Esa firma no son "muchos fallos",
+ * son MUCHAS CUENTAS DISTINTAS, asi que es lo que se cuenta. Y la respuesta es
+ * un 429 de duracion FIJA —esperar y volver—, nunca una escalada: el limite
+ * frena el barrido sin convertirse en la denegacion de servicio que cualquiera
+ * dispara desde la acera con el wifi del sitio.
  *
  * Y LA IP TIENE QUE SER LA DEL CLIENTE, NO LA DEL PROXY. Detras de Caddy toda
  * peticion llega con la IP del contenedor `caddy`: sin `ipDelCliente` y
- * `PROXY_DE_CONFIANZA` (D-16.49, INC-022) este eje bloquearia a todos los
- * usuarios a la vez al vigesimoquinto fallo de cualquiera.
- *
- * Es un apartamiento de la lectura literal de SEGURIDAD.md §2.1, que da un solo
- * numero para los dos ejes. Esta razonado en ADR-006 y es reversible: son dos
- * constantes.
+ * `PROXY_DE_CONFIANZA` (D-16.49, INC-022) este eje contaria a todos los
+ * usuarios como uno solo.
  */
-const UMBRAL_POR_CUENTA = 5;
-const UMBRAL_POR_IP = 25;
+const CUENTAS_DISTINTAS_POR_IP = 10;
+const MINUTOS_DE_ENFRIAMIENTO_DE_IP = 15;
 
 const MINUTOS_DE_DISPARO = 15;
 const MINUTOS_DE_ESCALADA = 60;
@@ -83,22 +89,53 @@ const ESCALA_DE_BLOQUEO_MINUTOS = [
   BLOQUEO_A_PARTIR_DE_LA_CUARTA,
 ] as const;
 
-export type EjeDeConteo = 'cuenta' | 'ip';
+/** Los numeros del login por CUENTA. El eje de IP ya no bloquea (ver arriba). */
+export const POLITICA_DE_LOGIN: PoliticaDeIntentos = {
+  umbral: UMBRAL_POR_CUENTA,
+  ventanaDeDisparoMs: VENTANA_DE_DISPARO_MS,
+  ventanaDeEscaladaMs: VENTANA_DE_ESCALADA_MS,
+  escalaDeBloqueoMinutos: ESCALA_DE_BLOQUEO_MINUTOS,
+};
 
-function politicaDeLogin(umbral: number): PoliticaDeIntentos {
-  return {
-    umbral,
-    ventanaDeDisparoMs: VENTANA_DE_DISPARO_MS,
-    ventanaDeEscaladaMs: VENTANA_DE_ESCALADA_MS,
-    escalaDeBloqueoMinutos: ESCALA_DE_BLOQUEO_MINUTOS,
-  };
+/** Un fallo visto desde el eje de IP: cuando, y CONTRA QUE CUENTA. */
+export interface FalloPorIp {
+  readonly at: Date;
+  readonly email: string;
 }
 
-/** Los numeros del login, por eje. Son la unica diferencia entre los dos ejes. */
-export const POLITICA_DE_LOGIN: Readonly<Record<EjeDeConteo, PoliticaDeIntentos>> = {
-  cuenta: politicaDeLogin(UMBRAL_POR_CUENTA),
-  ip: politicaDeLogin(UMBRAL_POR_IP),
-};
+export interface LimiteDeIp {
+  readonly permitido: boolean;
+  /** Hasta cuando se rechaza. `null` si no hay limite. */
+  readonly hasta: Date | null;
+  /** Cuantas cuentas distintas ha tanteado esa IP en la ventana. */
+  readonly cuentasDistintas: number;
+}
+
+/**
+ * El rociado de contrasenas desde una IP: MUCHAS CUENTAS, no muchos fallos.
+ *
+ * El enfriamiento cuenta desde el ULTIMO fallo y dura siempre lo mismo: insistir
+ * alarga la espera, pero no la agrava. Sin escalada, una IP compartida nunca se
+ * queda fuera mas de ese cuarto de hora por lo que hagan otros.
+ */
+export function evaluarRociadoPorIp(entrada: {
+  readonly fallos: readonly FalloPorIp[];
+  readonly ahora: Date;
+}): LimiteDeIp {
+  const enVentana = entrada.fallos.filter(
+    (f) => entrada.ahora.getTime() - f.at.getTime() <= VENTANA_DE_ESCALADA_MS,
+  );
+  const cuentasDistintas = new Set(enVentana.map((f) => f.email)).size;
+
+  if (cuentasDistintas < CUENTAS_DISTINTAS_POR_IP) {
+    return { permitido: true, hasta: null, cuentasDistintas };
+  }
+
+  const ultimo = enVentana.reduce((a, b) => (a.at.getTime() > b.at.getTime() ? a : b));
+  const hasta = new Date(ultimo.at.getTime() + MINUTOS_DE_ENFRIAMIENTO_DE_IP * MINUTO_MS);
+
+  return { permitido: hasta.getTime() <= entrada.ahora.getTime(), hasta, cuentasDistintas };
+}
 
 /**
  * @param fallos Fechas de los intentos fallidos **desde el ultimo acceso
@@ -109,13 +146,11 @@ export const POLITICA_DE_LOGIN: Readonly<Record<EjeDeConteo, PoliticaDeIntentos>
 export function evaluarIntentos(entrada: {
   readonly fallos: readonly Date[];
   readonly ahora: Date;
-  /** Cual de los dos ejes se esta contando. Decide el umbral. */
-  readonly eje: EjeDeConteo;
 }): DecisionDeAcceso {
   return evaluarConPolitica({
     fallos: entrada.fallos,
     ahora: entrada.ahora,
-    politica: POLITICA_DE_LOGIN[entrada.eje],
+    politica: POLITICA_DE_LOGIN,
   });
 }
 
