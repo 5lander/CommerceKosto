@@ -22,11 +22,12 @@
  * hacer lo que no debe, y nadie se entera hasta que hay una fuga.
  */
 
+import { closeSync, openSync, statSync } from 'node:fs';
+
 import { correr } from './proceso.mjs';
+import { argumentosDeDocker } from './docker.mjs';
 import { RAIZ, partesDeConexion } from './entorno.mjs';
 import { via } from './psql.mjs';
-
-const SERVICIO_DOCKER = 'db';
 
 /** El volcado de una base con dos anos de movimientos no cabe en el buffer por defecto. */
 const BUFFER_MAXIMO = 512 * 1024 * 1024;
@@ -34,10 +35,10 @@ const BUFFER_MAXIMO = 512 * 1024 * 1024;
 /**
  * Arma la invocacion de una herramienta de PostgreSQL segun la via disponible.
  *
- * @param {{herramienta: string, partes: ReturnType<typeof partesDeConexion>, args: readonly string[]}} peticion
+ * @param {{herramienta: string, partes: ReturnType<typeof partesDeConexion>, args: readonly string[], entorno?: Readonly<Record<string, string>>}} peticion
  * @returns {{comando: string, args: string[], entorno: NodeJS.ProcessEnv}}
  */
-function invocacion({ herramienta, partes, args }) {
+function invocacion({ herramienta, partes, args, entorno = {} }) {
   const modo = via();
   if (modo === 'ninguno') {
     throw new Error(
@@ -51,24 +52,24 @@ function invocacion({ herramienta, partes, args }) {
     return {
       comando: herramienta,
       args: ['-h', partes.host, '-p', partes.puerto, '-U', partes.usuario, ...args],
-      entorno: { ...process.env, PGPASSWORD: partes.contrasena },
+      entorno: { ...process.env, PGPASSWORD: partes.contrasena, ...entorno },
     };
   }
 
   return {
     comando: 'docker',
-    args: [
-      'compose', 'exec', '-T',
-      '-e', `PGPASSWORD=${partes.contrasena}`,
-      SERVICIO_DOCKER, herramienta,
-      '-U', partes.usuario, ...args,
-    ],
+    args: argumentosDeDocker({
+      herramienta,
+      contrasena: partes.contrasena,
+      entorno,
+      resto: ['-U', partes.usuario, ...args],
+    }),
     entorno: process.env,
   };
 }
 
 /**
- * Vuelca la base entera a un Buffer, en formato personalizado.
+ * Vuelca la base entera a un ARCHIVO, en formato personalizado.
  *
  * Se vuelca **como superusuario**, y no como el migrator, a proposito: RLS con
  * `FORCE` aplica tambien al dueno de la tabla, asi que un volcado hecho por
@@ -77,10 +78,10 @@ function invocacion({ herramienta, partes, args }) {
  * no una garantia, y un respaldo silenciosamente incompleto es la peor clase de
  * respaldo que existe.
  *
- * @param {{conexion: string}} peticion
- * @returns {Buffer}
+ * @param {{conexion: string, destino: string}} peticion
+ * @returns {number} bytes escritos en el archivo
  */
-export function volcar({ conexion }) {
+export function volcar({ conexion, destino }) {
   const partes = partesDeConexion(conexion);
   const { comando, args, entorno } = invocacion({
     herramienta: 'pg_dump',
@@ -88,22 +89,33 @@ export function volcar({ conexion }) {
     args: ['-d', partes.base, '--format=custom', '--compress=9'],
   });
 
-  const resultado = correr(comando, args, {
-    cwd: RAIZ,
-    env: entorno,
-    maxBuffer: BUFFER_MAXIMO,
-    // Sin `encoding`: la salida es BINARIA. Pedirla como utf8 la corrompe en
-    // silencio y el archivo resultante no se puede restaurar — que es un fallo
-    // que solo se descubre el dia que hace falta.
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // EL VOLCADO VA A UN DESCRIPTOR, NO A UN BUFFER — INC-028.
+  //
+  // `spawnSync` corta la salida en `maxBuffer` y mata al hijo SIN mensaje: el
+  // respaldo moria con un stderr vacio en cuanto la base pasaba del tope, que
+  // es justo el dia en que el respaldo importa. Escribiendo al descriptor no
+  // hay tope: los bytes van del proceso al archivo sin pasar por la memoria de
+  // Node.
+  //
+  // Sin `encoding`: la salida es BINARIA. Pedirla como utf8 la corrompe en
+  // silencio y el archivo no se puede restaurar.
+  const salida = openSync(destino, 'w');
+  try {
+    const resultado = correr(comando, args, {
+      cwd: RAIZ,
+      env: entorno,
+      stdio: ['ignore', salida, 'pipe'],
+    });
 
-  if (resultado.status !== 0) {
-    const detalle = resultado.stderr instanceof Buffer ? resultado.stderr.toString('utf8') : '';
-    throw new Error(`pg_dump fallo sobre "${partes.base}": ${detalle}`);
+    if (resultado.status !== 0) {
+      const detalle = resultado.stderr instanceof Buffer ? resultado.stderr.toString('utf8') : String(resultado.stderr ?? '');
+      throw new Error(`pg_dump fallo sobre "${partes.base}": ${detalle}`);
+    }
+  } finally {
+    closeSync(salida);
   }
 
-  return Buffer.isBuffer(resultado.stdout) ? resultado.stdout : Buffer.from('');
+  return statSync(destino).size;
 }
 
 /**
@@ -113,21 +125,25 @@ export function volcar({ conexion }) {
  * mensaje del fallo, no en como se lanza el proceso. Escribirlo dos veces era el
  * clon que `audit:duplication` paro.
  *
- * @param {{volcado: Buffer, conexion: string, args: readonly string[], queFallo: string}} peticion
+ * @param {{volcado: string, conexion: string, args: readonly string[], queFallo: string}} peticion
  * @returns {string}
  */
 function conPgRestore({ volcado, conexion, args, queFallo }) {
   const partes = partesDeConexion(conexion);
   const invocado = invocacion({ herramienta: 'pg_restore', partes, args });
 
+  // El volcado ENTRA por un descriptor, por lo mismo que sale por uno
+  // (INC-028): un respaldo de un giga no cabe dos veces en la memoria de Node,
+  // y `spawnSync` no avisa cuando no cabe.
+  const entrada = openSync(volcado, 'r');
   const resultado = correr(invocado.comando, invocado.args, {
     cwd: RAIZ,
     env: invocado.entorno,
-    input: volcado,
     encoding: 'utf8',
     maxBuffer: BUFFER_MAXIMO,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: [entrada, 'pipe', 'pipe'],
   });
+  closeSync(entrada);
 
   if (resultado.status !== 0) {
     throw new Error(`${queFallo}: ${String(resultado.stderr ?? '')}`);
@@ -143,7 +159,7 @@ function conPgRestore({ volcado, conexion, args, queFallo }) {
  * `pg_restore -l` falla aqui, en segundos, en vez de a mitad de una
  * restauracion de verdad.
  *
- * @param {{volcado: Buffer, conexion: string}} peticion
+ * @param {{volcado: string, conexion: string}} peticion
  * @returns {string}
  */
 export function listar({ volcado, conexion }) {
@@ -163,7 +179,7 @@ export function listar({ volcado, conexion }) {
  * base a la que le faltan tablas y un script que cree que todo fue bien. Es
  * exactamente la forma de fallo de INC-007, aplicada a lo que menos perdona.
  *
- * @param {{volcado: Buffer, conexion: string, base: string}} peticion
+ * @param {{volcado: string, conexion: string, base: string}} peticion
  */
 export function restaurar({ volcado, conexion, base }) {
   conPgRestore({
@@ -172,4 +188,58 @@ export function restaurar({ volcado, conexion, base }) {
     args: ['-d', base, '--exit-on-error', '--no-comments'],
     queFallo: `La restauracion sobre "${base}" fallo`,
   });
+}
+
+/**
+ * Las filas de UNA tabla que le pertenecen a UNA company, en SQL listo para
+ * reinsertar — D-16.195.
+ *
+ * **NO LLEVA NINGUN `WHERE`, Y ESO ES LO IMPORTANTE.** El recorte lo hace la
+ * misma RLS que impide la fuga en produccion: la conexion entra con el rol de
+ * la aplicacion y con `app.company_id` fijado (`PGOPTIONS`), asi que
+ * `--enable-row-security` deja a la vista exactamente las filas de ese tenant.
+ * Un filtro escrito a mano, tabla por tabla, seria una segunda definicion de
+ * "que es de quien" — y la unica que importa es la de la base.
+ *
+ * VA COMO `INSERT` Y NO COMO `COPY`, y no es una preferencia: PostgreSQL
+ * rechaza `COPY FROM` sobre una tabla con RLS —«COPY FROM not supported with
+ * row-level security. Use INSERT statements instead»— precisamente porque cada
+ * fila tiene que pasar por la politica. Es el precio de reinsertar CON la
+ * barrera puesta, y es el que se queria pagar: `--column-inserts` ademas nombra
+ * cada columna, asi que el volcado no depende del orden del catalogo.
+ *
+ * Es mas lento que `COPY`. Para un tenant —un restaurante, no la base entera—
+ * eso se mide en segundos, y esta dicho en el runbook.
+ *
+ * @param {{conexion: string, tabla: string, company: string}} peticion
+ * @returns {string} SQL con `COPY ... FROM stdin`
+ */
+export function volcarTablaDelTenant({ conexion, tabla, company }) {
+  const partes = partesDeConexion(conexion);
+  const { comando, args, entorno } = invocacion({
+    herramienta: 'pg_dump',
+    partes,
+    args: [
+      '-d', partes.base,
+      '--data-only',
+      '--enable-row-security',
+      '--column-inserts',
+      '--table', `public.${tabla}`,
+    ],
+    entorno: { PGOPTIONS: `-c app.company_id=${company}` },
+  });
+
+  const resultado = correr(comando, args, {
+    cwd: RAIZ,
+    env: entorno,
+    encoding: 'utf8',
+    maxBuffer: BUFFER_MAXIMO,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  if (resultado.status !== 0) {
+    throw new Error(`pg_dump fallo sobre "${tabla}": ${String(resultado.stderr ?? '')}`);
+  }
+
+  return typeof resultado.stdout === 'string' ? resultado.stdout : '';
 }

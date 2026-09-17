@@ -39,6 +39,7 @@
     "db:reset": "node scripts/db-reset.mjs",
     "respaldo": "node scripts/respaldo.mjs",
     "restaurar": "node scripts/restaurar.mjs",
+    "restaurar:tenant": "node scripts/restaurar-tenant.mjs",
     "seed:tenant": "node scripts/seed-tenant.mjs",
     "db:generate": "npm run db:generate --workspace @costeo/api",
     "migrate:new": "node scripts/migrate-new.mjs",

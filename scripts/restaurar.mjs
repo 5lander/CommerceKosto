@@ -20,10 +20,10 @@
  * Para rehacer una base: tirala y vuelve a crearla.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { conexionDeSuperusuario } from './lib/entorno.mjs';
+import { apuntandoA, conexionDeSuperusuario } from './lib/entorno.mjs';
 import { consultar } from './lib/psql.mjs';
 import { listar, restaurar } from './lib/pgdump.mjs';
 import { SQL_DE_RECUENTOS, TABLAS_TESTIGO, comoRecuentos } from './lib/testigos.mjs';
@@ -48,13 +48,6 @@ const BASE_RESTAURADA = 'costeo_restaurado';
 const SQL_CREAR_RESTAURADA = 'CREATE DATABASE costeo_restaurado';
 
 
-/** @param {string} conexion @param {string} base */
-function apuntandoA(conexion, base) {
-  const url = new URL(conexion);
-  url.pathname = `/${base}`;
-  return url.toString();
-}
-
 function main() {
   const archivo = process.argv.slice(2).find((a) => !a.startsWith('--'));
   if (archivo === undefined) {
@@ -65,8 +58,10 @@ function main() {
   if (!existsSync(ruta)) throw new Error(`No existe el archivo "${ruta}".`);
 
   const conexion = conexionDeSuperusuario();
-  const volcado = readFileSync(ruta);
-  console.log(`[restaurar] ${(volcado.byteLength / 1024).toFixed(0)} KiB leidos de ${archivo}`);
+  // La ruta, no el contenido: el volcado entra a `pg_restore` por un
+  // descriptor y no pasa por la memoria de Node (INC-028).
+  const volcado = ruta;
+  console.log(`[restaurar] ${(statSync(ruta).size / 1024).toFixed(0)} KiB en ${archivo}`);
 
   // Se lee el indice ANTES de tocar la base: si el archivo esta corrupto, se
   // sabe sin haber creado nada.

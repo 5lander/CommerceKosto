@@ -79,3 +79,19 @@ export function conexionDeSuperusuario() {
   const puerto = opcional('POSTGRES_PORT', '5432');
   return `postgresql://${credencial}@${host}:${puerto}/postgres`;
 }
+
+/**
+ * La misma cadena de conexion, apuntando a otra base.
+ *
+ * Vivia copiada en `bench`, `respaldo`, `restaurar` y `restaurar-tenant`: cuatro
+ * veces la misma linea, y `audit:duplication` la caza en cuanto dos de ellas
+ * quedan juntas. El nombre de la base es un IDENTIFICADOR y por eso viaja en la
+ * URL y no en el SQL (ver `consultar` en `psql.mjs`).
+ *
+ * @param {string} conexion @param {string} base @returns {string}
+ */
+export function apuntandoA(conexion, base) {
+  const url = new URL(conexion);
+  url.pathname = `/${base}`;
+  return url.toString();
+}

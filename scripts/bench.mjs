@@ -38,7 +38,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { RAIZ, conexionDeSuperusuario, exigir } from './lib/entorno.mjs';
+import { RAIZ, apuntandoA, conexionDeSuperusuario, exigir } from './lib/entorno.mjs';
 import { hashDe } from './lib/hashear.mjs';
 import { correr, correrCli } from './lib/proceso.mjs';
 import { aplicarSql, consultar } from './lib/psql.mjs';
@@ -118,13 +118,6 @@ const SQL_RECUENTOS = `
   UNION ALL SELECT 'productos', count(*)::text FROM product
   UNION ALL SELECT 'ventas', count(*)::text FROM product_sales
 `;
-
-/** @param {string} conexion @param {string} base @returns {string} */
-function apuntandoA(conexion, base) {
-  const url = new URL(conexion);
-  url.pathname = `/${base}`;
-  return url.toString();
-}
 
 
 /** @param {string} texto */

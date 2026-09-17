@@ -28,10 +28,10 @@
  * saldo de un item deja de cuadrar para siempre.
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { RAIZ, conexionDeSuperusuario, opcional } from './lib/entorno.mjs';
+import { RAIZ, apuntandoA, conexionDeSuperusuario, opcional } from './lib/entorno.mjs';
 import { consultar } from './lib/psql.mjs';
 import { listar, restaurar, volcar } from './lib/pgdump.mjs';
 import { SQL_DE_RECUENTOS, TABLAS_TESTIGO, comoRecuentos } from './lib/testigos.mjs';
@@ -53,19 +53,9 @@ const MILISEGUNDOS_POR_DIA = 24 * 60 * 60 * 1000;
 
 
 /**
- * La misma cadena, apuntando a otra base del mismo servidor.
- * @param {string} conexion @param {string} base @returns {string}
- */
-function apuntandoA(conexion, base) {
-  const url = new URL(conexion);
-  url.pathname = `/${base}`;
-  return url.toString();
-}
-
-/**
  * Restaura el volcado sobre una base desechable y compara los recuentos.
  *
- * @param {{volcado: Buffer, origen: string}} peticion
+ * @param {{volcado: string, origen: string}} peticion
  * @returns {readonly {tabla: string, original: string, restaurado: string}[]}
  */
 function verificarRestaurando({ volcado, origen }) {
@@ -133,6 +123,32 @@ function marcaDeTiempo() {
   return new Date().toISOString().replace(/[:.]/gu, '-');
 }
 
+/**
+ * Lee el volcado, lo restaura sobre la base desechable y compara los recuentos.
+ *
+ * Si algo no cuadra, BORRA el archivo: el runbook promete que un respaldo que no
+ * cuadra no se queda en el directorio, y desde INC-028 el archivo se crea antes
+ * de comprobarlo (los bytes van directos al disco, no a la memoria).
+ *
+ * @param {{destino: string, origen: string}} peticion
+ */
+function comprobarOBorrar({ destino, origen }) {
+  try {
+    console.log('[respaldo] leyendo el volcado sin restaurarlo');
+    const entradas = listar({ volcado: destino, conexion: origen }).split('\n').length;
+    console.log(`[respaldo] ${String(entradas)} entradas en el indice`);
+
+    console.log(`[respaldo] restaurando sobre ${BASE_DE_PRUEBA} y comparando`);
+    const recuentos = verificarRestaurando({ volcado: destino, origen });
+    exigirQueCuadren(recuentos);
+
+    for (const r of recuentos) console.log(`[respaldo]   ${r.tabla}: ${r.original} filas, cuadra`);
+  } catch (fallo) {
+    rmSync(destino, { force: true });
+    throw fallo;
+  }
+}
+
 function main() {
   // LA BASE DE VERDAD, NO LA ADMINISTRATIVA.
   //
@@ -152,22 +168,20 @@ function main() {
 
   if (!existsSync(directorio)) mkdirSync(directorio, { recursive: true });
 
-  console.log('[respaldo] volcando');
-  const volcado = volcar({ conexion: origen });
-  console.log(`[respaldo] ${(volcado.byteLength / 1024).toFixed(0)} KiB volcados`);
-
-  console.log('[respaldo] leyendo el volcado sin restaurarlo');
-  const entradas = listar({ volcado, conexion: origen }).split('\n').length;
-  console.log(`[respaldo] ${String(entradas)} entradas en el indice`);
-
-  console.log(`[respaldo] restaurando sobre ${BASE_DE_PRUEBA} y comparando`);
-  const recuentos = verificarRestaurando({ volcado, origen });
-  exigirQueCuadren(recuentos);
-
-  for (const r of recuentos) console.log(`[respaldo]   ${r.tabla}: ${r.original} filas, cuadra`);
-
+  // EL VOLCADO SE ESCRIBE DIRECTO AL ARCHIVO (INC-028), no a la memoria: un
+  // respaldo grande no cabe en el buffer de `spawnSync`, y lo que se perdia
+  // cuando no cabia era el mensaje, no solo el respaldo.
+  //
+  // El archivo se borra si algo falla despues, para conservar la promesa que
+  // el runbook hace: un respaldo que no cuadra NO se queda en el directorio.
   const destino = join(directorio, `costeo-${marcaDeTiempo()}.dump`);
-  writeFileSync(destino, volcado);
+
+  console.log('[respaldo] volcando');
+  const bytes = volcar({ conexion: origen, destino });
+  console.log(`[respaldo] ${(bytes / 1024).toFixed(0)} KiB volcados`);
+
+  comprobarOBorrar({ destino, origen });
+
   console.log(`[respaldo] guardado en ${destino}`);
 
   const borrados = podar(directorio, retencion);

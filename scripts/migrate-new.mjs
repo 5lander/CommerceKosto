@@ -30,7 +30,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 
 import { APP, MIGRACIONES, TEMPORAL } from './lib/entorno.mjs';
-import { correrCli } from './lib/proceso.mjs';
+import { argumento, correrCli } from './lib/proceso.mjs';
 
 const MARCADOR_MANUAL = [
   '',
@@ -64,13 +64,6 @@ function borradoDelHistorial(carpeta) {
   }
   const sentencia = 'DELETE FROM "_prisma_migrations" WHERE "migration_name" = ';
   return `${sentencia}'${carpeta}';`;
-}
-
-/** @param {string} nombre */
-function argumento(nombre) {
-  const indice = process.argv.indexOf(`--${nombre}`);
-  if (indice === -1) return undefined;
-  return process.argv[indice + 1];
 }
 
 /** @param {readonly string[]} args */

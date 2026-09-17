@@ -136,3 +136,17 @@ export function correrCliAsincrono(paquete, args, opciones = {}) {
 
   return spawn(process.execPath, argumentos, { ...resto, shell: false });
 }
+
+/**
+ * Un argumento con la forma `--nombre=valor`, o `undefined` si no esta.
+ *
+ * Los scripts operados los leen asi —no hay `commander` ni nada que instalar—,
+ * y tres de ellos tenian su propia copia.
+ *
+ * @param {string} nombre @returns {string | undefined}
+ */
+export function argumento(nombre) {
+  const prefijo = `--${nombre}=`;
+  const encontrado = process.argv.find((a) => a.startsWith(prefijo));
+  return encontrado === undefined ? undefined : encontrado.slice(prefijo.length);
+}

@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { APP, exigir } from './lib/entorno.mjs';
-import { correrCli } from './lib/proceso.mjs';
+import { argumento, correrCli } from './lib/proceso.mjs';
 import { consultar } from './lib/psql.mjs';
 
 const SALIDA_CON_ERROR = 1;
@@ -43,13 +43,6 @@ const ROLES_DE_COMPANY = ['OWNER', 'ADMIN', 'LECTURA'];
 
 /** Lo minimo que la politica de contrasenas de P1 acepta. */
 const LARGO_MINIMO = 12;
-
-/** @param {string} nombre */
-function argumento(nombre) {
-  const prefijo = `--${nombre}=`;
-  const encontrado = process.argv.find((a) => a.startsWith(prefijo));
-  return encontrado === undefined ? undefined : encontrado.slice(prefijo.length);
-}
 
 /** La conexion del MIGRATOR: es quien puede escribir en `company` y `app_user`. */
 function conexion() {

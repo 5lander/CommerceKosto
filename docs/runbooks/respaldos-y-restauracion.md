@@ -117,6 +117,12 @@ lo uno ni lo otro. Para rehacer una base, tírala y créala de nuevo.
 | **Se restaura sobre producción por error** | ✅ **Imposible por construcción** | El destino es una constante del script. No hay bandera que lo cambie |
 | **Los recuentos no cuadran** | Comparación directa de cadenas, no probada con un fallo inducido | Lanza con la lista de tablas descuadradas y **no guarda el archivo** |
 
+**Y un cuarto que estuvo roto hasta P16-G (INC-028):** cuando el volcado pasaba de 512 MiB,
+`spawnSync` mataba a `pg_dump` y devolvía **un fallo con el `stderr` vacío** — ningún mensaje, ningún
+respaldo, justo el día en que la base ya es grande. Ahora el volcado va del proceso al archivo por un
+descriptor, sin pasar por la memoria de Node, y no hay tope que ajustar. Probado sobre una base de
+**10 GB** (757 MiB de volcado).
+
 El tercero es una comparación `original !== restaurado` sobre el resultado de `count(*)`. No se
 indujo un descuadre real porque el libro es append-only y no se le pueden borrar filas ni siendo
 dueño — que es R3 haciendo su trabajo. **Queda anotado como lo que es**: los dos caminos difíciles
@@ -156,6 +162,77 @@ comprobación una copia a medias se sobrescribiría con otra a medias.
 
 **Lo que falta para cerrar del todo:** elegir el destino de `RESPALDO_COMANDO_SUBIDA`. Hasta que esté,
 la ventana de pérdida real es **un día** y el respaldo vive en la misma máquina.
+
+---
+
+## Restaurar UN solo cliente (D-16.195)
+
+**El caso probable no es la pérdida total: es que un cliente pierda lo suyo.** Alguien borró un
+catálogo, una importación se comió los precios, un empleado archivó lo que no era. Restaurar la base
+entera para arreglarle el día a uno devolvería a **todos los demás** al estado de ayer — un incidente
+mayor que el que se está arreglando.
+
+```sh
+# 1. la copia completa de ayer, en la base auxiliar (esto ya existía)
+npm run restaurar -- .respaldos/costeo-2026-09-17T09-12-03-004Z.dump
+
+# 2. solo las filas de ese cliente, de la auxiliar a producción
+npm run restaurar:tenant -- --company=01a0af83-7403-75b9-96af-c63c3585e0a3
+
+# 3. la auxiliar se tira, como siempre
+docker exec costeo-db psql -U postgres -d postgres -c "DROP DATABASE costeo_restaurado;"
+```
+
+### Qué hace, y por qué es seguro
+
+**No hay ni un `WHERE company_id` escrito a mano.** Las dos conexiones —la de la copia y la de
+producción— entran con el **rol de la aplicación** y con `app.company_id` fijado, así que:
+
+- `pg_dump --enable-row-security` ve **solo** las filas de ese tenant: el recorte lo hace la misma
+  RLS que impide la fuga en producción (Barrera 1);
+- al insertarlas, **la política vuelve a comprobar cada fila**: si algo no fuera de esa company, la
+  base lo rechazaría.
+
+Un filtro escrito a mano sería una segunda definición de «qué es de quién», y la única que vale es la
+de la base.
+
+### Lo que NO vuelve, a propósito
+
+| | Por qué |
+|---|---|
+| `session` | Son **credenciales vivas**. Devolver las sesiones de anteayer es devolverles validez a tokens que ya circularon |
+| `email_outbox` | Correos que ya salieron, o que ya no deben salir. Reponer la cola reenvía invitaciones viejas |
+| `audit_log`, `backoffice_access_log` | Append-only, y **la aplicación ni siquiera puede leerlos** (SEGURIDAD.md §10): no aparecen en el volcado. Restaurar un log sería escribir historia |
+
+### Lo que exige antes de tocar nada
+
+1. **La company tiene que existir** en el destino. Se restauran sus datos, no su alta: el cascarón lo
+   crea `npm run seed:tenant`.
+2. **El destino tiene que estar vacío para ese tenant.** No escribe encima: mezclar lo restaurado con
+   lo que quedó deja una base que no es ni lo uno ni lo otro. Si hay filas, las lista y se para.
+3. **La lista de tablas tiene que estar completa.** El script pregunta al catálogo qué tablas tienen
+   `company_id` y política de lectura para la aplicación, y **se para** si encuentra alguna que
+   `scripts/lib/tenant.mjs` no conoce. Una restauración a la que le falta una tabla no se nota hasta
+   que el cliente busca lo que falta.
+
+Al terminar compara los recuentos tabla por tabla entre la copia y producción, y falla si no cuadran.
+
+### El límite que hay que conocer
+
+**Un tenant con libro de inventario no se puede «vaciar» para rehacerlo.** El libro es append-only
+(R3) y sus `DELETE` los rechaza un trigger, también al dueño de la tabla. Eso significa:
+
+- si lo que se perdió fueron **los datos** (el cliente borró su catálogo, el libro sigue ahí), este
+  procedimiento **no aplica al libro**: hay que restaurar lo que falte a mano o valorar la
+  restauración completa;
+- si lo que se perdió fue **la company entera**, se recrea el cascarón con `seed:tenant` y esto la
+  repuebla de cero, libro incluido.
+
+### Ensayo (obligatorio antes de la entrega al piloto)
+
+| Fecha | Sobre quién | Resultado |
+|---|---|---|
+| 2026-09-17 | `ensayo-b` (company sintética, D-16.193) | ✅ **18 filas en 11 tablas**, recuentos cuadrados uno a uno; `ensayo` intacto (7 ítems, 4 productos, 15 líneas); la interfaz de ensayo-b vuelve a costear («Arroz marinero» 9.90, receta 0.3 kg AP, costo 3.60). Los ajustes de costeo los reportó como hay que reponerlos |
 
 ---
 

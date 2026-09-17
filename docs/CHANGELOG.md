@@ -4,6 +4,26 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-G · Restaurar un solo cliente, y el respaldo que no cabía en memoria · 2026-09-17
+
+> Herramientas de operación y documentación. Sin cambios en `apps/`.
+
+**Un cliente que borra lo suyo ya no obliga a devolver a todos los demás al estado de ayer.**
+`npm run restaurar:tenant` copia las filas de una sola company desde la copia de seguridad, y lo hace
+**sin un solo filtro escrito a mano**: las dos conexiones entran con el tenant fijado, así que la
+misma RLS que impide la fuga recorta el volcado y vuelve a comprobar cada fila al insertarla. No
+vuelven las sesiones ni los correos pendientes, y los ajustes de costeo se comparan y se avisan en
+vez de restaurarse en silencio.
+
+**Y un fallo que llevaba tiempo esperando (INC-028):** `npm run respaldo` moría **sin mensaje** en
+cuanto el volcado pasaba de 512 MiB — es decir, el día en que el cliente ya tiene datos que perder.
+Ahora el volcado va del proceso al archivo por un descriptor, sin tope. Probado sobre una base de
+10 GB.
+
+Simulacro completo sobre la company sintética `ensayo-b`, con la otra company intacta.
+
+---
+
 ## P16-F · El eje de IP del login limita, no bloquea · 2026-09-17
 
 > API y documentación. Una migración: un tipo de evento de auditoría.
