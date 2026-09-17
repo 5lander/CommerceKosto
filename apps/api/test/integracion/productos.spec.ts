@@ -9,6 +9,8 @@
  *   🔴  INC-012, cuarta recurrencia (D-16.110): PVP y rendimiento por lote en
  *       cero salían como 500 contra un CHECK; ahora son 400
  *   🔴  el lote sube la versión (D-16.102)
+ *   🔴  el nombre es único POR COMPANY (D-16.194): el mismo «Arroz marinero» en
+ *       dos companies son dos 201, y el 409 solo aparece dentro de una
  *   ---  la ficha, sus ubicaciones filtradas por alcance (D-16.113) y la carta
  *       de una ubicación con nombres
  *   ---  los componentes de un combo (D-16.114): lectura, reemplazo y las cinco
@@ -97,6 +99,24 @@ describe('el agregado producto', () => {
     return (respuesta.body as { id: string }).id;
   }
 
+  /** Una company aparte con su ADMIN dentro, para lo que solo se ve con dos. */
+  async function otraCompanyConAdmin(): Promise<string> {
+    const sufijo = randomUUID().slice(0, 8);
+    const { rows } = await duena.query<{ id: string }>(
+      `INSERT INTO company (name, status) VALUES ($1, 'ACTIVE') RETURNING id`,
+      [`vecina ${sufijo}`],
+    );
+    const ajena = rows[0]?.id ?? '';
+    const correo = `admin.${sufijo}@vecina.ec`;
+    const hash = await new Argon2Hasher().hash(CONTRASENA);
+    await duena.query(`INSERT INTO app_user (company_id, email, password_hash, status) VALUES ($1, $2, $3, 'ACTIVE')`, [ajena, correo, hash]);
+    await duena.query(
+      `INSERT INTO user_role (company_id, user_id, role_code, has_location) SELECT $1, id, 'ADMIN', false FROM app_user WHERE email = $2`,
+      [ajena, correo],
+    );
+    return entrar(correo);
+  }
+
   async function versionDe(productId: string): Promise<number> {
     const ficha = await leer(`/productos/${productId}`);
     expect(ficha.status).toBe(OK);
@@ -178,6 +198,27 @@ describe('el agregado producto', () => {
 
       expect(ajeno.status).toBe(NO_ENCONTRADO);
       expect((ajeno.body as { message: string }).message).toBe((inventado.body as { message: string }).message);
+    });
+
+    /**
+     * 🔴 D-16.194. El índice único es `product_company_id_name_key`, por
+     * `(company_id, name)`: dos companies pueden vender los dos su «Arroz
+     * marinero», y el 409 solo sale dentro de una. Un índice global sobre el
+     * nombre sería una fuga de aislamiento en forma de conflicto: le diría a un
+     * cliente que otro ya usa ese nombre.
+     */
+    it('🔴 el mismo nombre en dos companies: 201 en las dos, y repetirlo dentro de una es 409', async () => {
+      const nombre = `Arroz marinero ${randomUUID().slice(0, 8)}`;
+      const otra = await otraCompanyConAdmin();
+
+      const aqui = await escribir('post', '/productos', { nombre, tipo: 'SIMPLE', categoria: null });
+      const alli = await escribir('post', '/productos', { nombre, tipo: 'SIMPLE', categoria: null }, otra);
+      const repetido = await escribir('post', '/productos', { nombre, tipo: 'SIMPLE', categoria: null });
+
+      expect(aqui.status).toBe(CREADO);
+      expect(alli.status).toBe(CREADO);
+      expect(repetido.status).toBe(CONFLICTO);
+      expect((repetido.body as { message: string }).message).toBe('Ya existe un producto con ese nombre.');
     });
 
     it('BODEGA no la lee', async () => {

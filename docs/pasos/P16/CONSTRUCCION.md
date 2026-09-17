@@ -983,3 +983,65 @@ versiones del ensayo quedan en el historial, que es lo que deben hacer.
 ### Decisiones
 
 D-16.189…D-16.191 en `ESTADO.md`.
+
+---
+
+## Verificación multi-tenant · 2026-09-17
+
+> **El sistema es multi-tenant y la verificación tenía un solo tenant.** Las pantallas 1–14 se
+> comprobaron por rol —dueña, gerente, bodega— dentro de una company. Lo que no se había probado
+> desde la pantalla es lo que el cliente compra: que la company de al lado no exista para él.
+
+### Qué se hizo
+
+| | |
+|---|---|
+| **Segunda company sintética** | `npm run seed:tenant` con «Ensayo B (sintetico)»: mismas ubicaciones («Local Centro», «Bodega Norte») y, por la API, los mismos nombres de datos con cifras distintas — Arroz a 60.00 (ensayo: 54.00) y **«Arroz marinero» con PVP 9.90** (ensayo: 7.90) |
+| **D-16.194 · 🔴 nombre por company** | `productos.spec.ts`: el mismo nombre de producto en dos companies son **dos 201**, y repetirlo dentro de una es 409 |
+| **Corrección que destapó esa prueba** | el nombre repetido devolvía **400** y `docs/apis/app-cliente.md` decía **409** desde P4. Ahora es 409 `CONFLICTO` (`ProductoRepetidoError`), con el mismo razonamiento que el nombre repetido del catálogo: la petición está bien formada, lo que choca es el estado |
+| **Tildes de `iam`** | cinco mensajes que se leen en pantalla —«Sesión no válida», «Esa ubicación no está en tu alcance»— llevaban el texto sin tildes. Es el pendiente que arrastraba `ESTADO.md` y se cierra aquí; la verificación cruzada los puso en pantalla tres veces |
+| **`docs/pruebas/ESTRATEGIA.md`** | el procedimiento: el entorno de dos companies, las dos comprobaciones y por qué los nombres se repiten a propósito |
+
+### Cómo se verificó
+
+Como **dueña de ensayo-b**, contra el build de producción, con los 21 ids de ensayo en la mano:
+
+```
+(a) sin fugas en el listado  — 0 ids de ensayo en el HTML y 0 cifras suyas (54.00, 7.90, 6.50) en:
+    1 armazón (selector con sus dos sucursales) · 2 inicio · 3 ventas · 4 insumos · 5 alta de insumo
+    (grupos: «Sin grupo, Granos», los suyos) · 7 grupos · 9 precios (su pendiente, 62) · 11 productos
+
+(b) ficha con id ajeno, en sitio:
+    6  /insumos/<ajeno>                        «Ese ítem no existe en tu company.»          0 tablas · 0 campos
+    7  /grupos/<ajeno>/editar                  «Ese grupo no existe en tu empresa.»         0 tablas · 0 campos
+    8  /insumos/<ajeno>/articulos/<ajeno>/…    «Ese artículo de compra no existe en tu…»    0 tablas · 0 campos
+    10 /precios/nuevo?itemId=<ajeno>           «Ese ítem no existe en tu company.»          el selector, con SUS insumos
+    12 /productos/<ajeno>                      «Ese producto no existe en tu company.»      0 tablas · 0 campos
+    13 /productos/<combo ajeno>/componentes    «Ese producto no existe en tu company.»      0 tablas · 0 campos
+    14 /productos/<ajeno>/receta               «Ese producto no existe en tu company.»      0 tablas · 0 campos
+
+    sucursal ajena metida a mano en el navegador → «Esa ubicación no está en tu alcance.» en ventas,
+    costeo e inventario, en sitio y sin datos
+
+la API, directa, sobre lo ajeno:
+    /catalogo/items/:id 404 · /catalogo/articulos/:id 404 · /productos/:id 404 · …/ubicaciones 404 ·
+    …/componentes 404 · /recetas?locationId= 403 · /analitica/ventas 403 · /costeo 403 ·
+    /inventario/saldos 403      — ni un 200, ni un 500
+```
+
+**El id ajeno sí aparece en la página**, en el `href` del «← Volver» que se arma con el parámetro de
+la URL. No es una fuga —lo puso el navegador— y la comprobación lo separa: cuenta el id en el texto
+(0), en los enlaces (1) y en el resto del HTML (0).
+
+### Lo que queda dicho y no hecho
+
+- **D-16.195** restauración por tenant: commit propio, antes de la parada del piloto.
+- **D-16.196** el eje de IP del login **sí** puede dejar fuera una IP entera por los fallos de una
+  sola cuenta (25 fallos, escalada hasta 60 min): se relaja en su commit, con incidencia.
+- **D-16.197** `app_user.email` es único global: duda **#15** con plazo.
+- La pantalla 11 anotó su «repetido → 409» cuando la API aún devolvía 400; desde este commit es 409 de
+  verdad, que es lo que decía su documentación.
+
+### Decisiones
+
+D-16.193…D-16.197 en `ESTADO.md`; duda #15.

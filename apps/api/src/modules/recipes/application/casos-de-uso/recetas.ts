@@ -37,7 +37,7 @@ import {
   type SesionActiva,
 } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { cicloAlGuardar, CicloEnRecetaError } from '../../domain/ciclos';
-import { ProductoNoEncontradoError, RecetaInvalidaError } from '../../domain/errores';
+import { ProductoNoEncontradoError, ProductoRepetidoError, RecetaInvalidaError } from '../../domain/errores';
 import type {
   DestinoDeReceta,
   LineaParaGuardar,
@@ -69,7 +69,7 @@ export class CrearProducto {
     });
 
     if (resultado.clase === 'nombre_en_uso') {
-      throw new RecetaInvalidaError('Ya existe un producto con ese nombre.');
+      throw new ProductoRepetidoError();
     }
     // El plan, no el permiso: 409, no 403 (ver `LimiteDelPlanError`).
     if (resultado.clase === 'limite') {

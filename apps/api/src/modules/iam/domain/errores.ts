@@ -44,7 +44,7 @@ export class AccesoBloqueadoError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ACCESO_BLOQUEADO';
 
   public constructor(public readonly bloqueadoHasta: Date) {
-    super('Demasiados intentos fallidos. Vuelve a intentarlo mas tarde.', {
+    super('Demasiados intentos fallidos. Vuelve a intentarlo más tarde.', {
       bloqueadoHasta: bloqueadoHasta.toISOString(),
     });
   }
@@ -64,7 +64,7 @@ export class SesionInvalidaError extends ErrorDeDominio {
   public constructor(
     motivo: 'ausente' | 'desconocida' | 'revocada' | 'caducada' | 'inactiva' | 'sin_csrf',
   ) {
-    super('Sesion no valida. Inicia sesion de nuevo.', { motivo });
+    super('Sesión no válida. Inicia sesión de nuevo.', { motivo });
   }
 }
 
@@ -121,7 +121,7 @@ export class TokenDeRestablecimientoInvalidoError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
 
   public constructor() {
-    super('El enlace de restablecimiento no es valido o ya caduco. Pide uno nuevo.');
+    super('El enlace de restablecimiento no es válido o ya caducó. Pide uno nuevo.');
   }
 }
 
@@ -143,7 +143,7 @@ export class UbicacionNoEncontradaError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
 
   public constructor() {
-    super('Esa ubicacion no existe en tu company.');
+    super('Esa ubicación no existe en tu company.');
   }
 }
 
@@ -160,6 +160,6 @@ export class UbicacionFueraDeAlcanceError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'PERMISO_DENEGADO';
 
   public constructor() {
-    super('Esa ubicacion no esta en tu alcance.');
+    super('Esa ubicación no está en tu alcance.');
   }
 }

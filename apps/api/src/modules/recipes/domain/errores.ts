@@ -8,6 +8,23 @@ export class RecetaInvalidaError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
 }
 
+/**
+ * Un nombre de producto repetido DENTRO de la company (D-16.194).
+ *
+ * Sale como 409 y no como 400 —igual que el nombre repetido del catálogo— porque
+ * la petición está bien formada: lo que choca es el estado que ya hay. Y choca
+ * solo dentro de la company: el índice es `product_company_id_name_key`, por
+ * `(company_id, name)`, así que dos clientes pueden vender los dos su «Arroz
+ * marinero» sin enterarse el uno del otro.
+ */
+export class ProductoRepetidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor() {
+    super('Ya existe un producto con ese nombre.');
+  }
+}
+
 export class ProductoNoEncontradoError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
 

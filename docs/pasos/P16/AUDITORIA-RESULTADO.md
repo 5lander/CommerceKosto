@@ -747,3 +747,40 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Verificación multi-tenant · 2026-09-17
+
+**Alcance del diff:** `apps/api` (`ProductoRepetidoError` y su uso, tildes de cinco mensajes de `iam`,
+🔴 del nombre por company), `docs/pruebas/ESTRATEGIA.md`, `docs/apis/app-cliente.md`, `ESTADO.md`,
+`CHANGELOG` y `docs/pasos/P16/`. **Ni una línea de `apps/web`.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | El error nuevo es de dominio y no sabe de HTTP; el 409 lo pone `ErrorFilter` por su código |
+| B · Código | ✅ | `audit:types`, `audit:lint`, `audit:complexity`; `audit:forbidden` **47 reglas sobre 561 archivos** |
+| C · Seguridad | ✅ | **Las tres barreras, vistas desde la pantalla**: 0 fugas en 8 listados, «no encontrado» en sitio en 7 fichas ajenas, «no está en tu alcance» en 3 pantallas con sucursal ajena, y 404/403 en la API sobre nueve rutas ajenas |
+| E · Reglas | ✅ | R1 verificada también por la interfaz (D-16.193); el nombre único por company, con 🔴 |
+| G · Pruebas | ✅ | **894 unitarias** (sin base) y **542 de integración**, una más: la 🔴 del nombre por company |
+| H · Documentación | ✅ | Estrategia de pruebas, `app-cliente.md` (el 409 y por qué es por company), ESTADO con «tenant cruzado ✓» en las 15 filas |
+| I · Duplicación | ✅ | `Found 0 clones` |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 561 archivos
+✔ no dependency violations found (391 modules, 1754 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 18 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 528 skipped (547)
+      Tests  894 passed (894)
+ℹ tests 49
+ℹ pass 49
+ℹ fail 0
+      Tests  542 passed | 5 skipped (547)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

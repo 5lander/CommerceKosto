@@ -4,6 +4,22 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16 · Verificación multi-tenant — dos companies en el entorno sintético · 2026-09-17
+
+> Sin pantallas nuevas. `apps/api` y documentación.
+
+**El entorno de verificación pasa a tener dos restaurantes**, con los mismos nombres de datos y
+cifras distintas: lo que distingue a uno del otro en la pantalla es el id, no el texto. Las pantallas
+1–14 quedan comprobadas contra la company de al lado —ningún listado trae filas ajenas, y toda ficha
+con un id ajeno responde «no existe en tu company» en sitio, nunca un 500—, y así se verificará cada
+pantalla nueva.
+
+**Corregido de paso:** crear un producto con un nombre repetido devolvía 400 donde la documentación
+decía 409 —ahora es 409, y el conflicto es **por company**: dos clientes pueden tener los dos su
+«Arroz marinero»—, y cinco mensajes visibles de sesión y ubicación recuperan sus tildes.
+
+---
+
 ## P16 · Pantalla 14 — Escribir la receta · 2026-09-14
 
 > Decimoquinto commit de pantallas. Sin cambios en `apps/api`.

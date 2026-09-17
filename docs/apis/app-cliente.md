@@ -514,7 +514,9 @@ La cadena de costo de SPEC §12 entera, a una fecha:
 { "nombre": "Empanada de verde", "tipo": "SIMPLE", "categoria": "SNACK ATTACK" }
 ```
 
-**201** con `{ id }`. `tipo`: `SIMPLE` (receta a ítems) o `COMBO` (componentes que son productos simples). **409** si el nombre ya existe en la company.
+**201** con `{ id }`. `tipo`: `SIMPLE` (receta a ítems) o `COMBO` (componentes que son productos simples). **409 `CONFLICTO`** si el nombre ya existe en la company.
+
+**El conflicto es POR COMPANY, y sale del índice `product_company_id_name_key`** *(D-16.194)*: dos clientes pueden vender los dos su «Arroz marinero» y ninguno se entera del otro — 201 en las dos. Un índice global sobre el nombre sería una fuga de aislamiento con forma de conflicto. **Hasta la verificación multi-tenant este caso salía como 400** aunque esta página ya decía 409; lo fija la 🔴 de `productos.spec.ts`.
 
 ### `PUT /productos/:id/ubicaciones` — `product.write`
 
