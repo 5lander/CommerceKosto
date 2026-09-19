@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Fecha** | 2026-09-17 |
+| **Fecha** | 2026-09-17 · **umbral revisado el 2026-09-19 (D-16.199)** |
 | **Estado** | Aceptada |
 | **Paquete** | P16-F |
 | **Decisión del usuario** | D-16.196 |
@@ -39,12 +39,35 @@ titular en la transición). Bloquea una credencial por sus propios fallos y no a
 
 | | Antes | Ahora |
 |---|---|---|
-| Qué cuenta | fallos desde la IP | **cuentas distintas** tanteadas desde la IP |
-| Umbral | 25 en 60 min | **10 cuentas distintas** en 60 min |
+| Qué cuenta | fallos desde la IP | **cuentas distintas con fallos** desde la IP — nunca intentos |
+| Umbral | 25 en 60 min | **50 cuentas distintas** en 60 min *(D-16.199; la primera versión puso 10)* |
 | Respuesta | `ACCESO_BLOQUEADO`, escalando a 60 min | **429 `LIMITE_DE_SOLICITUDES`** con `Retry-After`, **15 min fijos** desde el último fallo |
 
 Contar cuentas distintas es contar **la firma del rociado**, no el síntoma: un barrido son muchos
 correos, no muchos intentos. Con eso, una sola cuenta —mil fallos— no toca nunca el eje de IP.
+
+### Por qué cincuenta y no diez (D-16.199)
+
+La primera versión puso el umbral en **diez cuentas por hora**, y ese número está mal por el mismo
+motivo que estaba mal contar fallos: **mide una IP como si detrás hubiera un local**.
+
+- Detrás de un **CGNAT** hay cientos de abonados del mismo operador. Diez personas distintas
+  equivocándose en una hora, en poblaciones así, es un martes cualquiera.
+- El **wifi de un centro comercial**, de una universidad o de un coworking junta más: si allí trabajan
+  diez clientes nuestros, diez fallos los pone la mañana del lunes, sin ningún atacante.
+- El precio de equivocarse **no es simétrico**. Pasarse de estricto deja fuera a terceros que no han
+  hecho nada, durante quince minutos, y el usuario legítimo no entiende por qué —es el daño de
+  INC-027 devuelto por otra puerta—. Quedarse corto deja pasar un barrido **que cada cuenta sigue
+  parando por su lado**: cinco fallos y esa cuenta se bloquea.
+
+**Cincuenta cuentas distintas en una hora desde una sola dirección no es ruido de oficina: es un
+barrido.** Un rociado de verdad tantea cientos o miles de correos —ese es su único modo de funcionar,
+porque prueba una contraseña común contra todo el padrón— y pasa de cincuenta sin despeinarse. El
+umbral queda donde el tráfico legítimo compartido no llega y el ataque sí.
+
+**Y cuenta cuentas, nunca intentos**, con una 🔴 que lo fija: cuatrocientos fallos repartidos entre
+diez correos siguen siendo diez cuentas. Volver a contar intentos —por la vía que sea— pone en rojo
+esa prueba.
 
 La duración fija es lo que impide que el límite se convierta en la denegación de servicio que quería
 evitar: insistir alarga la espera (el enfriamiento cuenta desde el último fallo) pero nunca la
@@ -68,9 +91,11 @@ no arregla un límite de IP, y esperar no desbloquea una cuenta.
 
 ## Consecuencias
 
-- Un rociado de **nueve** cuentas por hora y por IP ya no se corta por este eje. Es el precio: se
-  eligió no castigar a terceros. Lo que sí sigue protegiendo a cada cuenta es su propio bloqueo, y a
-  todas, la política de contraseñas y el hash Argon2id.
+- Un rociado de **menos de cincuenta** cuentas por hora y por IP ya no se corta por este eje. Es el
+  precio, y se paga a sabiendas: se eligió no castigar a terceros. Lo que sí sigue protegiendo a cada
+  cuenta es su propio bloqueo —cinco fallos—, la política de contraseñas y el hash Argon2id.
+- Si algún día hiciera falta apretar, **el número se mira con datos**: cuántas cuentas distintas
+  fallan por hora y por IP en producción, que es justo lo que `login_attempt` ya registra.
 - `login_attempt` se lee ahora con el correo además de la fecha en el eje de IP; el índice
   `(ip, at)` sigue sirviendo.
 - La tabla de SEGURIDAD.md §2.1 —«5 intentos / 15 min por cuenta **y** por IP»— queda apartada en su
@@ -83,8 +108,10 @@ no arregla un límite de IP, y esperar no desbloquea una cuenta.
 
 - mil fallos de **una** cuenta desde una IP **no** limitan esa IP, y otra cuenta entra con sus
   credenciales;
-- **diez cuentas distintas** sí: 429 `LIMITE_DE_SOLICITUDES` con `Retry-After` ≤ 15 min;
-- **no escala**: cuarenta cuentas esperan lo mismo que diez;
+- **doce cuentas distintas tampoco** (D-16.199): eso lo junta una IP compartida un lunes;
+- **cuatrocientos fallos de diez cuentas siguen siendo diez cuentas**: se cuentan cuentas, no intentos;
+- **cincuenta** sí: 429 `LIMITE_DE_SOLICITUDES` con `Retry-After` ≤ 15 min;
+- **no escala**: cien cuentas esperan lo mismo que cincuenta;
 - el enfriamiento son 15 minutos desde el último fallo, y a los 16 se pasa;
 - fuera de la ventana de una hora, las cuentas ya no cuentan;
 - limitado por IP **tampoco gasta un hash**: el Argon2id no se toca.

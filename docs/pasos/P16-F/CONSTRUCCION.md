@@ -86,6 +86,35 @@ con `127.0.0.1` como proxy de confianza y manda `X-Forwarded-For` con una IP de 
 5737): así vive en una dirección que no es de nadie, no borra la tabla de todos y no le cae encima a
 ninguna otra suite.
 
-## 5 · Decisiones
+## 5 · Revisión del umbral — D-16.199 (2026-09-19)
 
-D-16.196 en `ESTADO.md`; **ADR-028**; **INC-027**.
+El umbral salió a **diez cuentas por hora**, y el usuario lo corrigió en cuanto lo leyó: ese número
+mide una IP **como si detrás hubiera un local**. Detrás de un CGNAT hay cientos de abonados; detrás
+del wifi de un centro comercial, de una universidad o de un coworking, más. **Diez cuentas distintas
+fallando en una hora las junta cualquier lunes por la mañana**, sin un solo atacante — y dejar a esa
+gente fuera un cuarto de hora es exactamente el daño que este eje existe para no causar.
+
+| | Primera versión | Ahora (D-16.199) |
+|---|---|---|
+| Umbral | 10 cuentas / 60 min | **50 cuentas / 60 min** |
+| Qué cuenta | cuentas distintas | cuentas distintas **con fallos, nunca intentos** (fijado por 🔴) |
+
+**El error no es simétrico, y por eso el número sube.** Pasarse de estricto castiga a terceros que no
+han hecho nada; quedarse corto deja pasar un barrido *que cada cuenta sigue parando por su lado* a
+los cinco fallos. Un rociado de verdad tantea cientos de correos —es su único modo de funcionar— y
+pasa de cincuenta sin despeinarse.
+
+Tres 🔴 nuevas lo fijan, y son el guardián de las dos mitades de la decisión:
+
+```
+🔴 doce cuentas distintas con un fallo cada una NO limitan la IP      (dominio, caso de uso y HTTP)
+🔴 cuatrocientos fallos de diez cuentas siguen siendo diez cuentas    (cuentas, nunca intentos)
+🔴 cincuenta sí: 429 con Retry-After ≤ 15 min, y no escala (100 = 50)
+```
+
+El porqué del número vive en **ADR-028**, con lo que se mira si algún día hay que apretarlo: cuántas
+cuentas distintas fallan por hora y por IP en producción, que es lo que `login_attempt` ya registra.
+
+## 6 · Decisiones
+
+D-16.196 y **D-16.199** en `ESTADO.md`; **ADR-028**; **INC-027**.

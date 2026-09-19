@@ -57,17 +57,26 @@ const UMBRAL_POR_CUENTA = 5;
  *
  * Lo que este eje tiene que cortar es el ROCIADO DE CONTRASENAS: una IP
  * probando "Verano2026" contra cien correos. Esa firma no son "muchos fallos",
- * son MUCHAS CUENTAS DISTINTAS, asi que es lo que se cuenta. Y la respuesta es
- * un 429 de duracion FIJA —esperar y volver—, nunca una escalada: el limite
- * frena el barrido sin convertirse en la denegacion de servicio que cualquiera
- * dispara desde la acera con el wifi del sitio.
+ * son MUCHAS CUENTAS DISTINTAS, asi que es lo que se cuenta —cuentas CON
+ * fallos, nunca intentos: un correo que falla cuarenta veces sigue siendo UNA
+ * cuenta—. Y la respuesta es un 429 de duracion FIJA —esperar y volver—, nunca
+ * una escalada: el limite frena el barrido sin convertirse en la denegacion de
+ * servicio que cualquiera dispara desde la acera con el wifi del sitio.
+ *
+ * EL UMBRAL SE CALIBRA PARA LO COMPARTIDO, NO PARA UN LOCAL (D-16.199). Cincuenta
+ * cuentas distintas fallando en una hora desde la misma direccion no es un
+ * restaurante teniendo un mal dia: es un barrido. Detras de una IP con CGNAT hay
+ * cientos de abonados, y detras del wifi de un centro comercial o de una
+ * universidad, mas; diez cuentas las junta cualquier lunes por la manana, y
+ * dejarlos a todos fuera un cuarto de hora es el dano que este eje existe para
+ * no causar. El ataque real no se acerca a cincuenta: los pasa de largo.
  *
  * Y LA IP TIENE QUE SER LA DEL CLIENTE, NO LA DEL PROXY. Detras de Caddy toda
  * peticion llega con la IP del contenedor `caddy`: sin `ipDelCliente` y
  * `PROXY_DE_CONFIANZA` (D-16.49, INC-022) este eje contaria a todos los
  * usuarios como uno solo.
  */
-const CUENTAS_DISTINTAS_POR_IP = 10;
+const CUENTAS_DISTINTAS_POR_IP = 50;
 const MINUTOS_DE_ENFRIAMIENTO_DE_IP = 15;
 
 const MINUTOS_DE_DISPARO = 15;

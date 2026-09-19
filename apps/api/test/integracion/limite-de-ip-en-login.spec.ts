@@ -2,7 +2,8 @@
  * 🔴 El eje de IP del login limita, no bloquea — D-16.196, ADR-028, INC-027.
  *
  *   🔴  treinta fallos de UNA cuenta desde una IP no dejan fuera a las demas
- *   🔴  diez cuentas distintas si: 429 LIMITE_DE_SOLICITUDES con Retry-After
+ *   🔴  doce cuentas distintas tampoco: eso lo junta una IP compartida (D-16.199)
+ *   🔴  cincuenta si: 429 LIMITE_DE_SOLICITUDES con Retry-After
  *
  * VIVE EN SU PROPIO ARCHIVO, Y CON UNA IP FALSA, POR UNA RAZON QUE ES LA MISMA
  * QUE LA DEL CAMBIO. Las demas suites salen todas de `127.0.0.1`: si estas
@@ -33,8 +34,10 @@ const OK = 200;
 const DEMASIADAS_PETICIONES = 429;
 /** Quince minutos: el enfriamiento fijo del eje de IP (ADR-028). */
 const SEGUNDOS_DE_ENFRIAMIENTO = 15 * 60;
-/** Cuentas distintas en una hora que disparan el limite. */
-const CUENTAS_DEL_ROCIADO = 10;
+/** Cuentas distintas en una hora que disparan el limite (D-16.199). */
+const CUENTAS_DEL_ROCIADO = 50;
+/** Lo que junta un lunes por la manana detras de un CGNAT, y NO puede limitar. */
+const CUENTAS_DE_UN_LUNES = 12;
 
 const CONTRASENA = 'tres cebollas moradas';
 
@@ -123,7 +126,17 @@ describe('🔴 el eje de IP del login limita, no bloquea (D-16.196)', () => {
     expect(respuesta.status).toBe(OK);
   });
 
-  it('🔴 diez cuentas distintas si: 429 LIMITE_DE_SOLICITUDES con Retry-After, sin bloquear ninguna cuenta', async () => {
+  it('🔴 doce cuentas distintas NO limitan: eso lo junta una IP compartida (D-16.199)', async () => {
+    await duena.query('DELETE FROM login_attempt WHERE ip = $1', [IP]);
+    const tanteadas = Array.from({ length: CUENTAS_DE_UN_LUNES }, (_, n) => `lunes${String(n)}.${randomUUID().slice(0, 6)}@snacklab.ec`);
+    await fallosDesdeLaIp(tanteadas, 1);
+
+    const respuesta = await entrar(admin);
+
+    expect(respuesta.status).toBe(OK);
+  });
+
+  it('🔴 cincuenta cuentas distintas si: 429 LIMITE_DE_SOLICITUDES con Retry-After, sin bloquear ninguna cuenta', async () => {
     await duena.query('DELETE FROM login_attempt WHERE ip = $1', [IP]);
     const tanteadas = Array.from({ length: CUENTAS_DEL_ROCIADO }, (_, n) => `barrido${String(n)}.${randomUUID().slice(0, 6)}@snacklab.ec`);
     await fallosDesdeLaIp(tanteadas, 1);

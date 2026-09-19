@@ -370,9 +370,15 @@ describe('IniciarSesion', () => {
       await expect(entrar()).resolves.toBeDefined();
     });
 
-    it('🔴 diez cuentas distintas desde la misma IP si limitan: eso ya es rociado', async () => {
+    it('🔴 doce cuentas distintas NO limitan: eso lo junta un CGNAT un lunes (D-16.199)', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(12) };
+
+      await expect(entrar()).resolves.toBeDefined();
+    });
+
+    it('🔴 cincuenta cuentas distintas desde la misma IP si limitan: eso ya es rociado', async () => {
       // Ninguna cuenta llega a cinco fallos; sin este eje el barrido pasaria entero.
-      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(10) };
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(50) };
 
       await expect(entrar()).rejects.toBeInstanceOf(RociadoDeContrasenasError);
     });
@@ -388,17 +394,17 @@ describe('IniciarSesion', () => {
         }
       };
 
-      expect(await espera(10)).toBe(await espera(40));
+      expect(await espera(50)).toBe(await espera(100));
     });
 
     it('y limitar por IP no es bloquear una cuenta: 429 con espera, no ACCESO_BLOQUEADO', async () => {
-      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(10) };
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(50) };
 
       await expect(entrar()).rejects.not.toBeInstanceOf(AccesoBloqueadoError);
     });
 
     it('limitado por IP tampoco gasta un hash', async () => {
-      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(10) };
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(50) };
 
       await expect(entrar()).rejects.toThrow();
 

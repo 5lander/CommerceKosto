@@ -4,6 +4,20 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-F2 · El umbral del eje de IP se calibra para IPs compartidas · 2026-09-19
+
+> API y documentación. Sin migraciones.
+
+**Diez cuentas equivocándose en una hora no son un ataque: son un lunes.** El límite por IP del login
+salió con ese umbral, y detrás de un CGNAT —o del wifi de un centro comercial— lo alcanza gente que
+no ha hecho nada, quedándose fuera un cuarto de hora. Sube a **cincuenta cuentas distintas por hora**,
+que es donde el tráfico legítimo compartido no llega y un barrido de contraseñas sí.
+
+Y queda fijado por prueba que cuenta **cuentas, nunca intentos**: cuatrocientos fallos repartidos
+entre diez correos siguen siendo diez cuentas.
+
+---
+
 ## P16-G · Restaurar un solo cliente, y el respaldo que no cabía en memoria · 2026-09-17
 
 > Herramientas de operación y documentación. Sin cambios en `apps/`.

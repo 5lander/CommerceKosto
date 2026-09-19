@@ -33,3 +33,38 @@ audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documen
 audit:tests  OK — unitarias (sin base) e integracion en verde
 audit exit=0
 ```
+
+---
+
+## Revisión del umbral — D-16.199 (2026-09-19)
+
+**Alcance del diff:** `apps/api` (una constante del dominio, su comentario y cinco pruebas),
+`docs/` (ADR-028 con el porqué del número, SEGURIDAD, sistema/seguridad, app-cliente, este paso),
+`ESTADO.md` y `CHANGELOG`. **Sin migraciones y sin cambios de forma: solo el número y lo que lo fija.**
+
+| Sección | Resultado | Evidencia |
+|---|---|---|
+| A · Arquitectura | ✅ | El cambio es **una constante del dominio**; ni el caso de uso ni el adaptador se tocan |
+| C · Seguridad | ✅ | El umbral sube donde el tráfico legítimo compartido no llega (50 cuentas/hora). El eje de cuenta —el que protege la credencial— no cambia: cinco fallos y esa cuenta se bloquea |
+| E · Reglas | ✅ | ADR-028 gana la sección «Por qué cincuenta y no diez», con el error asimétrico escrito y qué se mira para revisarlo |
+| G · Pruebas | ✅ | **905 unitarias** (+3) y **546 de integración** (+1): doce cuentas no limitan · cuatrocientos fallos de diez cuentas siguen siendo diez · cincuenta sí, sin escalada |
+| I · Duplicación | ✅ | `Found 0 clones` |
+
+### Salida de `npm run audit`
+
+```
+audit:forbidden  OK — 47 reglas sobre 567 archivos
+✔ no dependency violations found (391 modules, 1755 dependencies cruised)
+audit:arch  OK — reglas de capa respetadas y guardian verificado
+Found 0 clones.
+audit:migrations  OK — 19 migracion(es) reversibles y con RLS
+audit:deps  OK — sin vulnerabilidades altas fuera de las 4 aceptadas y documentadas
+      Tests  19 passed | 532 skipped (551)
+      Tests  905 passed (905)
+ℹ tests 49
+ℹ pass 49
+ℹ fail 0
+      Tests  546 passed | 5 skipped (551)
+audit:tests  OK — unitarias (sin base) e integracion en verde
+audit exit=0
+```

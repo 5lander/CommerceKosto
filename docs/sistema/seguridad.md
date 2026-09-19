@@ -339,13 +339,14 @@ Lista local y no HIBP: la comprobación por k-anonimato mete una llamada de red 
 | Eje | Cuenta | Umbral | Al exceder |
 |---|---|---|---|
 | **Cuenta** | fallos de ese correo desde el último acceso correcto | 5 / 15 min | **Bloqueo** escalonado 1 → 5 → 15 → 60 min, y aviso al titular en la transición |
-| **IP** | **cuentas distintas** tanteadas desde esa dirección | 10 / 60 min | **429 `LIMITE_DE_SOLICITUDES`** con `Retry-After`; **15 min fijos** desde el último fallo, sin escalada |
+| **IP** | **cuentas distintas con fallos** desde esa dirección (nunca intentos) | **50 / 60 min** | **429 `LIMITE_DE_SOLICITUDES`** con `Retry-After`; **15 min fijos** desde el último fallo, sin escalada |
 
 **El eje de IP no bloquea a nadie**, y es deliberado (D-16.196, ADR-028, INC-027): detrás de una IP
 hay una cocina entera —o, con CGNAT, medio barrio—, así que dejar la dirección fuera por los fallos
 de una sola cuenta convierte la defensa en una denegación de servicio que cualquiera dispara desde el
 wifi del local. Lo que ese eje corta es el **rociado de contraseñas**, y un rociado son muchos
-correos, no muchos intentos: por eso cuenta cuentas.
+correos, no muchos intentos: por eso cuenta cuentas. Y el umbral —50 por hora, D-16.199— se calibra
+para lo compartido: doce cuentas fallando las junta cualquier lunes, cincuenta ya no.
 
 La IP es la del cliente y no la del proxy (`ipDelCliente` + `PROXY_DE_CONFIANZA`, INC-022), y los dos
 ejes se evalúan **antes** de verificar la contraseña: ni un bloqueo ni un límite deben conseguir que
