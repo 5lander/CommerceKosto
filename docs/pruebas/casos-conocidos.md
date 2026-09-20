@@ -492,6 +492,141 @@ Se prueban en `shared/domain/iva/neteo.spec.ts` y `precedencia.spec.ts` (dominio
 
 ---
 
+---
+
+## CC-010 · CC-011 · CC-012 — Un mes con el vocabulario completo del libro (D-16.201)
+
+**Qué prueban:** los **tres agregados de dinero** del modelo —`compras_del_mes`, `CONSUMO_REAL` y la
+valorización del inventario— sobre **un único mes que usa todo el vocabulario del libro**: compra,
+corrección de compra, transferencia, producción, merma, ajuste y consumo por venta. Los tres se
+alimentan del mismo dataset, así que un número que se mueva en uno se ve en los otros.
+
+**Por qué existen (D-16.201).** Cierran **la clase de INC-029**, no su instancia. El saldo tenía dos
+definiciones vigilándose —el `SUM` de PostgreSQL y `proyectarSaldos`— y el dinero **no tenía
+ninguna**: vivía dentro de una consulta, en infraestructura, sin un solo número esperado escrito en
+ninguna parte. Por esa grieta pasó una compra corregida que seguía contando su importe. Estos casos
+ponen el número esperado por delante del código.
+
+**Origen:** construidos y **calculados a mano antes de escribir el pliegue**, el 2026-09-20.
+
+**Qué cubre el Excel, y qué no:** cubre **las fórmulas** —SPEC §16 y §18, verificadas una a una
+contra el archivo en P8 (ver la tabla del final de este documento)— y **no cubre los resultados**,
+por tres razones que ya estaban escritas: el Excel **no tiene dimensión temporal** (SPEC §3), **no
+tiene correcciones, transferencias ni producción** (son la extensión de P6) y **tiene todas las
+unidades vendidas en cero**, así que sus vistas de período están vacías en el propio archivo. Lo
+contrastable —cada fórmula— está contrastado; lo demás se calcula aquí y se dice que es de aquí.
+
+### El dataset: Local Centro, marzo 2026, ítem «Arroz» en kg
+
+**Costo neto de uso del arroz: `1.00 / kg`** — igual al neto de la primera compra, a propósito: con
+el precio de referencia y el precio pagado coincidiendo, cada número de estos casos se puede
+comprobar en kilos y en dólares a la vez.
+
+| # | Fecha | Tipo | Cantidad (con signo) | `total_cost` (magnitud) | Nota |
+|---|---|---|---|---|---|
+| 1 | 03-03 | `COMPRA` | `+100` | `100.00` | 100 kg a 1,00 netos |
+| 2 | 03-10 | `COMPRA` | `+50` | `50.00` | |
+| 3 | 03-11 | `COMPRA` | `−50` | `50.00` | **la corrección de la #2**: mismo tipo, cantidad contraria, importe en positivo (R3, ADR-009 §3) |
+| 4 | 03-12 | `TRANSFERENCIA_SALIDA` | `−20` | `null` | **no lleva importe**: mueve stock, no dinero. La otra pata entra en Bodega Norte, que es otro libro |
+| 5 | 03-15 | `PRODUCCION` | `−8` | `8.00` | el arroz que se fue a una preparación |
+| 6 | 03-20 | `MERMA` | `−2.5` | `null` | |
+| 7 | 03-28 | `AJUSTE` | `+0.5` | `null` | |
+| 8 | 03-31 | `CONSUMO_POR_VENTA` | `−22` | `null` | la receta × las unidades vendidas |
+
+**Y dos datos que no son movimientos:** el conteo confirmado de **febrero** fue **40 kg**, y el
+conteo físico de **marzo** fue **86 kg**.
+
+---
+
+### CC-010 — `compras_del_mes` y las cantidades de SPEC §18
+
+**Entrada:** los ocho movimientos de arriba.
+
+| Salida | Esperado | De dónde sale |
+|---|---|---|
+| `importeDeCompras` | **`100.00`** | `+100.00 + 50.00 − 50.00` — el importe lleva **el signo de su cantidad** |
+| `compras` (cantidad) | **`100.000000000000`** kg | `+100 + 50 − 50` |
+| `mermasYAjustes` | **`−2.000000000000`** kg | `−2.5 + 0.5` |
+| `otros` | **`−28.000000000000`** kg | `−20` transferencia `− 8` producción |
+
+**Las aserciones que discriminan**
+
+| # | Aserción | Qué implementación mata |
+|---|---|---|
+| 1 | `importeDeCompras` vale `100.00`, **no `200.00`** | La que suma `total_cost` sin mirar el signo de la cantidad: cuenta la compra corregida **dos veces**. Es INC-029 exactamente |
+| 2 | `importeDeCompras` vale `100.00`, **no `208.00` ni `92.00`** | La que suma el dinero de **todos** los tipos: el consumo de una producción lleva importe y no es una compra. `208` es sumarlo todo sin signo; `92`, sumarlo todo con signo |
+| 3 | El `CONSUMO_POR_VENTA` no aparece en ningún agregado | La que lo suma en `otros` — y deja el stock teórico corto por el consumo entero del mes |
+| 4 | Barajar los ocho movimientos no cambia ni un dígito | La que acumula con punto flotante, donde el orden sí importa |
+
+Probado en `apps/api/src/modules/inventory/domain/agregados.spec.ts`, **con la base apagada**.
+
+---
+
+### CC-011 — `CONSUMO_REAL` y su varianza (SPEC §16)
+
+**Entrada** — `inventario_inicial = 40 × 1.00`, `compras_del_mes = 100.00` (de CC-010),
+`inventario_final_fisico = 86 × 1.00`, `consumo_teorico = 22 × 1.00`.
+
+| Salida | Esperado | De dónde sale |
+|---|---|---|
+| `CONSUMO_REAL` | **`54.00`** | `40.00 + 100.00 − 86.00` |
+| `CONSUMO_TEORICO` | **`22.00`** | 22 kg de receta × 1,00 |
+| `VARIANZA_USD` | **`32.00`** | `54.00 − 22.00` |
+
+**La varianza se desglosa exactamente en el vocabulario del libro**, y es lo que hace útil este caso:
+
+```
+32.00 = 20.00 transferencia + 8.00 producción + 2.50 merma − 0.50 ajuste + 2.00 faltante del conteo
+```
+
+> ⚠️ **Lo que este caso deja a la vista, y no se arregla aquí.** De esos 32,00, **28,00 son
+> transferencia y producción**: stock que salió de este local sin haberse consumido en él. La
+> fórmula de SPEC §16 —`inicial + compras − final`— los cuenta como consumo porque **en el Excel no
+> existen**: no hay transferencias ni producción en un único local sin dimensión temporal. A nivel
+> de company se compensan —el local que recibe muestra consumo negativo—; **por ubicación, no**.
+> Queda anotado como **duda abierta #16**, junto a la divergencia de la MC promedio: es una decisión
+> de modelo, no un error de aritmética, y cambiarla toca SPEC §16.
+
+Probado en `apps/api/src/modules/analytics/domain/vistas.spec.ts`, con la base apagada.
+
+---
+
+### CC-012 — El inventario valorizado del mismo mes (SPEC §18)
+
+**Entrada** — las cantidades de CC-010, `stock_inicial = 40`, `consumo_teorico = 22`,
+`conteo_fisico = 86`, `costo_de_uso = 1.00`, y los parámetros de la company (`dias_operativos = 22`,
+`dias_cobertura = 7`).
+
+| Salida | Esperado | De dónde sale |
+|---|---|---|
+| `STOCK_TEORICO` | **`88`** kg | `40 + 100 + (−2) + (−28) − 22` |
+| `valor_teorico` | **`88.00`** | `88 × 1.00` |
+| `diferencia` | **`−2`** kg | `86 − 88`: el conteo encontró dos kilos menos |
+| `valor_diferencia` | **`−2.00`** | |
+| `punto_de_reorden` | **`7`** kg | `(22 / 22) × 7` — un kilo al día, siete días de cobertura |
+| `dias_cobertura` | **`88`** | `88 / (22 / 22)` |
+| `estado` | **`OK`** | 88 kg está muy por encima de los 7 de reorden |
+
+**La aserción que discrimina:** el `−2` de la diferencia **no es la merma ni el ajuste**. Los dos ya
+están dentro del stock teórico; el faltante es lo que el libro **no explica**, y por eso vale
+exactamente dos kilos y no `−2.5` ni `+0.5`. Una implementación que olvidara `otros` daría un stock
+teórico de 116 kg y una diferencia de −30: el error saldría quince veces mayor que el hallazgo real.
+
+Probado en `apps/api/src/modules/analytics/domain/vistas.spec.ts`, con la base apagada.
+
+---
+
+### Lo que cierra la clase, y no solo la instancia
+
+Tres piezas, no una:
+
+1. **La definición vive en el dominio** (`inventory/domain/agregados.ts`) y no dentro de una
+   consulta. Antes, el único sitio donde estaba escrito qué significa `compras_del_mes` era SQL.
+2. **Los tres casos están aquí, con su número esperado**, calculados antes que el pliegue.
+3. **Una prueba de integración exige que el `SUM` de PostgreSQL y el pliegue del dominio den el
+   mismo número** sobre el mismo libro — el mismo criterio que P6 fijó para el saldo, ahora también
+   para el dinero. Si una consulta futura olvida el signo, falla ahí.
+
 ## Cobertura — estado tras P5
 
 Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se redactaron en la fase PLAN de P5, antes de tocar el motor**, y el motor se implementó contra ellos.

@@ -30,13 +30,19 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
+import { plegarAgregadosDelPeriodo } from '../../src/modules/inventory/domain/agregados';
 import { proyectarSaldos } from '../../src/modules/inventory/domain/saldo';
+import {
+  REPOSITORIO_DE_INVENTARIO,
+  type RepositorioDeInventario,
+} from '../../src/modules/inventory/application/ports/repositorio-de-inventario.port';
 import type { TipoDeMovimiento } from '../../src/modules/inventory/domain/movimiento';
 import {
+  companyId as aCompanyId,
   itemId as aItemId,
   locationId as aLocationId,
 } from '../../src/shared/domain/identity/identificadores';
-import { Quantity } from '../../src/shared/domain/money/tipos-monetarios';
+import { Money, Quantity } from '../../src/shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../src/shared/domain/unidad/unidad-de-uso';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { cookieConCsrf, csrfDe } from '../soporte/csrf';
@@ -93,6 +99,8 @@ describe('inventario', () => {
   let cookieBodega: string;
   let bodegaCentral: string;
   let local: string;
+  /** La company del tenant de esta suite. La necesita quien llama al repositorio. */
+  let company: string;
 
   function servidor(): Server {
     return app.getHttpServer() as Server;
@@ -261,7 +269,7 @@ describe('inventario', () => {
       `INSERT INTO company (name, status) VALUES ($1, 'ACTIVE') RETURNING id`,
       [`inventario ${sufijo}`],
     );
-    const company = rows[0]?.id ?? '';
+    company = rows[0]?.id ?? '';
 
     // `company_settings` NO se inserta aquí: la crea la semilla de P3 al dar de
     // alta la company, con los valores de D3. Insertarla a mano choca contra su
@@ -456,8 +464,8 @@ describe('inventario', () => {
 
       const { rows } = await duena.query<{ suma: string }>(
         `SELECT COALESCE(SUM(quantity), 0)::text AS suma FROM inventory_movement
-         WHERE item_id = $1 AND type = 'COMPRA'`,
-        [item],
+         WHERE company_id = $2 AND item_id = $1 AND type = 'COMPRA'`,
+        [item, company],
       );
       expect(Number.parseFloat(rows[0]?.suma ?? '1')).toBe(0);
     });
@@ -488,8 +496,9 @@ describe('inventario', () => {
 
       const { rows } = await duena.query<{ neto: string }>(
         `SELECT COALESCE(SUM(sign(quantity) * total_cost), 0)::text AS neto
-           FROM inventory_movement WHERE item_id = $1 AND type = 'COMPRA'`,
-        [item],
+           FROM inventory_movement
+          WHERE company_id = $2 AND item_id = $1 AND type = 'COMPRA'`,
+        [item, company],
       );
       expect(Number.parseFloat(rows[0]?.neto ?? '1')).toBe(0);
     });
@@ -566,8 +575,9 @@ describe('inventario', () => {
       expect(await saldoDe(local, item)).toBe('4.000000000000');
 
       const { rows } = await duena.query<{ suma: string }>(
-        `SELECT COALESCE(SUM(quantity), 0)::text AS suma FROM inventory_movement WHERE item_id = $1`,
-        [item],
+        `SELECT COALESCE(SUM(quantity), 0)::text AS suma FROM inventory_movement
+          WHERE company_id = $2 AND item_id = $1`,
+        [item, company],
       );
       expect(Number.parseFloat(rows[0]?.suma ?? '-1')).toBe(10);
     });
@@ -623,8 +633,9 @@ describe('inventario', () => {
         quantity: string;
       }>(
         `SELECT location_id, item_id, type, quantity::text
-           FROM inventory_movement WHERE location_id = $1 AND item_id = $2`,
-        [local, item],
+           FROM inventory_movement
+          WHERE company_id = $3 AND location_id = $1 AND item_id = $2`,
+        [local, item, company],
       );
 
       const kg = unidadDeUso('kg');
@@ -644,6 +655,126 @@ describe('inventario', () => {
       // 12,345 − 0,075 − 1,27
       expect(proyectado).toBe('11.000000000000');
     });
+
+  /**
+   * **CC-010 — el `SUM` del dinero y el pliegue del dominio coinciden** (D-16.201).
+   *
+   * Es el mismo criterio que la prueba de arriba fija para el saldo, aplicado a
+   * lo que hasta ahora no lo tenía: **el dinero**. Hasta D-16.201 el único
+   * sitio donde estaba escrito qué vale `compras_del_mes` era una consulta SQL,
+   * y por esa grieta entró INC-029 —una compra corregida que seguía contando su
+   * importe— sin que ninguna prueba se enterara.
+   *
+   * El `CONSUMO_POR_VENTA` no entra aquí: su exclusión ya la fija la prueba de
+   * P8 que registra el consumo y exige que el stock teórico dé lo mismo con él
+   * y sin él. Lo que falta cubrir, y se cubre, son los seis tipos restantes.
+   */
+  it('CC-010 — el dinero que suma PostgreSQL es el que pliega el dominio', async () => {
+    const { rows: locales } = await duena.query<{ id: string }>(
+      `INSERT INTO location (company_id, name, type, status)
+       SELECT company_id, $2, 'LOCAL', 'ACTIVE' FROM location WHERE id = $1
+       RETURNING id, company_id`,
+      [local, `CC-010 ${randomUUID().slice(0, 8)}`],
+    );
+    const sucursal = locales[0]?.id ?? '';
+
+    const arroz = await itemConPrecio('1.00', 'kg');
+    const salsa = await preparacionConPrecio({ precio: '1.00', unidad: 'lt', llevaStock: true });
+
+    // 1 y 2 — dos compras, con la tarifa a cero para que el neto sea el tecleado
+    await registrar({ locationId: sucursal, itemId: arroz, tipo: 'COMPRA', cantidad: '100', costoTotal: '100.00' });
+    const segunda = await registrar({
+      locationId: sucursal,
+      itemId: arroz,
+      tipo: 'COMPRA',
+      cantidad: '50',
+      costoTotal: '50.00',
+    });
+
+    // 3 — LA CORRECCIÓN de la segunda compra: la fila que INC-029 contaba al derecho
+    const correccion = await request(servidor())
+      .post(`/inventario/movimientos/${(segunda.body as { id: string }).id}/correccion`)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ note: 'llegó a la sucursal equivocada' });
+    expect(correccion.status).toBe(CREADO);
+
+    // 4 — transferencia, que mueve stock y no dinero
+    const transferencia = await request(servidor())
+      .post('/inventario/transferencias')
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ origen: sucursal, destino: bodegaCentral, itemId: arroz, cantidad: '20', occurredAt: MARZO, note: null });
+    expect(transferencia.status).toBe(CREADO);
+
+    // 5 — producción, que SÍ lleva importe y no es una compra
+    const produccion = await request(servidor())
+      .post('/inventario/producciones')
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({
+        locationId: sucursal,
+        itemId: salsa,
+        cantidad: '8',
+        insumos: [{ itemId: arroz, cantidad: '8' }],
+        occurredAt: MARZO,
+        note: null,
+      });
+    expect(produccion.status).toBe(CREADO);
+
+    // 6 y 7 — merma y ajuste
+    await registrar({ locationId: sucursal, itemId: arroz, tipo: 'MERMA', cantidad: '2.5' });
+    await registrar({ locationId: sucursal, itemId: arroz, tipo: 'AJUSTE', cantidad: '0.5' });
+
+    // Los movimientos CRUDOS, sin pasar por el repositorio que se está verificando.
+    const { rows } = await duena.query<{
+      location_id: string;
+      item_id: string;
+      type: string;
+      quantity: string;
+      total_cost: string | null;
+    }>(
+      `SELECT location_id, item_id, type, quantity::text, total_cost::text
+         FROM inventory_movement
+        WHERE company_id = $3 AND location_id = $1 AND item_id = $2`,
+      [sucursal, arroz, company],
+    );
+
+    const kg = unidadDeUso('kg');
+    const plegado = plegarAgregadosDelPeriodo(
+      rows.map((fila) => ({
+        locationId: aLocationId(fila.location_id),
+        itemId: aItemId(fila.item_id),
+        tipo: fila.type as TipoDeMovimiento,
+        cantidad: Quantity.fromDatabase(fila.quantity, kg),
+        costoTotal: fila.total_cost === null ? null : Money.fromDatabase(fila.total_cost),
+        ocurridoEn: new Date(),
+      })),
+    );
+
+    const repositorio = app.get<RepositorioDeInventario>(REPOSITORIO_DE_INVENTARIO);
+    const tenant = aCompanyId(company);
+    const desde = new Date('2026-03-01T00:00:00.000Z');
+    const hasta = new Date('2026-04-01T00:00:00.000Z');
+
+    const [porSql] = (
+      await repositorio.agregadosDelPeriodo({ companyId: tenant, locationId: aLocationId(sucursal), desde, hasta })
+    ).filter((agregado) => agregado.itemId === arroz);
+    const comprasPorSql = await repositorio.comprasEntre({
+      companyId: tenant,
+      locationId: aLocationId(sucursal),
+      desde,
+      hasta,
+    });
+
+    // 100 + 50 − 50: la corrección resta su importe, y la producción no suma el suyo.
+    expect(plegado[0]?.importeDeCompras.toExactString()).toBe('100');
+    expect(porSql?.importeDeCompras).toBe(plegado[0]?.importeDeCompras.toStorageString());
+    expect(comprasPorSql).toBe(plegado[0]?.importeDeCompras.toStorageString());
+
+    // Y las cantidades, que ya cuadraban, siguen cuadrando por los dos caminos.
+    expect(porSql?.compras).toBe(plegado[0]?.compras.toStorageString());
+    expect(porSql?.mermasYAjustes).toBe(plegado[0]?.mermasYAjustes.toStorageString());
+    expect(porSql?.otros).toBe(plegado[0]?.otros.toStorageString());
+  }, 120_000);
+
   });
 
   describe('R10 — la producción se valora al estándar y deja su varianza', () => {
@@ -739,8 +870,8 @@ describe('inventario', () => {
 
       const { rows } = await duena.query<{ total_cost: string }>(
         `SELECT total_cost::text FROM inventory_movement
-          WHERE item_id = $1 AND type = 'PRODUCCION' AND quantity > 0`,
-        [salsa],
+          WHERE company_id = $2 AND item_id = $1 AND type = 'PRODUCCION' AND quantity > 0`,
+        [salsa, company],
       );
       expect(Number.parseFloat(rows[0]?.total_cost ?? '')).toBe(1);
     });
@@ -1036,8 +1167,9 @@ describe('inventario', () => {
       await comprar({ itemId: item, locationId: local, cantidad: '5' });
 
       const { rows } = await duena.query<{ total: string }>(
-        `SELECT count(*)::text AS total FROM inventory_movement WHERE item_id = $1`,
-        [item],
+        `SELECT count(*)::text AS total FROM inventory_movement
+          WHERE company_id = $2 AND item_id = $1`,
+        [item, company],
       );
       expect(Number(rows[0]?.total ?? '0')).toBeGreaterThan(0);
 

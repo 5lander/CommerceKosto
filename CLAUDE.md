@@ -196,6 +196,9 @@ El detalle completo está en `docs/OPTIMIZACION.md` §1 y es obligatorio. Resume
 ### Errores
 - Errores tipados de dominio · **nunca** capturar y silenciar · el mensaje al usuario y el detalle del log son cosas distintas
 
+### Código generado desde otro lenguaje
+- **Código generado desde Python: raw strings o la herramienta de escritura; nunca `str.replace` sobre literales con barras invertidas.** En una cadena normal de Python `\b` es el carácter de **retroceso** (0x08), no un límite de palabra: la regex resultante compila, no lanza y **no casa nunca**, así que el check que la usa pasa en verde sin examinar nada. Ver `docs/incidencias/INC-007`, casos 7, 8 y 14 — tres veces el mismo carácter. Lo caza `sin-caracteres-de-control` de `audit:forbidden`, pero la regla existe para no llegar hasta ahí
+
 ### Comentarios
 - El código explica el *qué*; el comentario explica el *por qué* · **sin código comentado** en el repositorio
 

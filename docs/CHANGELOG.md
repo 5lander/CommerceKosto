@@ -4,6 +4,33 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-I · Tres casos conocidos para los tres agregados de dinero · 2026-09-20
+
+> Dominio, casos conocidos, pruebas y una regla de CLAUDE.md. Sin migraciones y sin cambio de
+> comportamiento.
+
+**INC-029 no fue un descuido aislado: fue una asimetría.** El saldo tenía dos definiciones
+vigilándose —el `SUM` de PostgreSQL y `proyectarSaldos`— y el dinero tenía una sola, dentro de una
+consulta, sin una prueba que dijera cuánto debía valer. D-16.201 cierra **la clase**:
+
+1. la definición baja al dominio (`inventory/domain/agregados.ts`), pura y con la base apagada;
+2. `casos-conocidos.md` gana **CC-010, CC-011 y CC-012** —`compras_del_mes`, `CONSUMO_REAL` y la
+   valorización del inventario— sobre **un mismo mes con el vocabulario completo del libro**:
+   compra, corrección, transferencia, producción, merma, ajuste y consumo por venta, con el
+   resultado calculado a mano antes que el código;
+3. una prueba de integración ata el `SUM` de producción al pliegue del dominio, el mismo criterio
+   que P6 fijó para el saldo.
+
+La varianza de CC-011 se desglosa sin residuo en el vocabulario del libro, y al hacerlo deja a la
+vista **la duda abierta #16**: de 32,00 dólares, 28,00 son transferencia y producción — stock que
+salió del local sin consumirse en él, que SPEC §16 cuenta como consumo porque en el Excel no existe.
+
+Y CLAUDE.md §3 gana la regla que INC-007 pidió tres veces: **código generado desde Python, con raw
+strings o con la herramienta de escritura; nunca `str.replace` sobre literales con barras
+invertidas**.
+
+---
+
 ## P16-G2 · El simulacro con libro y mes cerrado, y las cuatro cosas que encontró · 2026-09-20
 
 > Tooling de operación, 2 migraciones sin cambio de datos, un check nuevo y documentación.
