@@ -21,6 +21,12 @@
  * credenciales vivas), el outbox de correo (no se reenvían invitaciones viejas)
  * y los dos registros append-only, que la aplicación ni siquiera puede leer.
  *
+ * EL LIBRO Y LOS MESES CERRADOS (D-16.198). Reinsertar movimientos viejos choca
+ * con el trigger que protege los periodos cerrados, y la respuesta no es
+ * apagarlo: dentro de la misma transaccion se reabren los meses cerrados, entra
+ * el libro y se vuelven a cerrar. El trigger nunca deja de comprobar y RLS sigue
+ * puesta; si algo falla, no queda ningun mes abierto.
+ *
  * EL DESTINO TIENE QUE ESTAR VACIO PARA ESE TENANT. No se mezcla lo restaurado
  * con lo que haya: mezclar deja una base que no es ni lo uno ni lo otro, que es
  * la misma razón por la que `restaurar` no escribe encima de una base con
@@ -35,8 +41,12 @@ import { comoRecuentos } from './lib/testigos.mjs';
 import { argumento } from './lib/proceso.mjs';
 import {
   SQL_DE_LOS_AJUSTES,
+  SQL_DIFERIR_LA_FK_DEL_CONTEO,
   SQL_DE_RECUENTOS_DEL_TENANT,
   SQL_LA_COMPANY,
+  SQL_PERIODOS_CERRADOS,
+  SQL_REABRIR_PERIODOS,
+  SQL_RECERRAR_PERIODOS,
   SQL_TABLAS_CON_TENANT,
   TABLAS_DEL_TENANT,
   TABLAS_QUE_NO_VUELVEN,
@@ -147,12 +157,32 @@ function exigirDestinoVacio(destino, company) {
   }
 }
 
-/** @param {{origen: string, destino: string, company: string}} peticion */
+/**
+ * Copia las filas, EN UNA SOLA TRANSACCION.
+ *
+ * Una por tabla habria sido mas simple de escribir y peor de operar: si la
+ * quinta falla, el tenant se queda a medio restaurar y el guardian de «destino
+ * vacio» ya no deja reintentar. Aqui, o entra todo o no entra nada.
+ *
+ * Y dentro de esa transaccion va el paso de D-16.198: los periodos cerrados se
+ * reabren antes del libro y se vuelven a cerrar despues (ver `lib/tenant.mjs`).
+ *
+ * @param {{origen: string, destino: string, company: string}} peticion
+ */
 function copiar({ origen, destino, company }) {
+  const partes = [SQL_DIFERIR_LA_FK_DEL_CONTEO];
   for (const tabla of TABLAS_DEL_TENANT) {
-    const sql = volcarTablaDelTenant({ conexion: origen, tabla, company });
-    aplicarSql({ conexion: destino, sql, descripcion: `las filas de ${tabla}`, entorno: comoTenant(company) });
+    partes.push(`-- ${tabla}`, volcarTablaDelTenant({ conexion: origen, tabla, company }));
+    if (tabla === 'period') partes.push(SQL_REABRIR_PERIODOS);
   }
+  partes.push(SQL_RECERRAR_PERIODOS);
+
+  aplicarSql({
+    conexion: destino,
+    sql: partes.join('\n'),
+    descripcion: `las filas de la company ${company}`,
+    entorno: comoTenant(company),
+  });
 }
 
 /**
@@ -179,6 +209,37 @@ function avisarDeLosAjustes({ origen, destino, company }) {
   console.log('[restaurar-tenant]   iva_venta, iva_compra_recuperable, provision_merma, food_cost_objetivo,');
   console.log('[restaurar-tenant]   food_cost_maximo, food_cost_umbral_verde, prime_cost_maximo,');
   console.log('[restaurar-tenant]   regla_popularidad, dias_operativos_mes, dias_cobertura');
+}
+
+/**
+ * LOS MESES CERRADOS VUELVEN A ESTAR CERRADOS — D-16.198.
+ *
+ * `comparar` cuenta filas por tabla y no vería esto: un período restaurado como
+ * ABIERTO cuando estaba CERRADO cuenta igual, y deja el mes contable de un
+ * cliente editable sin que nadie se entere. El recierre depende de un parámetro
+ * de transacción, así que si algún día deja de poblarse, **este contador es lo
+ * único que lo dice**.
+ *
+ * @param {{origen: string, destino: string, company: string}} peticion
+ */
+function exigirLosMesesCerrados({ origen, destino, company }) {
+  const entorno = comoTenant(company);
+  const enLaCopia = consultar({ conexion: origen, sql: SQL_PERIODOS_CERRADOS, entorno }).trim();
+  const enDestino = consultar({ conexion: destino, sql: SQL_PERIODOS_CERRADOS, entorno }).trim();
+
+  if (enLaCopia !== enDestino) {
+    throw new Error(
+      [
+        `Los meses CERRADOS no cuadran: ${enLaCopia} en la copia y ${enDestino} en el destino.`,
+        '',
+        'Se reabren para poder reinsertar el libro y se recierran al final, dentro',
+        'de la misma transaccion. Si el numero no coincide, alguno se quedo abierto:',
+        'un mes contable editable que deberia estar cerrado. Ver scripts/lib/tenant.mjs.',
+      ].join('\n'),
+    );
+  }
+
+  console.log(`[restaurar-tenant] meses cerrados: ${enDestino}, los mismos que en la copia`);
 }
 
 /** @param {ReadonlyMap<string, string>} antes @param {ReadonlyMap<string, string>} despues */
@@ -240,6 +301,8 @@ function principal() {
   copiar({ origen, destino, company });
   comparar(enLaCopia, recuentos(destino, company));
   avisarDeLosAjustes({ origen, destino, company });
+
+  exigirLosMesesCerrados({ origen, destino, company });
 
   console.log('[restaurar-tenant] listo — los recuentos cuadran tabla por tabla');
   console.log('[restaurar-tenant] NO vuelven, a proposito: sesiones, outbox de correo y los dos logs');

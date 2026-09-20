@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
-| **Recurrencias** | **13** |
+| **Recurrencias** | **14** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -127,6 +127,17 @@ pero el archivo se genero desde una cadena de otro lenguaje donde `` **no es «
 Tiene su prueba del guardian: se vuelve a meter el retroceso en `tools/audit/migrations.mjs`, se comprueba que el check falla senalando linea y columna, y se revierte. La salida esta en `docs/pasos/P5/evidencia/guardian-5-caracter-de-control.txt`.
 
 **Esta es la primera prevencion de INC-007 que ataca la CAUSA y no el sintoma.** Las siete anteriores enseñaban a desconfiar del verde; esta impide que el fallo se escriba.
+
+### Caso 14 (P16-G2) — la regla funcionó, la costumbre no
+
+El mismo retroceso, **la tercera vez con esta causa exacta**, escribiendo la regex de M12 desde un
+generador. Se anota aquí y no en una ficha nueva porque no añade nada al diagnóstico: añade la única
+cosa que faltaba saber, que es que **la prevención del caso 8 aguanta**. `sin-caracteres-de-control`
+lo paró antes del commit, con archivo, línea y columna, y el arreglo fue de un minuto.
+
+Lo que sí cambió: esa regex ya no usa ``. Donde un límite de palabra se puede sustituir por algo
+que no se degrada en silencio —aquí `(?!FUNCTION)`— se sustituye, porque la regla caza el carácter
+pero no obliga a nadie a dejar de escribirlo.
 
 ## Caso 10 (P14) — la misma trampa, ahora con la extensión del archivo
 

@@ -4,6 +4,33 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-G2 · El simulacro con libro y mes cerrado, y las cuatro cosas que encontró · 2026-09-20
+
+> Tooling de operación, 2 migraciones sin cambio de datos, un check nuevo y documentación.
+
+**El simulacro de P16-G decía «probado» y no lo estaba**: restauraba un tenant **sin libro**, que es
+el caso que ningún cliente real tiene. Repetido sobre `ensayo-b` con tres movimientos y **agosto
+cerrado** (D-16.198), encontró cuatro cosas, ninguna visible leyendo el código:
+
+1. la catástrofe simulada apagaba tres guardianes por nombre y faltaba uno — ahora se usa el
+   interruptor de sesión, local a su transacción;
+2. `pg_dump --data-only` deja el `search_path` **vacío**, y el SQL escrito a mano que va entre dos
+   volcados tiene que ir cualificado;
+3. `costeo_app` **no tiene privilegio `TEMP`** — la lista de períodos a recerrar vive ahora en un
+   parámetro de la transacción. La barrera no se baja para que el script funcione;
+4. **INC-030**: tres guardas no fijaban su `search_path` y resolvían el nombre de la tabla que
+   vigilan con el del llamante. Migración + check **M12** en `audit:migrations`.
+
+Y una pared que exigió decisión: un mes cerrado arrastra un conteo **confirmado**, y sus líneas no
+se pueden reinsertar. Se resolvió por **orden** —las líneas antes que su conteo, con la clave
+foránea diferible solo en esa transacción— sin apagar el guardián ni aflojar ningún `CHECK`.
+
+El runbook ya puede decir **probado**: 24 filas en 22 tablas, agosto otra vez CERRADO, saldo
+idéntico y el tenant de al lado intacto. Y gana la señal del respaldo nocturno: **por encima de 20
+minutos**, la verificación pasa a semanal o a otra máquina.
+
+---
+
 ## P16-H · Una importación que escribió en el libro se deshace COMO importación · 2026-09-20
 
 > API, 1 migración, SPEC y documentación de API.

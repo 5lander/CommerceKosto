@@ -163,6 +163,22 @@ comprobación una copia a medias se sobrescribiría con otra a medias.
 **Lo que falta para cerrar del todo:** elegir el destino de `RESPALDO_COMANDO_SUBIDA`. Hasta que esté,
 la ventana de pérdida real es **un día** y el respaldo vive en la misma máquina.
 
+### Señal: cuándo dejar de verificar cada noche
+
+`npm run respaldo` **restaura lo que acaba de volcar** y compara los recuentos. Eso es lo que lo
+convierte en un respaldo y no en una copia, y cuesta tiempo: crece con la base, no con el cambio del
+día.
+
+> **Umbral: 20 minutos.** Cuando la verificación nocturna pase de ahí en el VPS —se mide en
+> `/var/log/costeo-respaldo.log`, que lleva la marca de tiempo de cada paso—, la verificación pasa a
+> **semanal**, o a **otra máquina** que restaure la copia remota. El volcado diario sigue siendo
+> diario en los dos casos: lo que se espacia es la comprobación, nunca el respaldo.
+
+Por qué 20 y no otro número: es el punto donde la ventana nocturna deja de ser holgada. Por encima,
+el respaldo empieza a solaparse con la actividad de la mañana en un negocio que abre temprano, y un
+`pg_dump` compitiendo con el servicio es una forma tonta de que el cliente note el respaldo. Por
+debajo, espaciarlo solo quita cobertura a cambio de nada.
+
 ---
 
 ## Restaurar UN solo cliente (D-16.195)
@@ -217,6 +233,20 @@ de la base.
 
 Al terminar compara los recuentos tabla por tabla entre la copia y producción, y falla si no cuadran.
 
+### El libro y los meses cerrados (D-16.198)
+
+**Un cliente con más de un mes de uso tiene meses cerrados, y reponerlos choca con dos guardianes.**
+Ninguno se apaga. Los dos se resuelven con el ORDEN, dentro de la misma transacción:
+
+| Guardián | Por qué estorba | Cómo se le pasa por delante |
+|---|---|---|
+| `inventory_movement_respeta_periodo_cerrado` | El libro que vuelve es de meses ya cerrados | Los períodos entran, se **reabren**, entra el libro y se **vuelven a cerrar**. El trigger comprueba siempre y deja pasar porque el mes está abierto de verdad. Al final se verifica que el número de meses cerrados coincide con el de la copia |
+| `physical_count_line_solo_en_borrador` | Un mes cerrado tiene su conteo CONFIRMADO, y sus líneas no se pueden escribir | Las **líneas van antes que su conteo**: el guardián se ejecuta, no encuentra conteo todavía y deja pasar. Que cada línea acabe teniendo el suyo lo comprueba la clave foránea al COMMIT, diferida solo para esta transacción (`p16g2_fk_diferible_del_conteo`) |
+
+**El contra, dicho donde se paga:** durante esa ventana el guardián de la línea pasa *en vacío*.
+Fuera de la restauración nada cambia — la clave es `INITIALLY IMMEDIATE` y la aplicación no difiere
+nunca, así que una línea huérfana escrita por la API sigue fallando en el acto.
+
 ### El límite que hay que conocer
 
 **Un tenant con libro de inventario no se puede «vaciar» para rehacerlo.** El libro es append-only
@@ -232,7 +262,19 @@ Al terminar compara los recuentos tabla por tabla entre la copia y producción, 
 
 | Fecha | Sobre quién | Resultado |
 |---|---|---|
-| 2026-09-17 | `ensayo-b` (company sintética, D-16.193) | ✅ **18 filas en 11 tablas**, recuentos cuadrados uno a uno; `ensayo` intacto (7 ítems, 4 productos, 15 líneas); la interfaz de ensayo-b vuelve a costear («Arroz marinero» 9.90, receta 0.3 kg AP, costo 3.60). Los ajustes de costeo los reportó como hay que reponerlos |
+| 2026-09-17 | `ensayo-b` **sin libro** (company sintética, D-16.193) | ✅ **18 filas en 11 tablas**, recuentos cuadrados uno a uno; `ensayo` intacto (7 ítems, 4 productos, 15 líneas); la interfaz de ensayo-b vuelve a costear («Arroz marinero» 9.90, receta 0.3 kg AP, costo 3.60). Los ajustes de costeo los reportó como hay que reponerlos |
+| 2026-09-20 | `ensayo-b` **con libro y agosto CERRADO** (D-16.198) | ✅ **24 filas en 22 tablas** tras borrar el tenant entero: 3 movimientos, el conteo confirmado con su línea, el período de agosto **otra vez CERRADO** y el saldo en 15 kg, idénticos a la copia; `ensayo` intacto. Encontró tres cosas por el camino: INC-030, la falta de privilegio `TEMP` de `costeo_app` y el `search_path` vacío de `pg_dump` |
+
+**El simulacro de 2026-09-20 es el que hace que este procedimiento esté PROBADO para un cliente
+real**, porque un cliente real tiene meses cerrados. El de 2026-09-17 probaba un tenant sin libro,
+que es el caso fácil.
+
+> **Cómo se repite.** Se siembra el tenant sintético por el flujo normal (compras, conteo,
+> `POST /conteos/:id/cierre-de-periodo`), se hace el respaldo, se restaura a la auxiliar, se **borra
+> el tenant** de la base de trabajo como superusuario —`SET LOCAL session_replication_role =
+> replica` dentro de una transacción; **eso es el desastre, no el procedimiento**— y se lanza
+> `restaurar:tenant`, que corre con **todo puesto**: RLS, los append-only y el trigger del mes
+> cerrado.
 
 ---
 

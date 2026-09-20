@@ -405,6 +405,95 @@ function comprobarGuardasDeDominio({ nombre, upSql }) {
   ];
 }
 
+const FUNCION_CREADA = /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:"?public"?\.)?"?(\w+)"?/gi;
+
+/**
+ * `SET search_path` puede llegar en el `CREATE` o en un `ALTER` posterior. La
+ * captura corta en el siguiente `FUNCTION` para no cruzar de una a otra.
+ *
+ * SIN `\b`, Y ESTA VEZ A PROPOSITO: la NOVENA recurrencia de INC-007 —tercera
+ * con esta causa exacta— fue escribir esta misma linea desde un generador donde
+ * `\b` significa RETROCESO (0x08). La regla `sin-caracteres-de-control` la paro
+ * antes del commit, que es para lo que existe. `(?!FUNCTION)` hace el mismo
+ * trabajo aqui y no tiene forma de degradarse en silencio.
+ */
+const FUNCION_CON_SEARCH_PATH =
+  /(?:CREATE\s+(?:OR\s+REPLACE\s+)?|ALTER\s+)FUNCTION\s+(?:"?public"?\.)?"?(\w+)"?(?:(?!FUNCTION)[\s\S])*?SET\s+search_path/gi;
+
+/** @type {Set<string> | null} */
+let searchPathFijado = null;
+
+/**
+ * Las funciones que fijan su `search_path` en ALGUNA migracion.
+ *
+ * MIRA TODAS, como M10, y por la misma razon: una funcion creada en P7 y
+ * arreglada en P16-G2 esta bien, y la migracion de P7 no se puede editar
+ * —Prisma guarda su checksum—. Lo que la regla persigue es que NINGUNA funcion
+ * se quede sin decidir donde mira, no que se decida en su primera linea.
+ *
+ * @returns {Set<string>}
+ */
+function funcionesConSearchPath() {
+  if (searchPathFijado !== null) return searchPathFijado;
+
+  const acumulado = new Set();
+  for (const nombre of listarMigraciones()) {
+    const ruta = join(MIGRACIONES, nombre, 'migration.sql');
+    if (!existsSync(ruta)) continue;
+
+    for (const funcion of capturarTodo(sinComentarios(readFileSync(ruta, 'utf8')), FUNCION_CON_SEARCH_PATH)) {
+      acumulado.add(funcion.toLowerCase());
+    }
+  }
+
+  searchPathFijado = acumulado;
+  return searchPathFijado;
+}
+
+/**
+ * M12 — una funcion nace sabiendo donde mira.
+ *
+ * NACE DE UN FALLO REAL (INC-030), que destapo el simulacro de restauracion por
+ * tenant. Tres funciones de guarda leian otra tabla por su nombre sin
+ * cualificar y sin fijar su `search_path`, asi que resolvian ese nombre con el
+ * del llamante. `pg_dump --data-only` lo deja VACIO, y las tres reventaron con
+ * «relation "physical_count" does not exist» sobre una base donde la tabla
+ * estaba.
+ *
+ * LO QUE PROTEGE NO ES LA COMODIDAD, ES LA BARRERA. Una guarda que resuelve su
+ * tabla con el `search_path` de quien escribe mira donde le digan: un esquema
+ * por delante con una tabla del mismo nombre y vacia la desactiva. Y en una
+ * funcion `SECURITY DEFINER` —las cinco de este proyecto lo son— eso deja de
+ * ser una rareza y pasa a ser el vector clasico de escalada.
+ *
+ * Se comprueba por TEXTO y por eso acepta las dos formas: `SET search_path` en
+ * el `CREATE FUNCTION` o un `ALTER FUNCTION ... SET search_path` en la misma
+ * migracion. No comprueba que el valor sea sensato —eso no es automatizable—,
+ * comprueba que alguien decidio uno.
+ * @param {Migracion} m
+ * @returns {Fallo[]}
+ */
+function comprobarSearchPathDeFunciones({ upSql }) {
+  const creadas = capturarTodo(upSql, FUNCION_CREADA);
+  if (creadas.length === 0) return [];
+
+  const sinFijar = [...new Set(creadas.map((n) => n.toLowerCase()))].filter(
+    (nombre) => !funcionesConSearchPath().has(nombre),
+  );
+  if (sinFijar.length === 0) return [];
+
+  return [
+    {
+      check: 'M12',
+      mensaje:
+        `la(s) funcion(es) "${sinFijar.join('", "')}" no fijan su \`search_path\`. Sin el, ` +
+        'resuelven los nombres de tabla con el del llamante: dejan de encontrarlos cuando viene ' +
+        'vacio (`pg_dump --data-only`) y miran donde les digan cuando no. Anade ' +
+        '`SET search_path = pg_catalog, public`. Ver docs/incidencias/INC-030',
+    },
+  ];
+}
+
 const COMPROBACIONES = [
   comprobarBloquesManuales,
   comprobarPoliticas,
@@ -415,6 +504,7 @@ const COMPROBACIONES = [
   comprobarBorradoDelHistorial,
   comprobarBorradoDeFilas,
   comprobarGuardasDeDominio,
+  comprobarSearchPathDeFunciones,
 ];
 
 // --- Recorrido -----------------------------------------------------------

@@ -138,15 +138,28 @@ export function correrCliAsincrono(paquete, args, opciones = {}) {
 }
 
 /**
- * Un argumento con la forma `--nombre=valor`, o `undefined` si no esta.
+ * Un argumento de la linea de ordenes, en sus DOS formas: `--nombre=valor` y
+ * `--nombre valor`. `undefined` si no esta.
  *
  * Los scripts operados los leen asi —no hay `commander` ni nada que instalar—,
  * y tres de ellos tenian su propia copia.
  *
+ * LAS DOS FORMAS, Y NO UNA, PORQUE LAS DOS ESTABAN EN USO. Al juntar las copias
+ * en P16-G se conservo solo la del `=`, y eso rompio en silencio la sintaxis que
+ * `migrate:new` documenta en su propio mensaje de uso (`--name <slug>`): el
+ * script decia «falta --name» con el `--name` delante. Una utilidad compartida
+ * que estrecha el contrato de quien la usa no es una simplificacion: es un
+ * cambio de comportamiento escondido en un refactor.
+ *
  * @param {string} nombre @returns {string | undefined}
  */
 export function argumento(nombre) {
-  const prefijo = `--${nombre}=`;
-  const encontrado = process.argv.find((a) => a.startsWith(prefijo));
-  return encontrado === undefined ? undefined : encontrado.slice(prefijo.length);
+  const conIgual = process.argv.find((a) => a.startsWith(`--${nombre}=`));
+  if (conIgual !== undefined) return conIgual.slice(`--${nombre}=`.length);
+
+  const indice = process.argv.indexOf(`--${nombre}`);
+  if (indice === -1) return undefined;
+
+  const siguiente = process.argv[indice + 1];
+  return siguiente === undefined || siguiente.startsWith('--') ? undefined : siguiente;
 }

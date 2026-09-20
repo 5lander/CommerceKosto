@@ -29,8 +29,14 @@ export const TABLAS_DEL_TENANT = Object.freeze([
   'period',
   'product_sales',
   'fixed_cost',
-  'physical_count',
+  // LAS LINEAS VAN ANTES QUE SU CONTEO, y es la unica pareja del orden que no
+  // sigue a las claves foraneas — D-16.198. `physical_count_line_solo_en_borrador`
+  // rechaza escribir lineas de un conteo CONFIRMADO, asi que el conteo tiene que
+  // llegar DESPUES: el guardian se ejecuta, no encuentra conteo todavia y deja
+  // pasar. Quien comprueba que cada linea acabo teniendo el suyo es la clave
+  // foranea al COMMIT, diferida por `SQL_DIFERIR_LA_FK_DEL_CONTEO`.
   'physical_count_line',
+  'physical_count',
   'inventory_movement',
   'inventory_transfer',
   'inventory_production',
@@ -139,6 +145,77 @@ export const SQL_DE_RECUENTOS_DEL_TENANT = `
   UNION ALL SELECT 'import_job',               count(*)::text FROM import_job
   ORDER BY tabla
 `;
+
+/**
+ * LA FK DE LA LINEA DE CONTEO SE DIFIERE, Y SOLO ELLA — D-16.198.
+ *
+ * Es lo que permite insertar las lineas ANTES que su conteo, que es lo unico
+ * que deja reponer un conteo CONFIRMADO sin apagar su guardian ni tocar sus
+ * CHECK (ver la migracion `p16g2_fk_diferible_del_conteo`).
+ *
+ * EL CONTRA, ESCRITO DONDE SE PAGA: durante esta transaccion
+ * `physical_count_line_solo_en_borrador` pasa EN VACIO —lee un conteo que
+ * todavia no esta y no encuentra 'CONFIRMADO'—, asi que la coherencia de esas
+ * filas la sostiene la clave foranea al COMMIT y no el trigger. Fuera de aqui
+ * nada cambia: la FK es `INITIALLY IMMEDIATE` y la aplicacion no difiere nunca.
+ */
+export const SQL_DIFERIR_LA_FK_DEL_CONTEO = `
+SET CONSTRAINTS "physical_count_line_count_id_company_id_fkey" DEFERRED;
+`;
+
+/**
+ * LOS PERÍODOS CERRADOS SE REABREN PARA REINSERTAR, Y SE VUELVEN A CERRAR — D-16.198.
+ *
+ * `inventory_movement_respeta_periodo_cerrado` rechaza TODO movimiento cuya
+ * fecha caiga en un periodo `CERRADO` de esa ubicacion, y tiene razon: es R3
+ * vista desde el mes contable. Pero una restauracion reinserta justamente eso:
+ * movimientos viejos, de meses ya cerrados.
+ *
+ * Las dos salidas faciles son las dos que este proyecto no toma: desactivar el
+ * trigger (`ALTER TABLE ... DISABLE TRIGGER` necesita ser dueno y apaga la
+ * regla para todos) o entrar como superusuario (que ademas se salta RLS, la
+ * barrera que hace segura toda esta operacion).
+ *
+ * La salida buena es el ORDEN: dentro de la MISMA transaccion se anota que
+ * periodos estaban cerrados, se reabren, se reinserta el libro y se vuelven a
+ * cerrar. El trigger nunca se apaga —comprueba, y deja pasar porque el mes
+ * esta abierto de verdad—, RLS sigue puesta, y al COMMIT el mes vuelve a estar
+ * cerrado. Si algo falla por el camino, la transaccion entera se revierte y no
+ * queda ningun mes abierto por accidente.
+ *
+ * `closed_at` y `closed_by` NO se tocan: `period_cerrado_tiene_autor` exige que
+ * un CERRADO tenga autor, y conservarlos es lo que permite volver a cerrarlo
+ * con su rastro intacto.
+ *
+ * QUE PERIODOS RECERRAR SE RECUERDA EN UN PARAMETRO DE LA TRANSACCION, y no en
+ * una tabla temporal: `costeo_app` NO tiene privilegio `TEMP` sobre la base, y
+ * eso es una decision de minimo privilegio, no un descuido que arreglar para
+ * que este script funcione. El simulacro de D-16.198 lo dijo con todas las
+ * letras —«permission denied to create temporary tables»— y la respuesta es
+ * amoldarse a la barrera, no bajarla. `set_config(..., true)` es local a la
+ * transaccion, igual que `app.company_id`, asi que si algo falla se va con ella.
+ *
+ * TODO NOMBRE VA CUALIFICADO —`public.period`— y no es estilo: `pg_dump
+ * --data-only` abre cada volcado con `set_config('search_path', '', false)`.
+ * Sus propios `INSERT` llevan el esquema delante y no lo notan; este SQL,
+ * escrito a mano y pegado entre dos volcados, se encontro con `relation
+ * "period" does not exist` a la primera.
+ */
+export const SQL_REABRIR_PERIODOS = `
+SELECT set_config(
+  'app.periodos_a_recerrar',
+  coalesce((SELECT string_agg(id::text, ',') FROM public.period WHERE status = 'CERRADO'), ''),
+  true);
+UPDATE public.period SET status = 'ABIERTO' WHERE status = 'CERRADO';
+`;
+
+export const SQL_RECERRAR_PERIODOS = `
+UPDATE public.period SET status = 'CERRADO'
+ WHERE id::text = ANY (string_to_array(current_setting('app.periodos_a_recerrar', true), ','));
+`;
+
+/** Cuantos periodos se reabrieron: para decirlo en la salida. */
+export const SQL_PERIODOS_CERRADOS = `SELECT count(*)::text FROM period WHERE status = 'CERRADO'`;
 
 /** La company existe y está activa, vista desde la propia sesión del tenant. */
 export const SQL_LA_COMPANY = `SELECT name, status FROM company`;
