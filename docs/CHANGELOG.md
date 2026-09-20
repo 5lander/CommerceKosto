@@ -4,6 +4,31 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-I2 · La regla del doble intérprete, la base en limpio y D-16.202 registrada · 2026-09-20
+
+> Reglas, entorno y una decisión anotada. Sin código de aplicación y sin migraciones.
+
+**La regla de CLAUDE.md §3 se generaliza.** Hablaba de Python y de `\b`; la causa real es que el
+contenido atraviesa **dos intérpretes** y el primero se come lo que el segundo necesitaba —tres
+casos, tres lenguajes: el retroceso de Python (INC-007 7/8/14), los backticks que bash ejecutó
+dentro de un `node -e` (P16-I) y el *here-string* de PowerShell que dejó una arroba en el asunto de
+un commit (P16-H)—. **El contenido de archivos y mensajes se escribe con la herramienta de escritura
+o desde un archivo; nunca incrustado en un comando de shell.**
+
+**La base de desarrollo pasa de 12 GB y 34,4 millones de movimientos a 15 MB**, y la auxiliar del
+simulacro se elimina. El entorno sintético se reconstruye entero: dos companies con los mismos
+nombres y cifras distintas, como pide D-16.193.
+
+**Y los UUID escritos a mano dejan de estarlo.** El reset dejó 21 guiones de verificación apuntando
+a filas inexistentes —un 404 que parece un fallo de pantalla—: ahora `ids.mjs` resuelve ubicaciones,
+ítems y productos **por nombre** y falla diciendo cuáles hay.
+
+**D-16.202 queda registrada** (la duda #16, decidida con la opción (a) extendida) para construirse
+como **P16-J, justo antes de la pantalla 25**. Con una cuenta anotada que no cuadra: sobre el
+dataset de CC-011 la varianza nueva sale **4,00**, no 4,50, porque el `AJUSTE` de +0,5 kg resta.
+
+---
+
 ## P16-I · Tres casos conocidos para los tres agregados de dinero · 2026-09-20
 
 > Dominio, casos conocidos, pruebas y una regla de CLAUDE.md. Sin migraciones y sin cambio de
