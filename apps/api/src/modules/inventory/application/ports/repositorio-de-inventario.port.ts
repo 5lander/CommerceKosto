@@ -15,6 +15,7 @@
 
 import type {
   CompanyId,
+  ImportJobId,
   ItemId,
   LocationId,
   MovementId,
@@ -65,6 +66,8 @@ export interface MovimientoLeido {
   readonly costoTotal: string | null;
   /** `null` = «sin desglose»: una COMPRA anterior a P16-A1, o no es COMPRA. */
   readonly desglose: DesgloseDeCompra | null;
+  /** En qué presentación se compró. Su corrección conserva la misma (INC-029). */
+  readonly purchaseArticleId: PurchaseArticleId | null;
   readonly occurredAt: Date;
   readonly recordedAt: Date;
   readonly transferId: TransferId | null;
@@ -182,12 +185,32 @@ export interface RepositorioDeInventario {
    *
    * Lo usa el consumo por venta, que explota la receta de un lote de productos
    * vendidos y produce una salida por ítem: o entran todas o no entra ninguna.
+   *
+   * `importJobId` marca TODAS las filas del lote con la importación que las
+   * trajo (D-16.200). Va aquí y no en cada `MovimientoParaGuardar` porque es
+   * una propiedad del lote entero: media importación no existe. `null` es el
+   * caso normal —el consumo por venta, la anulación de una importación— y
+   * significa «esta fila no la trajo ningún archivo».
    */
   registrarVarios(entrada: {
     readonly companyId: CompanyId;
     readonly userId: UserId;
     readonly movimientos: readonly MovimientoParaGuardar[];
+    readonly importJobId: ImportJobId | null;
   }): Promise<readonly MovementId[]>;
+
+  /**
+   * Las filas que trajo una importación, para poder deshacerla (D-16.200).
+   *
+   * Vienen con `corregidoPor`, que es lo que hace el reintento seguro: una
+   * anulación a medias —la caída entre la escritura de las filas contrarias y
+   * el cambio de estado— se completa volviendo a lanzarla, porque lo ya
+   * corregido se salta en vez de corregirse dos veces.
+   */
+  movimientosDeImportacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly importJobId: ImportJobId;
+  }): Promise<readonly MovimientoLeido[]>;
 
   /** La cabecera y sus dos patas, atómicamente. Media transferencia no existe. */
   registrarTransferencia(datos: DatosDeTransferenciaRegistrada): Promise<TransferId>;

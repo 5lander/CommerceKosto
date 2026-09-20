@@ -17,7 +17,7 @@
  * permite mirar 149 filas antes de tocar la base.
  */
 
-import type { LocationId } from '../../../../shared/domain/identity/identificadores';
+import type { ImportJobId, LocationId } from '../../../../shared/domain/identity/identificadores';
 import type { CrearArticulosEnLote, CrearItemsEnLote } from '../../../catalog/application/casos-de-uso/lotes';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import type { RegistrarMovimientosEnLote } from '../../../inventory/application/casos-de-uso/lotes';
@@ -88,8 +88,20 @@ export interface DatosDeImportacion {
   readonly vigenciaDesde: Date;
 }
 
+/**
+ * Lo que la escritura necesita saber, en un objeto: son cuatro cosas y
+ * CLAUDE.md §3 corta en tres parámetros. La cuarta es el `id`, que desde
+ * D-16.200 viaja hasta el libro.
+ */
+interface EscrituraDeLaImportacion {
+  readonly sesion: SesionActiva;
+  readonly datos: DatosDeImportacion;
+  readonly analisis: Analisis;
+  readonly id: ImportJobId;
+}
+
 export interface ResultadoDeImportacion {
-  readonly id: string;
+  readonly id: ImportJobId;
   readonly analisis: Analisis;
   /** `null` si no se confirmó: el análisis se guardó y no se escribió nada. */
   readonly filasEscritas: number | null;
@@ -123,7 +135,7 @@ export class ImportarArchivo {
 
     if (!datos.confirmar) return { id, analisis, filasEscritas: null };
 
-    const filasEscritas = await this.escribir(sesion, datos, analisis);
+    const filasEscritas = await this.escribir({ sesion, datos, analisis, id });
     await this.deps.repositorio.marcarConfirmada({
       companyId: sesion.companyId,
       id,
@@ -164,25 +176,23 @@ export class ImportarArchivo {
    * 149 buenas. Se comprueba aquí, antes de llamar a ningún módulo, porque una
    * vez repartido el lote entre cuatro transacciones ya no habría vuelta atrás.
    */
-  private async escribir(
-    sesion: SesionActiva,
-    datos: DatosDeImportacion,
-    analisis: Analisis,
-  ): Promise<number> {
-    if (analisis.problemas.length > 0) {
+  private async escribir(escritura: EscrituraDeLaImportacion): Promise<number> {
+    const { problemas } = escritura.analisis;
+    if (problemas.length > 0) {
       throw new ArchivoIlegibleError(
-        `El archivo tiene ${String(analisis.problemas.length)} fila(s) con problemas y no se ` +
+        `El archivo tiene ${String(problemas.length)} fila(s) con problemas y no se ` +
           'escribió nada. Corrígelas y vuelve a intentarlo.',
       );
     }
-    return this.despachar(sesion, datos, analisis);
+    return this.despachar(escritura);
   }
 
-  private async despachar(
-    sesion: SesionActiva,
-    datos: DatosDeImportacion,
-    analisis: Analisis,
-  ): Promise<number> {
+  private async despachar({
+    sesion,
+    datos,
+    analisis,
+    id,
+  }: EscrituraDeLaImportacion): Promise<number> {
     const { validas } = analisis;
 
     if (datos.tipo === 'ITEMS') {
@@ -214,6 +224,10 @@ export class ImportarArchivo {
     return this.deps.registrarMovimientos.ejecutar(sesion, {
       locationId: datos.locationId,
       movimientos: validas.map(comoMovimiento),
+      // EL HILO QUE HACE REVERSIBLE LA IMPORTACIÓN (D-16.200): cada fila del
+      // libro sabe de qué archivo vino, y por eso se puede deshacer el lote
+      // entero sin adivinar cuáles eran.
+      importJobId: id,
     });
   }
 }

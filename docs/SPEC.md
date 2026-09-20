@@ -207,6 +207,28 @@ operador del back office.
 con previsualización, detección de duplicados por similitud ("Tomate riñón" / "tomate
 riñon" / "TOMATE") y resolución de unidades **antes** de escribir.
 
+### 10.1 Toda importación que escribe en el libro se deshace COMO IMPORTACIÓN (D-16.200)
+
+Un archivo de movimientos mal armado —el mes cambiado, la cantidad en la unidad que no era, el
+archivo de la otra sucursal— deja cientos de filas en un libro que **no se edita** (R3).
+Corregirlas de una en una desde la pantalla, sabiendo cuáles son, no es un procedimiento: es una
+forma de dejar el saldo mal para siempre en cuanto alguien se salte una.
+
+| Regla | |
+|---|---|
+| **Cada movimiento sabe de qué importación vino** | `inventory_movement.import_job_id`. Sin ese hilo no hay forma de saber qué filas deshacer |
+| **Deshacer es escribir, nunca borrar** | `POST /importaciones/:id/anulacion` emite los movimientos de signo contrario **en una sola transacción** (R3). Media importación deshecha no existe |
+| **El mes cerrado sigue mandando** | La fila contraria conserva la fecha de la original, así que una importación que cayó en un mes cerrado se detiene con **409** y su motivo. Para deshacerla hay que reabrir el mes, que es una decisión con dueño |
+| **La importación queda `ANULADA`** | Es un estado, no un borrado: el rastro de lo que pasó —quién la subió, qué decía el análisis, quién la deshizo y cuándo— se conserva entero |
+| **Solo la de MOVIMIENTOS** | Deshacer una importación de ítems o de recetas no es escribir la fila contraria: es borrar catálogo del que ya cuelgan precios, recetas y movimientos. Eso se mira caso por caso, no en un endpoint. El resto recibe 409 con el motivo |
+| **Reintentarla es seguro** | Lo ya corregido se salta, así que una caída entre las dos escrituras se arregla volviendo a lanzarla |
+
+**Permiso: `import.write`** — el mismo que escribir. Quien puede meter un archivo entero en el libro
+puede sacarlo; pedir otro obligaría a llamar a alguien para arreglar lo que uno acaba de romper.
+
+> **Esta regla es de la importación, no del endpoint**: cuando §24 (importación desde la UI, P20)
+> se escriba, la hereda tal cual y le añade su pantalla.
+
 **Unidades vendidas: digitación manual en Fase 1.** Decisión confirmada.
 
 > **Riesgo de producto.** De este único dato dependen tres de las seis vistas (menu

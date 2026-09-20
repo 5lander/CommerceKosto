@@ -462,6 +462,38 @@ describe('inventario', () => {
       expect(Number.parseFloat(rows[0]?.suma ?? '1')).toBe(0);
     });
 
+    /**
+     * **Y EL DINERO TAMBIÉN VUELVE — INC-029.**
+     *
+     * La prueba de arriba miraba la cantidad, que siempre estuvo bien porque
+     * lleva signo. El importe NO lo lleva (ADR-009 §2), así que `SUM(total_cost)`
+     * sumaba la compra y su corrección: `compras_del_mes` (SPEC §16) contaba el
+     * dinero de una compra que se anuló, y de ahí sale el food cost real. Esto
+     * pregunta por el número que el cierre usa —con el signo aplicado— y exige
+     * que sea cero.
+     */
+    it('y su DINERO también se cancela: la compra corregida no cuenta en el mes', async () => {
+      const item = await itemConPrecio('2.00');
+      const compra = await comprar({
+        itemId: item,
+        locationId: bodegaCentral,
+        cantidad: '4',
+        costoTotal: '46.00',
+      });
+
+      await request(servidor())
+        .post(`/inventario/movimientos/${compra}/correccion`)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ note: null });
+
+      const { rows } = await duena.query<{ neto: string }>(
+        `SELECT COALESCE(SUM(sign(quantity) * total_cost), 0)::text AS neto
+           FROM inventory_movement WHERE item_id = $1 AND type = 'COMPRA'`,
+        [item],
+      );
+      expect(Number.parseFloat(rows[0]?.neto ?? '1')).toBe(0);
+    });
+
     it('corregir dos veces el mismo movimiento devuelve 409, no un 500 del índice único', async () => {
       const item = await itemConPrecio('2.00');
       const compra = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '3' });

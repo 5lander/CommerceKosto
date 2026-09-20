@@ -15,14 +15,23 @@
 
 import { Injectable } from '@nestjs/common';
 
-import type { CompanyId, UserId } from '../../../shared/domain/identity/identificadores';
+import {
+  importJobId as aImportJobId,
+  type CompanyId,
+  type ImportJobId,
+  type UserId,
+} from '../../../shared/domain/identity/identificadores';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
-import type { RepositorioDeImportaciones } from '../application/ports/repositorio-de-importaciones.port';
+import type {
+  ImportacionParaAnular,
+  RepositorioDeImportaciones,
+} from '../application/ports/repositorio-de-importaciones.port';
 import type { Analisis, TipoDeImportacion } from '../domain/analisis';
 
 const SUBIDA = 'SUBIDA';
 const ANALIZADA = 'ANALIZADA';
 const CONFIRMADA = 'CONFIRMADA';
+const ANULADA = 'ANULADA';
 
 @Injectable()
 export class PrismaImportacionesRepositorio implements RepositorioDeImportaciones {
@@ -35,7 +44,7 @@ export class PrismaImportacionesRepositorio implements RepositorioDeImportacione
     readonly claveDeAlmacenamiento: string;
     readonly nombreOriginal: string;
     readonly bytes: number;
-  }): Promise<string> {
+  }): Promise<ImportJobId> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       const fila = await tx.importJob.create({
         data: {
@@ -50,13 +59,13 @@ export class PrismaImportacionesRepositorio implements RepositorioDeImportacione
         select: { id: true },
       });
 
-      return fila.id;
+      return aImportJobId(fila.id);
     });
   }
 
   public async guardarAnalisis(entrada: {
     readonly companyId: CompanyId;
-    readonly id: string;
+    readonly id: ImportJobId;
     readonly analisis: Analisis;
   }): Promise<void> {
     await this.transaccion.run(entrada.companyId, async (tx) => {
@@ -72,7 +81,7 @@ export class PrismaImportacionesRepositorio implements RepositorioDeImportacione
 
   public async marcarConfirmada(entrada: {
     readonly companyId: CompanyId;
-    readonly id: string;
+    readonly id: ImportJobId;
     readonly filasEscritas: number;
   }): Promise<void> {
     await this.transaccion.run(entrada.companyId, async (tx) => {
@@ -82,6 +91,47 @@ export class PrismaImportacionesRepositorio implements RepositorioDeImportacione
       await tx.importJob.updateMany({
         where: { id: entrada.id, companyId: entrada.companyId },
         data: { status: CONFIRMADA, writtenRows: entrada.filasEscritas, confirmedAt: new Date() },
+      });
+    });
+  }
+
+  public async buscarParaAnular(entrada: {
+    readonly companyId: CompanyId;
+    readonly id: ImportJobId;
+  }): Promise<ImportacionParaAnular | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.importJob.findFirst({
+        where: { id: entrada.id, companyId: entrada.companyId },
+        select: { id: true, kind: true, status: true },
+      });
+
+      if (fila === null) return null;
+      return {
+        id: aImportJobId(fila.id),
+        tipo: fila.kind as TipoDeImportacion,
+        estado: fila.status,
+      };
+    });
+  }
+
+  public async marcarAnulada(entrada: {
+    readonly companyId: CompanyId;
+    readonly id: ImportJobId;
+    readonly userId: UserId;
+  }): Promise<void> {
+    await this.transaccion.run(entrada.companyId, async (tx) => {
+      // Los dos campos a la vez, que es lo que exige el `CHECK`
+      // `import_job_anulada_es_coherente`: anulada si y solo si hay fecha, y el
+      // autor va con la fecha.
+      //
+      // `status: CONFIRMADA` en el `WHERE` no es adorno: si dos operadores
+      // pulsan a la vez, el segundo `UPDATE` no encuentra fila y no hay dos
+      // autores para la misma anulación. Lo que ya no puede pasar por aquí es
+      // una segunda tanda de filas contrarias — de eso se encarga el libro,
+      // saltándose lo ya corregido.
+      await tx.importJob.updateMany({
+        where: { id: entrada.id, companyId: entrada.companyId, status: CONFIRMADA },
+        data: { status: ANULADA, voidedAt: new Date(), voidedBy: entrada.userId },
       });
     });
   }

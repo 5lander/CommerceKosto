@@ -35,6 +35,7 @@ declare const MARCA_TRANSFER: unique symbol;
 declare const MARCA_PRODUCTION: unique symbol;
 declare const MARCA_PERIOD: unique symbol;
 declare const MARCA_COUNT: unique symbol;
+declare const MARCA_IMPORT: unique symbol;
 
 export type CompanyId = string & { readonly [MARCA_COMPANY]: 'company' };
 export type LocationId = string & { readonly [MARCA_LOCATION]: 'location' };
@@ -52,6 +53,13 @@ export type TransferId = string & { readonly [MARCA_TRANSFER]: 'inventory-transf
 export type ProductionId = string & { readonly [MARCA_PRODUCTION]: 'inventory-production' };
 export type PeriodId = string & { readonly [MARCA_PERIOD]: 'period' };
 export type PhysicalCountId = string & { readonly [MARCA_COUNT]: 'physical-count' };
+/**
+ * Hasta D-16.200 el id de una importación era una cadena suelta, y podía serlo:
+ * no salía de `imports`. Ahora viaja al libro —cada movimiento importado lo
+ * lleva— y llega por una ruta, que son las dos formas en que un identificador
+ * se confunde con otro.
+ */
+export type ImportJobId = string & { readonly [MARCA_IMPORT]: 'import-job' };
 
 /**
  * ES UN ERROR DE DOMINIO, Y ESO LO CONVIERTE EN UN 400 (P16-A2, INC-012).
@@ -193,4 +201,9 @@ export function periodId(valor: string): PeriodId {
 /** @throws {IdentificadorInvalidoError} */
 export function physicalCountId(valor: string): PhysicalCountId {
   return exigirUuid('PhysicalCountId', valor) as PhysicalCountId;
+}
+
+/** @throws {IdentificadorInvalidoError} */
+export function importJobId(valor: string): ImportJobId {
+  return exigirUuid('ImportJobId', valor) as ImportJobId;
 }

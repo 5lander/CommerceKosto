@@ -106,6 +106,45 @@ export async function exigirLibroEscribible(entrada: {
   });
 }
 
+/** Dónde y cuándo quiere escribir una fila: lo que la guarda necesita saber. */
+export interface EscrituraDelLibro {
+  readonly locationId: LocationId;
+  readonly ocurridoEn: Date;
+}
+
+/**
+ * La misma guarda aplicada a un conjunto de escrituras, **una vez por mes y
+ * ubicación distintos** y no una por fila.
+ *
+ * Un archivo puede traer marzo y abril mezclados, y si marzo está cerrado hay
+ * que pararlo antes de escribir nada; consultar el período 500 veces para
+ * averiguarlo sería pagar 500 veces por la misma respuesta. Lo que importa es
+ * el mes, no la fila.
+ */
+export async function exigirLibroEscribibleEnCada(entrada: {
+  readonly deps: DependenciasDeInventario;
+  readonly sesion: SesionActiva;
+  readonly escrituras: readonly EscrituraDelLibro[];
+}): Promise<void> {
+  const unicas = new Map(
+    entrada.escrituras.map((e) => [`${e.locationId}|${claveDeMes(e.ocurridoEn)}`, e]),
+  );
+
+  for (const escritura of unicas.values()) {
+    await exigirLibroEscribible({
+      deps: entrada.deps,
+      sesion: entrada.sesion,
+      locationId: escritura.locationId,
+      ocurridoEn: escritura.ocurridoEn,
+    });
+  }
+}
+
+/** El mes al que pertenece un instante, para no repetir la consulta de período. */
+function claveDeMes(fecha: Date): string {
+  return `${String(fecha.getUTCFullYear())}-${String(fecha.getUTCMonth())}`;
+}
+
 /** El saldo con lo que el catálogo aporta: cómo se llama y en qué se mide. */
 export interface SaldoConNombre extends SaldoLeido {
   readonly nombre: string;
@@ -366,7 +405,9 @@ function filaDe(
 }
 
 /**
- * La fila que anula a otra.
+ * La fila que anula a otra. La usan la corrección de una sola y la anulación de
+ * una importación entera (D-16.200): **deshacer es siempre lo mismo**, cambie
+ * el número de filas.
  *
  * EL IMPORTE VIAJA CON LA CANTIDAD, y no es un detalle: sin él,
  * `compras_del_mes` (SPEC §16) seguiría contando el dinero de una compra que se
@@ -376,7 +417,7 @@ function filaDe(
  * desglose no queda «sin desglose», y así el CHECK de coherencia la admite y
  * Σ(bruto) del mes se cancela igual que Σ(neto).
  */
-function anulacionDe(
+export function anulacionDe(
   original: MovimientoLeido,
   unidad: string,
   note: string | null,
@@ -397,7 +438,10 @@ function anulacionDe(
     cantidad: anulacion.cantidad.toStorageString(),
     costoTotal: original.costoTotal,
     desglose: original.desglose,
-    purchaseArticleId: null,
+    // Y EL ARTÍCULO TAMBIÉN (INC-029): se devuelve la misma presentación que se
+    // compró. Sin él, la devolución caía en otro grupo que la compra y la
+    // comparativa por presentación no podía cuadrar ni restando.
+    purchaseArticleId: original.purchaseArticleId,
     reversesMovementId: original.id,
     occurredAt: anulacion.ocurridoEn,
     note,

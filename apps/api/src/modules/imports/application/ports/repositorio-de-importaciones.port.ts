@@ -11,10 +11,21 @@
  * subió, qué decía el análisis y qué se acabó escribiendo.
  */
 
-import type { CompanyId, UserId } from '../../../../shared/domain/identity/identificadores';
+import type {
+  CompanyId,
+  ImportJobId,
+  UserId,
+} from '../../../../shared/domain/identity/identificadores';
 import type { Analisis, TipoDeImportacion } from '../../domain/analisis';
 
 export const REPOSITORIO_DE_IMPORTACIONES = 'REPOSITORIO_DE_IMPORTACIONES';
+
+/** Lo poco que hace falta saber de una importación para decidir si se anula. */
+export interface ImportacionParaAnular {
+  readonly id: ImportJobId;
+  readonly tipo: TipoDeImportacion;
+  readonly estado: string;
+}
 
 /**
  * **NO HAY `leer()`, Y ES DELIBERADO.** Una version anterior de este puerto lo
@@ -34,11 +45,11 @@ export interface RepositorioDeImportaciones {
     readonly claveDeAlmacenamiento: string;
     readonly nombreOriginal: string;
     readonly bytes: number;
-  }): Promise<string>;
+  }): Promise<ImportJobId>;
 
   guardarAnalisis(entrada: {
     readonly companyId: CompanyId;
-    readonly id: string;
+    readonly id: ImportJobId;
     readonly analisis: Analisis;
   }): Promise<void>;
 
@@ -61,7 +72,29 @@ export interface RepositorioDeImportaciones {
    */
   marcarConfirmada(entrada: {
     readonly companyId: CompanyId;
-    readonly id: string;
+    readonly id: ImportJobId;
     readonly filasEscritas: number;
+  }): Promise<void>;
+
+  /** `null` si no existe o es de otra company: quien pregunta no distingue. */
+  buscarParaAnular(entrada: {
+    readonly companyId: CompanyId;
+    readonly id: ImportJobId;
+  }): Promise<ImportacionParaAnular | null>;
+
+  /**
+   * Deja la importación en `ANULADA`, con su fecha y su autor.
+   *
+   * **VA DESPUÉS DE ESCRIBIR LAS FILAS CONTRARIAS, Y EN OTRA TRANSACCIÓN**, por
+   * lo mismo que `marcarConfirmada` va después de escribir las filas: el libro
+   * lo escribe `inventory` dentro de su propia `run()`, y no hay forma de que
+   * una transacción contenga a otra. Si se cae en medio, quedan las filas
+   * contrarias y el estado sin cambiar — que es el estado honesto, y además
+   * reintentable: la anulación se salta lo ya corregido.
+   */
+  marcarAnulada(entrada: {
+    readonly companyId: CompanyId;
+    readonly id: ImportJobId;
+    readonly userId: UserId;
   }): Promise<void>;
 }

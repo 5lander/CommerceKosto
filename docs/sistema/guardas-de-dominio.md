@@ -349,6 +349,37 @@ período siempre existe cuando se compara —`AsegurarPeriodo` lo crea antes—,
 
 ---
 
+## `20260919234308_p16h_anulacion_de_importacion`
+
+Deshacer una importación que escribió en el libro (D-16.200). Sus restricciones son **todas
+estructurales**, y por una razón que se repite en toda la migración: **ningún campo que tocan viene
+de un cuerpo de petición**. El endpoint recibe un id de ruta y una nota, y nada más.
+
+| Restricción | | Guarda |
+|---|---|---|
+| `import_job_status_codigo_conocido` (ampliada con `ANULADA`) | ⚪ | El estado lo escribe el repositorio de `imports` con una constante, nunca el cliente. No hay endpoint que acepte «estado» |
+| `import_job_confirmada_es_coherente` (ampliada a `ANULADA`) | ⚪ | `marcarConfirmada` escribe estado, fecha y recuento **en la misma sentencia**; `marcarAnulada` no los toca. Violarla exigiría un `UPDATE` a mano |
+| `import_job_anulada_es_coherente` | ⚪ | Igual: `marcarAnulada` escribe `status`, `voided_at` y `voided_by` juntos, y el autor sale de la sesión |
+| `inventory_movement_import_job_id_fkey` (FK) | ⚪ | El id lo pone `ImportarArchivo` con el de la fila que acaba de crear. No llega por HTTP ni por el archivo |
+| `import_job_voided_by_fkey` (FK) | ⚪ | El usuario sale de `SesionActiva`, que ya existe en `app_user` |
+
+**Lo alcanzable de este paquete no tiene `CHECK` detrás, y por eso se dice aquí.** `POST
+/importaciones/:id/anulacion` tiene tres formas de no poder hacerse, y las tres salen con su código
+en vez de con un 500:
+
+| Guarda | | Qué la dispara y qué responde |
+|---|---|---|
+| `ImportacionNoEncontradaError` (`imports/domain/errores.ts`) | 🔴 | Un id que no existe **o que es de otra company**: el mismo 404 para los dos, que es CLAUDE.md §4.4. Probada en `test/integracion/anulacion-de-importacion.spec.ts` («la importación de otra company no se encuentra») |
+| `ImportacionNoAnulableError` (misma) | 🔴 | **409 `CONFLICTO`** con el motivo: ya estaba anulada, nunca se confirmó, o no es de movimientos. El de «ya estaba anulada» no es un éxito silencioso a propósito: pulsar dos veces tiene que decir que ya está hecho. Probada en el mismo archivo («anular dos veces») |
+| `PeriodoCerradoError`, vía `exigirLibroEscribible` | 🔴 | La fila contraria conserva la fecha de la original, así que una importación que cayó en un mes ya cerrado **no se puede deshacer sin reabrirlo**. La guarda ya existía desde P7; lo nuevo es que este endpoint es un sexto camino hasta ella, y por eso `AnularMovimientosDeImportacion` la llama —una vez por mes y ubicación distintos— antes de escribir nada. Probada en el mismo archivo («la importación de un mes cerrado no se anula») |
+
+**Y una que no hace falta:** escribir dos veces las filas contrarias. No lo impide un `CHECK` sino el
+índice único de `reverses_movement_id`, que ya existía — pero antes de llegar a él, la anulación
+**se salta lo ya corregido**, que es lo que hace seguro reintentarla tras una caída entre sus dos
+pasos.
+
+---
+
 ## Los tipos del borde — tres guardas sin `CHECK` detrás *(P16-A2)*
 
 **Esta sección rompe el molde del documento a propósito.** Todas las de arriba parten de una restricción de la base; estas tres no tienen ninguna. Y aun así son exactamente el mismo fallo, que es lo que las trae aquí: **una regla que se hace cumplir y no se explica sale como `INTERNAL_ERROR 500`**. Lo único que cambia es quién la hace cumplir — allí un `CHECK`, aquí el constructor de un tipo de dominio.

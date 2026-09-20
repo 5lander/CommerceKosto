@@ -36,6 +36,30 @@ export class DemasiadasFilasError extends ErrorDeDominio {
   }
 }
 
+/** No existe, o es de otra company: el mismo 404 para los dos (CLAUDE.md §4.4). */
+export class ImportacionNoEncontradaError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+
+  public constructor() {
+    super('No se encontró esa importación.');
+  }
+}
+
+/**
+ * Se pide deshacer algo que no se puede deshacer — D-16.200.
+ *
+ * **EL MENSAJE DICE EL ESTADO, Y ESO ES SEGURO**: quien pregunta ya ha probado
+ * que la importación es de su company, porque si no lo fuera habría recibido el
+ * 404 de arriba. Sin el estado, el usuario no sabe si insistir o no.
+ */
+export class ImportacionNoAnulableError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor(motivo: string) {
+    super(`Esta importación no se puede anular: ${motivo}`);
+  }
+}
+
 /**
  * El proceso hijo se pasó del plazo y se le mató.
  *

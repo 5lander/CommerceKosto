@@ -315,15 +315,16 @@ model AppUser {
   transferencias InventoryTransfer[]
   producciones   InventoryProduction[]
 
-  periodosCerrados     Period[]             @relation("cerro")
-  periodosReabiertos   Period[]             @relation("reabrio")
-  conteosCreados       PhysicalCount[]      @relation("conteos_creados")
-  conteosConfirmados   PhysicalCount[]      @relation("conteos_confirmados")
-  ventasCargadas       ProductSales[]
-  importacionesSubidas ImportJob[]
-  costosCargados       FixedCost[]
-  correos              EmailOutbox[]
-  restablecimientos    PasswordResetToken[]
+  periodosCerrados      Period[]             @relation("cerro")
+  periodosReabiertos    Period[]             @relation("reabrio")
+  conteosCreados        PhysicalCount[]      @relation("conteos_creados")
+  conteosConfirmados    PhysicalCount[]      @relation("conteos_confirmados")
+  ventasCargadas        ProductSales[]
+  importacionesSubidas  ImportJob[]          @relation("importaciones_subidas")
+  importacionesAnuladas ImportJob[]          @relation("importaciones_anuladas")
+  costosCargados        FixedCost[]
+  correos               EmailOutbox[]
+  restablecimientos     PasswordResetToken[]
 
   @@index([companyId, status])
   @@map("app_user")
@@ -1136,6 +1137,16 @@ model InventoryMovement {
   /// direccion del tipo — porque su cantidad no la escribe nadie, se deriva.
   reversesMovementId String? @unique @map("reverses_movement_id") @db.Uuid
 
+  /// De que importacion vino esta fila (D-16.200). `null` es lo normal: casi
+  /// todo el libro se escribe a mano. Sin este hilo, anular una importacion
+  /// seria adivinar que filas entraron por el archivo.
+  ///
+  /// LAS ANULACIONES NO LO LLEVAN: la fila de signo contrario no la trajo el
+  /// archivo, y su vinculo con el original ya es `reverses_movement_id`. Si lo
+  /// llevara, «los movimientos de esta importacion» devolveria tambien lo que
+  /// la deshizo, y la segunda anulacion intentaria anular la primera.
+  importJobId String? @map("import_job_id") @db.Uuid
+
   /// Cuando ocurrio en el negocio. Es la fecha que manda para todo informe.
   occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
   /// Cuando entro al libro. Nunca coinciden del todo, y la diferencia importa
@@ -1155,6 +1166,7 @@ model InventoryMovement {
   corrige    InventoryMovement?    @relation("correccion", fields: [reversesMovementId], references: [id], onDelete: Restrict)
   correccion InventoryMovement?    @relation("correccion")
   autor      AppUser               @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  importJob  ImportJob?            @relation(fields: [importJobId], references: [id], onDelete: Restrict)
 
   /// CLAUDE.md 5: "movimientos de una ubicacion en un rango de fechas".
   @@index([companyId, locationId, occurredAt])
@@ -1551,9 +1563,19 @@ model ImportJob {
   createdBy   String    @map("created_by") @db.Uuid
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
 
-  company Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  autor   AppUser         @relation(fields: [createdBy], references: [id], onDelete: Restrict)
-  estado  ImportJobStatus @relation(fields: [status], references: [code])
+  /// Quien la deshizo y cuando (D-16.200). `ANULADA` si y solo si hay fecha, y
+  /// el autor va con ella: poder deshacer sin dejar dicho quien deshizo seria
+  /// media funcion.
+  voidedAt DateTime? @map("voided_at") @db.Timestamptz(6)
+  voidedBy String?   @map("voided_by") @db.Uuid
+
+  company  Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  autor    AppUser         @relation("importaciones_subidas", fields: [createdBy], references: [id], onDelete: Restrict)
+  anulador AppUser?        @relation("importaciones_anuladas", fields: [voidedBy], references: [id], onDelete: Restrict)
+  estado   ImportJobStatus @relation(fields: [status], references: [code])
+
+  /// Las filas del libro que trajo. La anulacion las lee por aqui.
+  movimientos InventoryMovement[]
 
   @@index([companyId, createdAt(sort: Desc)])
   @@map("import_job")
@@ -1598,7 +1620,7 @@ model BackofficeSession {
   userAgent  String?   @map("user_agent")
 
   /// Token anti-CSRF del operador, EN CLARO. Mismo criterio que `Session`.
-  csrfToken  String?   @map("csrf_token")
+  csrfToken String? @map("csrf_token")
 
   usuario BackofficeUser @relation(fields: [userId], references: [id], onDelete: Restrict)
 

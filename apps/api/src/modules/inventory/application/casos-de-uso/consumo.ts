@@ -105,6 +105,8 @@ export class RegistrarConsumoPorVenta {
       companyId: sesion.companyId,
       userId: sesion.userId,
       movimientos,
+      // El consumo por venta no viene de ningún archivo: lo calcula la receta.
+      importJobId: null,
     });
 
     await registrarEvento({

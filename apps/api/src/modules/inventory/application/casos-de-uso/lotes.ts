@@ -23,7 +23,11 @@
  * company se leen UNA vez para todo el lote.
  */
 
-import type { ItemId, LocationId } from '../../../../shared/domain/identity/identificadores';
+import type {
+  ImportJobId,
+  ItemId,
+  LocationId,
+} from '../../../../shared/domain/identity/identificadores';
 import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
 import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import {
@@ -43,7 +47,7 @@ import {
 } from '../../domain/lote';
 import { conSignoDelTipo } from '../../domain/movimiento';
 import type { MovimientoParaGuardar } from '../ports/repositorio-de-inventario.port';
-import { exigirLibroEscribible, type DependenciasDeInventario } from './movimientos';
+import { exigirLibroEscribibleEnCada, type DependenciasDeInventario } from './movimientos';
 
 /** Lo que el lote necesita de cada ítem, resuelto por nombre. */
 interface ItemDelLote {
@@ -68,12 +72,21 @@ export class RegistrarMovimientosEnLote {
     entrada: {
       readonly locationId: LocationId;
       readonly movimientos: readonly MovimientoDelLote[];
+      /** De qué importación viene el lote (D-16.200). Es lo que la hace reversible. */
+      readonly importJobId: ImportJobId;
     },
   ): Promise<number> {
     const problemas = problemasDelLoteDeMovimientos(entrada.movimientos);
     if (problemas.length > 0) throw new MovimientoDeLoteInvalidoError(problemas);
 
-    await this.exigirLibroEscribibleParaTodos(sesion, entrada);
+    await exigirLibroEscribibleEnCada({
+      deps: this.deps,
+      sesion,
+      escrituras: entrada.movimientos.map((m) => ({
+        locationId: entrada.locationId,
+        ocurridoEn: m.occurredAt,
+      })),
+    });
 
     const contexto = await this.leerContexto(sesion, entrada.locationId);
     const preparados = preparar(entrada.movimientos, contexto);
@@ -82,6 +95,7 @@ export class RegistrarMovimientosEnLote {
       companyId: sesion.companyId,
       userId: sesion.userId,
       movimientos: preparados,
+      importJobId: entrada.importJobId,
     });
 
     await this.deps.auditoria.record({
@@ -96,33 +110,6 @@ export class RegistrarMovimientosEnLote {
     });
 
     return ids.length;
-  }
-
-  /**
-   * La guarda de las cinco escrituras del libro, aplicada a **cada fecha
-   * distinta** del lote y no solo a la primera.
-   *
-   * Un archivo puede traer marzo y abril mezclados, y si marzo está cerrado hay
-   * que pararlo antes de escribir nada. Se agrupan las fechas para no consultar
-   * el período 500 veces: lo que importa es el mes, no la fila.
-   */
-  private async exigirLibroEscribibleParaTodos(
-    sesion: SesionActiva,
-    entrada: {
-      readonly locationId: LocationId;
-      readonly movimientos: readonly MovimientoDelLote[];
-    },
-  ): Promise<void> {
-    const fechas = new Map(entrada.movimientos.map((m) => [claveDeMes(m.occurredAt), m.occurredAt]));
-
-    for (const ocurridoEn of fechas.values()) {
-      await exigirLibroEscribible({
-        deps: this.deps,
-        sesion,
-        locationId: entrada.locationId,
-        ocurridoEn,
-      });
-    }
   }
 
   /** Tres lecturas para todo el lote —ítems, grupos, ajuste—, no tres por fila. */
@@ -149,11 +136,6 @@ export class RegistrarMovimientosEnLote {
       ),
     };
   }
-}
-
-/** El mes al que pertenece un instante, para no repetir la consulta de período. */
-function claveDeMes(fecha: Date): string {
-  return `${String(fecha.getUTCFullYear())}-${String(fecha.getUTCMonth())}`;
 }
 
 /**

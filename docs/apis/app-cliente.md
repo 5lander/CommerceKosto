@@ -1268,6 +1268,39 @@ Tres campos, y **ninguno es una cantidad**. `FALTAN_COMPRAS` y `REPONER` colapsa
 
 Se construye desde otro caso de uso y con otro tipo, **no filtrando la vista de inventario**. Un campo que se calcula y luego se quita ya viajó por el cable alguna vez.
 
+## Importaciones (P16-H)
+
+**Subir un archivo NO es un endpoint**: la importación se opera desde la línea de comandos
+(`npm run importar`) hasta que exista su pantalla (P20). Deshacerla sí lo es, y la asimetría es a
+propósito: el comando puede dejar cientos de filas en el libro de un cliente, y hasta D-16.200 la
+única forma de revertirlas era corregirlas a mano, una a una.
+
+### `POST /importaciones/:importJobId/anulacion` — `import.write`
+
+Emite los movimientos de signo contrario de todo lo que escribió esa importación, **en una sola
+transacción**, y la deja en `ANULADA`. No borra ni una fila: es R3.
+
+```jsonc
+// cuerpo
+{ "note": "El archivo traía el mes cambiado" }   // o null
+
+// 201
+{ "id": "01a0bc30-…", "estado": "ANULADA", "filasAnuladas": 2 }
+```
+
+`filasAnuladas` cuenta movimientos, no cantidades: de ahí no se despeja ninguna receta (CLAUDE.md
+§4.3). La respuesta **no lleva saldo**, como ninguna escritura del libro.
+
+| Código | Cuándo |
+|---|---|
+| **404 `RECURSO_NO_ENCONTRADO`** | No existe **o es de otra company**: el mismo 404 para los dos |
+| **409 `CONFLICTO`** | Ya estaba anulada · nunca se confirmó · no es de `MOVIMIENTOS` · alguno de sus movimientos cae en un **mes cerrado**. El mensaje dice cuál de las cuatro |
+| **403** | `BODEGA` no tiene `import.write` |
+
+**Volver a lanzarla es seguro:** lo ya corregido se salta. Entre escribir las filas contrarias y
+marcar el estado hay dos transacciones que no se pueden juntar —el libro lo escribe `inventory`
+dentro de la suya—, y si se cae en medio, repetir la petición la termina.
+
 ## Salud
 
 `GET /health` (liveness, no toca la base) y `GET /ready` (readiness, sí la toca). Públicas y fuera del limitador: las sondea el orquestador cada pocos segundos.

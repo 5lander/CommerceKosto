@@ -18,6 +18,7 @@ import {
   CrearArticulosEnLote,
   CrearItemsEnLote,
 } from '../../catalog/application/casos-de-uso/lotes';
+import { AnularMovimientosDeImportacion } from '../../inventory/application/casos-de-uso/anulacion-de-importacion';
 import { RegistrarMovimientosEnLote } from '../../inventory/application/casos-de-uso/lotes';
 import { SugerirPreciosEnLote } from '../../pricing/application/casos-de-uso/lotes';
 import {
@@ -64,4 +65,8 @@ export class DependenciasDeImportacionNest {
 
   @Inject(RegistrarMovimientosEnLote)
   public readonly registrarMovimientos!: RegistrarMovimientosEnLote;
+
+  /** Deshacer también es del módulo dueño: `imports` no escribe en el libro. */
+  @Inject(AnularMovimientosDeImportacion)
+  public readonly anularEnElLibro!: AnularMovimientosDeImportacion;
 }

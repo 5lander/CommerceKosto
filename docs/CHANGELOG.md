@@ -4,6 +4,30 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-H · Una importación que escribió en el libro se deshace COMO importación · 2026-09-20
+
+> API, 1 migración, SPEC y documentación de API.
+
+**Un archivo de movimientos mal armado dejaba cientos de filas en un libro que no se edita.** El mes
+cambiado, la cantidad en la unidad que no era, el archivo de la otra sucursal: deshacerlo era
+corregir movimiento por movimiento desde la pantalla, sabiendo cuáles eran, y si alguien se saltaba
+uno el saldo quedaba mal para siempre sin que nada avisara.
+
+Ahora cada movimiento importado sabe de qué archivo vino (`import_job_id`) y
+`POST /importaciones/:id/anulacion` emite los de signo contrario **en una sola transacción** (R3),
+dejando la importación en `ANULADA` — un estado, no un borrado. El mes cerrado sigue mandando: si
+alguna de sus filas cae en uno, la anulación se detiene con **409** y su motivo. Reintentarla es
+seguro: lo ya corregido se salta. `import.write`, el mismo permiso que escribir.
+
+**Y destapó INC-029, que llevaba desde P6:** una compra corregida dejaba de contar en el saldo y
+**seguía contando en el dinero**. `total_cost` es magnitud sin signo (ADR-009 §2), así que
+`SUM(total_cost)` sumaba la compra y su corrección en vez de cancelarlas, e inflaba
+`compras_del_mes` (SPEC §16) por el doble de lo corregido — la cifra que entra en el food cost real.
+Las tres agregaciones de dinero restan ahora las correcciones, y la corrección de una compra
+conserva su artículo para que la comparativa por presentación también cuadre.
+
+---
+
 ## P16-F2 · El umbral del eje de IP se calibra para IPs compartidas · 2026-09-19
 
 > API y documentación. Sin migraciones.
