@@ -4,6 +4,31 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-I3 · R15 — la varianza del mes cuadra con el inventario · 2026-09-20
+
+> Una regla de negocio, un caso conocido reescrito y una fila de auditoría. Sin código: se construye
+> en P16-J.
+
+El usuario confirma el desglose de D-16.202 —**el `AJUSTE` es línea propia**, no parte de «sin
+explicar»— y con él entra **R15**:
+
+```
+varianza (§16)  =  −mermas_y_ajustes (§18)  −  diferencia_de_conteo (§18)
+```
+
+**No es una tolerancia: es una identidad.** Al despejar el stock teórico de §18 dentro del
+`consumo_real` de D-16.202, el término de transferencias y producción **se cancela entero** y lo que
+queda es exactamente lo que el libro no explica. Si las dos vistas del mismo libro dejan de cuadrar,
+una está mal y da igual cuál. Se probará sobre el dataset de CC-010/011/012 **y** sobre el caso
+conocido de R7.
+
+**CC-011 queda reescrito** con la fórmula nueva: `consumo_real = 26,00` y
+`varianza = 4,00 = 2,50 merma − 0,50 ajustes + 2,00 sin explicar` — las tres líneas que la pantalla
+25 enseñará. La prueba de hoy sigue anclando los 32,00 que el sistema da **hasta P16-J**, a
+propósito: es lo que hará visible el cambio cuando llegue.
+
+---
+
 ## P16-I2 · La regla del doble intérprete, la base en limpio y D-16.202 registrada · 2026-09-20
 
 > Reglas, entorno y una decisión anotada. Sin código de aplicación y sin migraciones.

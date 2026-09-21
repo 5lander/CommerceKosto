@@ -562,30 +562,62 @@ Probado en `apps/api/src/modules/inventory/domain/agregados.spec.ts`, **con la b
 
 ---
 
-### CC-011 — `CONSUMO_REAL` y su varianza (SPEC §16)
+### CC-011 — `CONSUMO_REAL` y su varianza (SPEC §16, reescrito por D-16.202)
 
 **Entrada** — `inventario_inicial = 40 × 1.00`, `compras_del_mes = 100.00` (de CC-010),
+`transferencias enviadas = 20 × 1.00`, `salidas a producción = 8 × 1.00`,
 `inventario_final_fisico = 86 × 1.00`, `consumo_teorico = 22 × 1.00`.
 
 | Salida | Esperado | De dónde sale |
 |---|---|---|
-| `CONSUMO_REAL` | **`54.00`** | `40.00 + 100.00 − 86.00` |
+| `CONSUMO_REAL` | **`26.00`** | `40.00 + 100.00 − 20.00 − 8.00 − 86.00` |
 | `CONSUMO_TEORICO` | **`22.00`** | 22 kg de receta × 1,00 |
-| `VARIANZA_USD` | **`32.00`** | `54.00 − 22.00` |
+| `VARIANZA_USD` | **`4.00`** | `26.00 − 22.00` |
 
-**La varianza se desglosa exactamente en el vocabulario del libro**, y es lo que hace útil este caso:
+**El desglose, con el ajuste en línea propia** (D-16.202) — y es lo que la pantalla 25 enseña:
+
+| Línea | | De dónde sale |
+|---|---|---|
+| Merma registrada | **`2.50`** | el movimiento `MERMA` del mes, atribuible y con su fecha |
+| Ajustes | **`−0.50`** | el `AJUSTE` de `+0,5 kg`: **suma stock, así que resta varianza** |
+| Sin explicar | **`2.00`** | la diferencia del conteo — lo que el libro no explica |
+| **Varianza** | **`4.00`** | `2.50 − 0.50 + 2.00` |
+
+**Por qué el ajuste es línea propia y no parte de «sin explicar»:** un ajuste es una corrección que
+alguien registró, con su nota y su autor; «sin explicar» es precisamente lo que nadie registró.
+Meterlos juntos borraría la diferencia entre «se corrigió» y «falta», que es la única pregunta que
+un dueño se hace mirando esta cifra.
+
+#### Y la identidad que lo ata al inventario — **R15**
 
 ```
-32.00 = 20.00 transferencia + 8.00 producción + 2.50 merma − 0.50 ajuste + 2.00 faltante del conteo
+varianza (§16)  =  −mermas_y_ajustes (§18)  −  diferencia_de_conteo (§18)
+     4.00       =        −(−2.00)           −        (−2.00)
 ```
 
-> ⚠️ **Lo que este caso deja a la vista, y no se arregla aquí.** De esos 32,00, **28,00 son
-> transferencia y producción**: stock que salió de este local sin haberse consumido en él. La
-> fórmula de SPEC §16 —`inicial + compras − final`— los cuenta como consumo porque **en el Excel no
-> existen**: no hay transferencias ni producción en un único local sin dimensión temporal. A nivel
-> de company se compensan —el local que recibe muestra consumo negativo—; **por ubicación, no**.
-> Queda anotado como **duda abierta #16**, junto a la divergencia de la MC promedio: es una decisión
-> de modelo, no un error de aritmética, y cambiarla toca SPEC §16.
+**No es una coincidencia del dataset: es álgebra.** Despejando el stock teórico de §18 dentro del
+`consumo_real` de §16, el término de transferencias y producción **se cancela entero**, y lo que
+queda es exactamente lo que el libro no explica:
+
+```
+consumo_real = inicial + compras + otros − conteo_fisico
+conteo_fisico = (inicial + compras + mermasYAjustes + otros − consumo_teorico) + diferencia
+⇒ consumo_real − consumo_teorico = −mermasYAjustes − diferencia
+```
+
+Por eso R15 se prueba **sobre este mismo dataset y sobre el caso conocido de R7**: si las dos vistas
+del mismo libro dejan de cuadrar, una está mal y da igual cuál.
+
+> **Lo que este caso destapó, y que ya está decidido.** Con la fórmula anterior —`inicial + compras
+> − final`, la del Excel— la varianza de este mes salía **32,00**, de los cuales **28,00 eran
+> transferencia y producción**: stock que salió del local sin consumirse en él. El Excel no los
+> tiene (SPEC §3), así que la fórmula no los restaba. Fue la **duda abierta #16**, decidida por el
+> usuario el 2026-09-20 con la opción (a) extendida: **D-16.202**, que se construye en **P16-J**,
+> justo antes de la pantalla 25.
+
+> ⚠️ **Hasta P16-J, el sistema todavía da `54.00` y `32.00`**, y su prueba lo fija a propósito: un
+> caso conocido dice lo que el número **debe** valer, y la prueba de hoy dice lo que **vale**, para
+> que el cambio se vea cuando llegue. Cuando P16-J entre, las dos cifras se encuentran aquí.
 
 Probado en `apps/api/src/modules/analytics/domain/vistas.spec.ts`, con la base apagada.
 
@@ -642,6 +674,10 @@ Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se r
 | CC-007 | `iva_recuperable = false`: sube exactamente el IVA **de cada precio** | ✅ P5 | Los once ítems de CC-003 con sus tres tasas |
 | CC-008 | Cuadrante de menu engineering con índice de popularidad **exactamente 1** | ⬜ P8 | Menu engineering es SPEC §15, y llega con las vistas |
 | CC-009 | Los cuatro bordes que no pueden dividir por cero | ✅ P5 | Guardas de SPEC §12 y §14, más la del PVP ausente |
+| CC-010 | **`compras_del_mes`** y las cantidades de §18, sobre un mes con todo el vocabulario del libro | ✅ P16-I | A mano, antes del pliegue. El Excel cubre la fórmula, no el resultado |
+| CC-011 | **`CONSUMO_REAL`** y su varianza, con el desglose de tres líneas | 🟡 **escrito con D-16.202; el sistema lo cumplirá en P16-J** | A mano. Hoy el sistema da 54,00/32,00 y su prueba lo ancla |
+| CC-012 | **El inventario valorizado** del mismo mes: stock teórico, diferencia, reorden y cobertura | ✅ P16-I | A mano, sobre las cantidades que CC-010 pliega |
+| **R15** | La identidad `varianza = −mermas_y_ajustes − diferencia` sobre el mismo mes | ⬜ **P16-J** | Álgebra: se despeja el stock teórico dentro del consumo real |
 | CC-R7 | Conciliación = 0 | 🟡 P0 con aritmética · **P5 a través del motor** · dataset completo en P8 |
 
 ### Qué cambió en P5 respecto de lo que esta tabla decía antes

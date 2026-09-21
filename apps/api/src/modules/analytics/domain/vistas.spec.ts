@@ -308,8 +308,16 @@ describe('food cost real y la conciliación R7 (SPEC §16)', () => {
    * Lo que lo hace útil es que **la varianza se desglosa en el vocabulario del
    * libro**, sin residuo: 20 de transferencia + 8 de producción + 2,50 de
    * merma − 0,50 de ajuste + 2 de faltante del conteo = 32.
+   *
+   * **ESTA PRUEBA FIJA LO QUE EL SISTEMA DA HOY, NO LO QUE DEBE DAR.** CC-011
+   * ya está reescrito con la fórmula de **D-16.202** —que resta lo que salió
+   * por transferencia o a producción— y su varianza esperada es **4,00**, no
+   * 32,00. Mientras tanto, estos 32,00 son el comportamiento actual, anclado a
+   * propósito: es lo que hará visible el cambio cuando **P16-J** entre, justo
+   * antes de la pantalla 25. Los 28,00 de diferencia son exactamente la
+   * transferencia y la producción.
    */
-  it('CC-011 — consumo real y varianza de un mes con todo el vocabulario', () => {
+  it('CC-011 — consumo real y varianza de un mes con todo el vocabulario (hasta P16-J)', () => {
     const real = foodCostReal({
       // 40 kg contados en febrero, a 1,00 el kilo
       inventarioInicial: usd('40.00'),

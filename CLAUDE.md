@@ -356,6 +356,16 @@ Cada una es verificable; la sección E de `docs/AUDITORIA.md` se deriva de aquí
 
 **R14 — El PVP incluye IVA; el food cost se calcula sobre venta neta.** `venta_neta = pvp / (1 + iva_venta)`. *(desde P5)*
 
+**R15 — La varianza del mes cuadra con el inventario.** Por ítem y ubicación, sobre el mismo mes:
+
+```
+varianza (§16)  =  −mermas_y_ajustes (§18)  −  diferencia_de_conteo (§18)
+```
+
+**No es una comprobación aproximada: es una identidad.** Con el `consumo_real` de D-16.202 —el que resta lo que salió por transferencia o a producción— el término de transferencias y producción **se cancela algebraicamente** al despejar el stock teórico, y lo que queda es exactamente lo que el libro no explica. Si no cuadra, una de las dos vistas está mal y da igual cuál: las dos salen del mismo libro.
+
+De ahí el desglose que la varianza enseña, con el ajuste en **línea propia**: `varianza = merma registrada − ajustes (con signo) + diferencia de conteo`. *(desde P16-J)*
+
 ---
 
 ## 7. Pruebas
