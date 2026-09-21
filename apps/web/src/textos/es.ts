@@ -292,6 +292,50 @@ export const TEXTOS = {
     } as Record<string, string>,
   },
 
+  /** Pantalla 18: registrar una compra, una merma o un ajuste. */
+  movimientoNuevo: {
+    enlace: 'Registrar',
+    titulo: 'Registrar movimiento',
+    ayuda: 'Lo que entró o salió de esta sucursal. Se anota una vez y no se edita: si te equivocas, se corrige con otro movimiento y los dos quedan.',
+    queEs: '¿Qué pasó?',
+    tipos: {
+      COMPRA: 'Llegó una compra',
+      MERMA: 'Se perdió producto',
+      AJUSTE: 'Corregir el stock tras contar',
+    } as Record<string, string>,
+    // Cada tipo pregunta lo que ese tipo significa: el signo lo pone el dominio
+    // (`movimiento.ts`), aquí nunca se resta nada por cuenta propia.
+    ayudasDeTipo: {
+      COMPRA: 'Cuánto entró y cuánto se pagó por ello, tal como dice la factura.',
+      MERMA: 'Cuánto se perdió. Escríbelo en positivo: el sistema ya sabe que resta.',
+      AJUSTE: 'La diferencia que hay que aplicar. En positivo si sobra, con el menos delante si falta.',
+    } as Record<string, string>,
+    insumo: 'Insumo',
+    elijaInsumo: 'Elige un insumo',
+    cantidades: {
+      COMPRA: 'Cuánto entró',
+      MERMA: 'Cuánto se perdió',
+      AJUSTE: 'Diferencia (+ sobra · − falta)',
+    } as Record<string, string>,
+    articulo: 'Presentación comprada',
+    sinArticulo: 'Sin presentación (usa el IVA del grupo)',
+    articuloAyuda: 'La presentación dice en qué se compró y con qué IVA. Si la eliges, no hace falta escribir la tarifa.',
+    total: 'Total de la factura (con IVA)',
+    totalAyuda: 'Escribe lo que dice la factura, con IVA incluido. El sistema le quita el IVA si tu company lo recupera.',
+    iva: 'IVA de esta factura (%)',
+    ivaAyuda: 'Solo si esta factura lleva una tarifa distinta de la de la presentación. Si lo dejas vacío, manda la de la presentación o la del grupo.',
+    fecha: 'Cuándo ocurrió',
+    fechaAyuda: 'La fecha del hecho, no la de hoy. No puede ser futura ni caer en un mes ya cerrado.',
+    nota: 'Nota',
+    notaAyuda: 'Número de factura, proveedor, qué pasó. Lo que ayude a entenderlo dentro de seis meses.',
+    registrar: 'Registrar movimiento',
+    registrando: 'Registrando…',
+    sinInsumos: 'No hay insumos en el catálogo todavía. Crea uno antes de registrar movimientos.',
+    hecho: 'Movimiento registrado.',
+    otro: 'Registrar otro',
+    verLibro: 'Ver el libro',
+  },
+
   /** Pantalla 13: los componentes de un combo. */
   componentes: {
     titulo: 'Componentes',
@@ -603,6 +647,9 @@ export const TEXTOS = {
     sinDato: '—',
     reintentar: 'Volver a intentar',
     volver: 'Volver',
+    // La salida de quien no puede volver a la pantalla de la que se suele venir:
+    // BODEGA registra movimientos y no puede leer el libro (§4.3).
+    volverAlInicio: 'Volver al inicio',
     cancelar: 'Cancelar',
     sinPermiso: 'Tu usuario no tiene acceso a esta pantalla.',
     sinPermisoAyuda: 'Si crees que debería tenerlo, pídeselo a quien administra el sistema.',

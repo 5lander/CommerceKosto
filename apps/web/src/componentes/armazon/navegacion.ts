@@ -64,9 +64,14 @@ export const NAVEGACION: readonly GrupoDeNavegacion[] = [
     titulo: TEXTOS.navegacion.operacion,
     entradas: [
       { href: '/ventas', texto: TEXTOS.ventas.titulo, permiso: 'sales.read', conMes: true },
-      // El libro pide `inventory.read`, que BODEGA NO tiene: de los movimientos se
-      // despeja el consumo teórico, y de ahí la receta (CLAUDE.md §4.3). BODEGA
-      // escribe movimientos —esa puerta llega con la pantalla 18— pero no los lee.
+      // DOS ENTRADAS PARA LA MISMA SECCIÓN, Y NO ES UN DESCUIDO: BODEGA tiene
+      // `inventory.write` y NO `inventory.read` —del libro se despeja el consumo
+      // teórico, y de ahí la receta (§4.3)—, así que ve «Registrar» y no el libro.
+      //
+      // «Registrar» VA PRIMERO a propósito: `entradaDe` devuelve la primera
+      // entrada que casa, y con el libro delante `/movimientos/nuevo` caería en
+      // la sección de `inventory.read`, que es justo la que BODEGA no tiene.
+      { href: '/movimientos/nuevo', texto: TEXTOS.movimientoNuevo.enlace, permiso: 'inventory.write', conMes: false },
       { href: '/movimientos', texto: TEXTOS.movimientos.titulo, permiso: 'inventory.read', conMes: false },
       // La hoja de conteo pide `count.write`, que BODEGA tiene: cuenta a ciegas.
       { href: '/inventario', texto: TEXTOS.inventario.titulo, permiso: 'count.write', conMes: true },

@@ -9,6 +9,12 @@ const PORCENTAJE = /^\d{0,3}(?:[.,]\d{0,2})?$/u;
 const CANTIDAD = /^\d{0,9}(?:[.,]\d{0,6})?$/u;
 
 /**
+ * La misma cantidad, admitiendo el menos delante — el `AJUSTE`, que es el único
+ * tipo del libro donde el signo lo elige quien escribe (`movimiento.ts`).
+ */
+const CANTIDAD_CON_SIGNO = /^-?\d{0,9}(?:[.,]\d{0,6})?$/u;
+
+/**
  * Un campo de texto que solo deja escribir la forma de un número —con la coma
  * de es-EC o con punto—, sin convertirlo a nada.
  *
@@ -53,4 +59,8 @@ export function CampoDePorcentaje(propiedades: PropiedadesDeCampo): ReactNode {
 
 export function CampoDeCantidad(propiedades: PropiedadesDeCampo): ReactNode {
   return <CampoConForma forma={CANTIDAD} {...propiedades} />;
+}
+
+export function CampoDeCantidadConSigno(propiedades: PropiedadesDeCampo): ReactNode {
+  return <CampoConForma forma={CANTIDAD_CON_SIGNO} {...propiedades} />;
 }

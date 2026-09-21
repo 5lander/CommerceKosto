@@ -56,6 +56,21 @@ export const frontendRules = [
     referencia: 'CLAUDE.md §3 · docs/incidencias/INC-020',
   },
   {
+    id: 'lectura-con-funcion-estable',
+    descripcion: '`useCarga(` con una funcion escrita alli mismo, en vez de una estable',
+    porQue:
+      'Una funcion nueva en cada render es, para `useCarga`, una lectura DISTINTA: vuelve a pedir, ' +
+      'el estado cambia, y la pantalla se queda en «Cargando...» para siempre. La documentacion de ' +
+      '`useLectura.ts` lo dice —«leer tiene que ser estable»— y aun asi paso en la pantalla 18. ' +
+      'No lo ven ni los tipos ni el linter: solo se ve abriendo la pantalla, y por eso existe esta ' +
+      'regla. La funcion va en un `useMemo` o un `useCallback`, o se usa `useLectura(ruta)`.',
+    patron: /\buseCarga\s*\(\s*(?:async\b|\(|function\b)/g,
+    incluye: FRONTEND,
+    excluye: META,
+    desde: 'P16 (pantalla 18)',
+    referencia: 'apps/web/src/lib/useLectura.ts · docs/incidencias/INC-031',
+  },
+  {
     id: 'no-tipti',
     descripcion: 'Cualquier mencion a Tipti en el codigo del frontend',
     porQue:

@@ -15,17 +15,25 @@
  * 'nunca'`): el vacío de esta pantalla casi siempre lo causa un filtro, y
  * reemplazar la pantalla entera se llevaría por delante el control que hay que
  * tocar para salir de ahí.
+ *
+ * **EL PERMISO VA EN LA PÁGINA, NO EN UN `layout.tsx` DE SECCIÓN** (D-16.208):
+ * esta pide `inventory.read` y `/movimientos/nuevo` pide `inventory.write`, y
+ * **`BODEGA` tiene el segundo y no el primero**. Una guardia de sección le
+ * cerraría la única pantalla de esta sección que de verdad usa.
  */
 
+import Link from 'next/link';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { Permitido } from '../../../componentes/armazon/Permitido';
 import { FiltrosDelLibro, FILTROS_VACIOS } from '../../../componentes/inventario/FiltrosDelLibro';
 import { consultaDelLibro, useLibro, type Filtros } from '../../../componentes/inventario/libro';
 import { TablaDelLibro } from '../../../componentes/inventario/TablaDelLibro';
 import { Marco } from '../../../componentes/Marco';
 import { Vacio } from '../../../componentes/ui/Estados';
 import { Vista } from '../../../componentes/ui/Vista';
+import { usePermisos } from '../../../lib/permisos';
 import { useSucursal } from '../../../lib/sesion';
 import { TEXTOS } from '../../../textos/es';
 
@@ -36,24 +44,38 @@ export default function LibroDeMovimientos(): ReactNode {
   const texto = TEXTOS.movimientos;
 
   return (
-    <Marco titulo={texto.titulo} ayuda={texto.ayuda}>
-      <Vista lectura={lectura} vacio="nunca">
-        {(leido) => {
-          const consulta = sucursal === null ? '' : consultaDelLibro(sucursal, filtros);
-          return (
-            <div className="pila">
-              <FiltrosDelLibro filtros={filtros} insumos={[...leido.insumos.values()]} cambiar={setFiltros} />
-              {leido.pagina.movimientos.length === 0 ? (
-                <Vacio titulo={texto.vacio} ayuda={texto.vacioAyuda} />
-              ) : (
-                // Una consulta nueva es una tabla nueva: sin la clave, las páginas
-                // que «Ver más» añadió con el filtro anterior se quedarían debajo.
-                <TablaDelLibro key={consulta} leido={leido} consulta={consulta} />
-              )}
-            </div>
-          );
-        }}
-      </Vista>
-    </Marco>
+    <Permitido permiso="inventory.read">
+      <Marco titulo={texto.titulo} ayuda={texto.ayuda} acciones={<Registrar />}>
+        <Vista lectura={lectura} vacio="nunca">
+          {(leido) => {
+            const consulta = sucursal === null ? '' : consultaDelLibro(sucursal, filtros);
+            return (
+              <div className="pila">
+                <FiltrosDelLibro filtros={filtros} insumos={[...leido.insumos.values()]} cambiar={setFiltros} />
+                {leido.pagina.movimientos.length === 0 ? (
+                  <Vacio titulo={texto.vacio} ayuda={texto.vacioAyuda} />
+                ) : (
+                  // Una consulta nueva es una tabla nueva: sin la clave, las páginas
+                  // que «Ver más» añadió con el filtro anterior se quedarían debajo.
+                  <TablaDelLibro key={consulta} leido={leido} consulta={consulta} />
+                )}
+              </div>
+            );
+          }}
+        </Vista>
+      </Marco>
+    </Permitido>
+  );
+}
+
+/** Quien lee el libro no siempre lo escribe: LECTURA tiene `inventory.read` y no `write`. */
+function Registrar(): ReactNode {
+  const { tiene } = usePermisos();
+  if (!tiene('inventory.write')) return null;
+
+  return (
+    <Link href="/movimientos/nuevo" className="boton">
+      {TEXTOS.movimientoNuevo.enlace}
+    </Link>
   );
 }

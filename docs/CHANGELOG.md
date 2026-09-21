@@ -4,6 +4,37 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Pantalla 18 · Registrar compra, merma o ajuste · 2026-09-21
+
+`/movimientos/nuevo`: los tres movimientos que se escriben sueltos, preguntando lo que cada uno
+significa —«Cuánto entró», «Cuánto se perdió», «Diferencia (+ sobra · − falta)»— y **sin poner
+ningún signo** (D-16.209): `COMPRA` y `MERMA` viajan en positivo y el dominio les da su dirección;
+`AJUSTE` es el único con signo. La compra pide **«Total de la factura (con IVA)»** (D-16.9), con su
+presentación y, solo si esa factura se sale de lo normal, su tarifa.
+
+**Esta es la pantalla de `BODEGA`**, y por eso el permiso baja del `layout.tsx` de sección a cada
+página (D-16.208): BODEGA tiene `inventory.write` y **no** `inventory.read`, así que una guardia de
+sección le habría cerrado justo lo que usa. La barra gana una segunda entrada, «Registrar», **antes**
+del libro —`entradaDe` devuelve la primera que casa por prefijo—, y quien no puede leer el libro
+sale por «Volver al inicio».
+
+**La presentación viene preseleccionada** (D-16.210). Sin ella la tarifa tiene que salir del grupo, y
+un grupo que no la define hace que la compra se rechace —a propósito: nunca se asume un 15 %—. Se
+descubrió intentando registrar una compra de verdad desde la pantalla, que es lo único que lo
+destapa.
+
+**INC-031**: la pantalla se quedaba en «Cargando…» para siempre con los cinco checks en verde,
+porque `useCarga` recibía la función de lectura escrita en la propia llamada y una función nueva por
+render es una lectura nueva. La documentación de `useLectura.ts` ya lo advertía y no bastó, así que
+la prevención no es otro comentario: **`audit:forbidden` gana `lectura-con-funcion-estable`** y pasa
+de 47 a 48 reglas.
+
+Verificado registrando una compra **de verdad desde la pantalla**, con BODEGA a 360 px: fila nueva
+con `bruto 34,50 → neto 34,50`, la tarifa `0` que trae el artículo, desglose `CONOCIDO` y la fecha al
+`12:00Z` del día escrito.
+
+---
+
 ## Pantalla 17 · El libro de movimientos · 2026-09-21
 
 `/movimientos`: todo lo que entró y salió de la sucursal elegida, lo más reciente primero, con
