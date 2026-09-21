@@ -60,7 +60,12 @@ export default function FichaDelProducto(): ReactNode {
   );
 }
 
-/** Volver, y la receta de la sucursal elegida si el producto la tiene y la sesión puede escribirla. */
+/**
+ * Volver, la receta de la sucursal elegida y su historial.
+ *
+ * **EL HISTORIAL PIDE `recipe.read` Y LA RECETA `recipe.write`**: quien audita
+ * un costo de hace tres meses no tiene por qué poder cambiarlo.
+ */
 function AccionesDelProducto({ id, conReceta }: { readonly id: string; readonly conReceta: boolean }): ReactNode {
   const { tiene } = usePermisos();
 
@@ -70,6 +75,11 @@ function AccionesDelProducto({ id, conReceta }: { readonly id: string; readonly 
       {conReceta && tiene('recipe.write') && (
         <Link href={`/productos/${id}/receta`} className="boton">
           {TEXTOS.receta.enlace}
+        </Link>
+      )}
+      {conReceta && tiene('recipe.read') && (
+        <Link href={`/productos/${id}/receta/versiones`} className="boton">
+          {TEXTOS.versionesDeReceta.enlace}
         </Link>
       )}
     </div>

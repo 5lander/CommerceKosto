@@ -4,6 +4,30 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Pantalla 15 · Versiones de receta · 2026-09-21
+
+`/productos/[id]/receta/versiones`: el historial de la receta de un producto en la sucursal elegida,
+la más nueva arriba, cada versión con su fecha de vigencia, su nota y sus líneas con unidad y base.
+Tres marcas: **«Manda hoy»**, **«La más nueva»** (cuando aún no manda) y **«Deja el producto sin
+receta»**. Pide **`recipe.read`**, no `recipe.write`: auditar un costo de hace tres meses no es
+poder cambiarlo. Entra desde la ficha del producto y desde la propia pantalla 14.
+
+**Cuál versión manda lo responde la API** (D-16.203). La pantalla compara identificadores y no
+evalúa ninguna fecha contra «hoy», que es lo que dejaría SPEC §9 escrito dos veces —y mal, porque
+una versión `VOID` gana igual que otra y deja al producto **sin** receta.
+
+Viaja con esta pantalla, sin commit propio y por decisión del usuario, la **adenda a D-16.202 y
+R15**: la identidad se enuncia **en cantidades** y el dinero se parte en `varianza_uso` y
+`varianza_precio` (CLAUDE.md §6, E24/E25 de la auditoría, **CC-013**). Y un arreglo de
+documentación: la fila de P16-I rompía el tablero de `ESTADO.md` con una celda desbordada.
+
+Modo cierre, regla 2: types, lint, forbidden, complexity y duplication en verde; las pruebas, en el
+pre-commit. Verificado con los tres roles a 1280 y 360 px sin desborde, contrastado versión a
+versión contra `GET /recetas/versiones`, y con **tenant cruzado**: el producto de `ensayo-b`
+responde «Ese producto no existe en tu company» en su sitio, y `BODEGA` no pasa de la puerta.
+
+---
+
 ## P16-I3 · R15 — la varianza del mes cuadra con el inventario · 2026-09-20
 
 > Una regla de negocio, un caso conocido reescrito y una fila de auditoría. Sin código: se construye

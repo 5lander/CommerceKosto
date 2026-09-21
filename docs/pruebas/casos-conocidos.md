@@ -494,7 +494,7 @@ Se prueban en `shared/domain/iva/neteo.spec.ts` y `precedencia.spec.ts` (dominio
 
 ---
 
-## CC-010 · CC-011 · CC-012 — Un mes con el vocabulario completo del libro (D-16.201)
+## CC-010 · CC-011 · CC-012 · CC-013 — Un mes con el vocabulario completo del libro (D-16.201, D-16.202)
 
 **Qué prueban:** los **tres agregados de dinero** del modelo —`compras_del_mes`, `CONSUMO_REAL` y la
 valorización del inventario— sobre **un único mes que usa todo el vocabulario del libro**: compra,
@@ -619,6 +619,12 @@ del mismo libro dejan de cuadrar, una está mal y da igual cuál.
 > caso conocido dice lo que el número **debe** valer, y la prueba de hoy dice lo que **vale**, para
 > que el cambio se vea cuando llegue. Cuando P16-J entre, las dos cifras se encuentran aquí.
 
+> **Y su `varianza_precio` es CERO POR CONSTRUCCIÓN.** El arroz de este caso se compra a `1,00`,
+> que es exactamente su costo de uso, así que `Σ(total_cost − cantidad × costo_de_uso) = 0` y la
+> varianza entera es de **uso**. Es deliberado: mantiene el caso base legible. El mes con el precio
+> pagado distinto del de referencia es **CC-013**, y es el que enseña que la identidad de R15 vive
+> en cantidades y no en dólares.
+
 Probado en `apps/api/src/modules/analytics/domain/vistas.spec.ts`, con la base apagada.
 
 ---
@@ -645,6 +651,55 @@ exactamente dos kilos y no `−2.5` ni `+0.5`. Una implementación que olvidara 
 teórico de 116 kg y una diferencia de −30: el error saldría quince veces mayor que el hallazgo real.
 
 Probado en `apps/api/src/modules/analytics/domain/vistas.spec.ts`, con la base apagada.
+
+---
+
+### CC-013 — El mismo mes, pagando el arroz más caro que su precio de referencia (D-16.202)
+
+**Qué prueba:** que la varianza **se parte en dos problemas distintos** y que la identidad de R15
+vive en **cantidades**, no en dólares. Es el mismo mes de CC-010/011/012, cambiando una sola cosa:
+el arroz se compra a **`1,20`** y su costo de uso sigue siendo **`1,00`**.
+
+**Por qué hace falta un caso propio.** En CC-011 el precio pagado y el de referencia coinciden a
+propósito, así que la varianza de precio es **cero por construcción** y la identidad parece valer en
+dólares. En cuanto dejan de coincidir —que es el caso normal— **en dólares deja de valer**, y lo que
+queda en pie es la de cantidades.
+
+**Entrada** — los ocho movimientos de CC-010 con los importes recalculados a `1,20`:
+
+| # | Tipo | Cantidad | `total_cost` |
+|---|---|---|---|
+| 1 | `COMPRA` | `+100` | `120.00` |
+| 2 | `COMPRA` | `+50` | `60.00` |
+| 3 | `COMPRA` (la corrección) | `−50` | `60.00` |
+
+El resto del mes no cambia: transferencia `−20`, producción `−8`, merma `−2,5`, ajuste `+0,5`,
+consumo por venta `−22`; conteo de febrero `40 kg`, de marzo `86 kg`, costo de uso `1,00`.
+
+**Resultado esperado**
+
+| Salida | Esperado | De dónde sale |
+|---|---|---|
+| `varianza_uso_kg` | **`4`** kg | `−(−2,00) − (−2,00)` — **igual que en CC-011**: el precio no mueve un kilo |
+| `varianza_uso` | **`4.00`** | `4 kg × 1,00` |
+| `varianza_precio` | **`20.00`** | `(120 − 100) + (60 − 50) + (−60 + 50)`, con el signo de cada movimiento |
+| `CONSUMO_REAL` | **`46.00`** | `40,00 + 120,00 − 20,00 − 8,00 − 86,00` |
+| **`VARIANZA_TOTAL`** | **`24.00`** | `46,00 − 22,00`, y también `4,00 + 20,00` |
+
+**Las aserciones que discriminan**
+
+| # | Aserción | Qué implementación mata |
+|---|---|---|
+| 1 | `varianza_uso_kg` vale `4` **igual que en CC-011** | La que mete el precio en la identidad: comprar más caro no gasta más kilos |
+| 2 | `varianza_uso + varianza_precio = varianza_total`, al centavo | La que enseña una de las dos y llama a eso «la varianza» |
+| 3 | La **corrección** aporta `−10.00` a la varianza de precio | La que suma los importes sin el signo del movimiento — la cara de INC-029 en esta cuenta |
+| 4 | Con el precio **igual** al de referencia (CC-011), `varianza_precio = 0.00` exacto | La que arrastra un residuo de división y lo enseña como «diferencia de precio» de un centavo |
+
+La cuarta es la que obliga a conservar CC-011 además de este: **el caso base tiene que seguir dando
+precio cero**, o el desglose de cuatro líneas enseñaría ruido en la pantalla 25 todos los meses.
+
+> **Construcción:** la fórmula y las dos pruebas 🔴 son de **P16-J**, junto con el resto de D-16.202.
+> El caso se escribe antes, que es el orden de CLAUDE.md §8.
 
 ---
 
@@ -677,7 +732,8 @@ Los nueve casos escribibles hoy están escritos. **CC-004 a CC-007 y CC-009 se r
 | CC-010 | **`compras_del_mes`** y las cantidades de §18, sobre un mes con todo el vocabulario del libro | ✅ P16-I | A mano, antes del pliegue. El Excel cubre la fórmula, no el resultado |
 | CC-011 | **`CONSUMO_REAL`** y su varianza, con el desglose de tres líneas | 🟡 **escrito con D-16.202; el sistema lo cumplirá en P16-J** | A mano. Hoy el sistema da 54,00/32,00 y su prueba lo ancla |
 | CC-012 | **El inventario valorizado** del mismo mes: stock teórico, diferencia, reorden y cobertura | ✅ P16-I | A mano, sobre las cantidades que CC-010 pliega |
-| **R15** | La identidad `varianza = −mermas_y_ajustes − diferencia` sobre el mismo mes | ⬜ **P16-J** | Álgebra: se despeja el stock teórico dentro del consumo real |
+| CC-013 | **La varianza partida en uso y precio**: el mes de CC-011 pagando el arroz a 1,20 con costo de uso 1,00 | ⬜ **P16-J** | A mano: 24,00 = 4,00 de uso + 20,00 de precio |
+| **R15** | La identidad **en cantidades** `varianza_uso_kg = −mermas_y_ajustes_kg − diferencia_kg`, y la suma `uso + precio` en dinero | ⬜ **P16-J** | Álgebra: se despeja el stock teórico dentro del consumo real; el precio sale aparte |
 | CC-R7 | Conciliación = 0 | 🟡 P0 con aritmética · **P5 a través del motor** · dataset completo en P8 |
 
 ### Qué cambió en P5 respecto de lo que esta tabla decía antes

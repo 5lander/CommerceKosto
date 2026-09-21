@@ -194,6 +194,30 @@ export const TEXTOS = {
     compradoSinReceta: 'Un insumo comprado no tiene receta: solo una preparación se hace con otros insumos.',
   },
 
+  /** Pantalla 15: el historial de versiones de una receta en una sucursal. */
+  versionesDeReceta: {
+    enlace: 'Versiones',
+    titulo: 'Versiones de la receta',
+    ayuda: 'Cada vez que se guarda la receta queda una versión con su fecha. Las anteriores no se borran: los costeos de los meses pasados siguen usando la que mandaba entonces.',
+    en: 'En',
+    desde: 'Vale desde el',
+    mandaHoy: 'Manda hoy',
+    masNueva: 'La más nueva',
+    sinReceta: 'Deja el producto sin receta',
+    hoySinReceta: 'Hoy este producto no tiene receta vigente en esta sucursal.',
+    hayFutura: 'La versión más nueva todavía no manda: empieza a valer más adelante.',
+    nota: 'Nota',
+    sinNota: 'Se guardó sin nota.',
+    sinLineas: 'Esta versión no tiene líneas: deja el producto sin receta hasta que otra la reemplace.',
+    lineas: 'Insumos de esta versión',
+    insumo: 'Insumo',
+    cantidad: 'Cantidad',
+    base: 'Se mide',
+    excluida: 'Excluida: no suma',
+    vacio: 'Esta receta todavía no tiene ninguna versión.',
+    vacioAyuda: 'Guarda la receta del producto en esta sucursal y su primera versión aparecerá aquí.',
+  },
+
   /** Pantalla 13: los componentes de un combo. */
   componentes: {
     titulo: 'Componentes',

@@ -356,15 +356,28 @@ Cada una es verificable; la sección E de `docs/AUDITORIA.md` se deriva de aquí
 
 **R14 — El PVP incluye IVA; el food cost se calcula sobre venta neta.** `venta_neta = pvp / (1 + iva_venta)`. *(desde P5)*
 
-**R15 — La varianza del mes cuadra con el inventario.** Por ítem y ubicación, sobre el mismo mes:
+**R15 — La varianza del mes cuadra con el inventario, y se parte en uso y precio.** Por ítem y ubicación, sobre el mismo mes.
+
+**La identidad es en CANTIDADES**, y ahí no admite tolerancia:
 
 ```
-varianza (§16)  =  −mermas_y_ajustes (§18)  −  diferencia_de_conteo (§18)
+varianza_uso_kg  =  −mermas_y_ajustes_kg (§18)  −  diferencia_de_conteo_kg (§18)
 ```
 
-**No es una comprobación aproximada: es una identidad.** Con el `consumo_real` de D-16.202 —el que resta lo que salió por transferencia o a producción— el término de transferencias y producción **se cancela algebraicamente** al despejar el stock teórico, y lo que queda es exactamente lo que el libro no explica. Si no cuadra, una de las dos vistas está mal y da igual cuál: las dos salen del mismo libro.
+Con el `consumo_real` de D-16.202 —el que resta lo que salió por transferencia o a producción— el término de transferencias y producción **se cancela algebraicamente** al despejar el stock teórico, y lo que queda es exactamente lo que el libro no explica. Si no cuadra, una de las dos vistas está mal y da igual cuál: las dos salen del mismo libro.
 
-De ahí el desglose que la varianza enseña, con el ajuste en **línea propia**: `varianza = merma registrada − ajustes (con signo) + diferencia de conteo`. *(desde P16-J)*
+**El dinero se descompone, y por eso la identidad no se enuncia en dólares:**
+
+```
+varianza_uso     = varianza_uso_kg × costo_de_uso
+varianza_precio  = Σ (total_cost real − cantidad × costo_de_uso), con el signo con el que
+                   ese movimiento entra en el consumo real
+varianza_total   = consumo_real − consumo_teórico  =  varianza_uso + varianza_precio
+```
+
+**Son dos problemas distintos y no se suman a ciegas:** gastar más kilos de los que la receta manda es de cocina; pagarlos más caros que el precio de referencia es de compras. Un mes puede tener la varianza de uso en cero y la de precio disparada, y confundirlas manda a arreglar lo que no está roto.
+
+La varianza se enseña en **cuatro líneas**: `merma registrada · ajustes (con signo) · sin explicar · precio de compra frente al de referencia`. *(desde P16-J)*
 
 ---
 

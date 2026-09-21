@@ -114,7 +114,8 @@
 | E21 | `venta_neta = pvp / (1 + iva_venta)` y el food cost se calcula sobre venta neta, nunca sobre PVP | R14 | P5 |
 | E22 | Ningún importe ni cantidad usa punto flotante; todo pasa por el tipo `Money` y `numeric` en la base | R6/R7 | P0 |
 | E23 | El consolidado de company es exactamente la suma de sus ubicaciones | R2 | P9 |
-| E24 | `varianza (§16) = −mermas_y_ajustes (§18) − diferencia_de_conteo (§18)`, por ítem y ubicación sobre el mismo mes. Es una **identidad**, no una tolerancia: si no da cero, una de las dos vistas está mal | R15 | P16-J |
+| E24 | **En cantidades:** `varianza_uso_kg = −mermas_y_ajustes_kg − diferencia_kg`, por ítem y ubicación sobre el mismo mes. Es una **identidad**, no una tolerancia | R15 | P16-J |
+| E25 | **En dinero:** `consumo_real − consumo_teórico = varianza_uso + varianza_precio`, y la de precio sale de `Σ(total_cost real − cantidad × costo_de_uso)`. Con el precio de compra igual al de referencia, la de precio da **exactamente cero** | R15 | P16-J |
 
 ## F. Frontend *(solo en P12, P13 y P14)*
 
