@@ -251,6 +251,47 @@ export const TEXTOS = {
     confirmarRevertir: 'Sí, revertir',
   },
 
+  /** Pantalla 17: el libro de movimientos de una sucursal. */
+  movimientos: {
+    titulo: 'Movimientos',
+    ayuda: 'Todo lo que entró y salió de esta sucursal, lo más reciente primero. Nada se edita ni se borra: un error se arregla con un movimiento de signo contrario, y los dos quedan.',
+    filtrar: 'Filtrar',
+    insumo: 'Insumo',
+    todosLosInsumos: 'Todos los insumos',
+    tipo: 'Tipo',
+    todosLosTipos: 'Todos los tipos',
+    desde: 'Desde',
+    hasta: 'Hasta',
+    limpiar: 'Quitar filtros',
+    fecha: 'Fecha',
+    cantidad: 'Cantidad',
+    importe: 'Importe',
+    nota: 'Nota',
+    estado: 'Estado',
+    verMas: 'Ver más',
+    // El importe es una MAGNITUD: el signo vive en la cantidad (ADR-009 §2). Sin
+    // esta línea, una corrección de −100 kg con importe 115,00 se lee como si
+    // hubiera sumado 115, y quien sume la columna a ojo se equivoca.
+    importeSinSigno:
+      'El importe es siempre en positivo: quien manda es la cantidad. En una corrección, la cantidad va en negativo y su importe se resta, aunque aquí se lea sin el signo.',
+    corregido: 'Corregido',
+    correccion: 'Es una corrección',
+    // D-16.18: las compras anteriores al modelo de IVA no tienen desglose, y eso
+    // se dice; un importe sin decir si es bruto o neto es peor que no enseñarlo.
+    sinDesglose: 'Sin desglose de IVA',
+    vacio: 'No hay movimientos con esos filtros.',
+    vacioAyuda: 'Prueba con otro insumo, otro tipo o un rango de fechas más amplio.',
+    tipos: {
+      COMPRA: 'Compra',
+      TRANSFERENCIA_ENTRADA: 'Transferencia recibida',
+      TRANSFERENCIA_SALIDA: 'Transferencia enviada',
+      PRODUCCION: 'Producción',
+      MERMA: 'Merma',
+      AJUSTE: 'Ajuste',
+      CONSUMO_POR_VENTA: 'Consumo por venta',
+    } as Record<string, string>,
+  },
+
   /** Pantalla 13: los componentes de un combo. */
   componentes: {
     titulo: 'Componentes',

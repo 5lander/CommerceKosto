@@ -64,6 +64,10 @@ export const NAVEGACION: readonly GrupoDeNavegacion[] = [
     titulo: TEXTOS.navegacion.operacion,
     entradas: [
       { href: '/ventas', texto: TEXTOS.ventas.titulo, permiso: 'sales.read', conMes: true },
+      // El libro pide `inventory.read`, que BODEGA NO tiene: de los movimientos se
+      // despeja el consumo teórico, y de ahí la receta (CLAUDE.md §4.3). BODEGA
+      // escribe movimientos —esa puerta llega con la pantalla 18— pero no los lee.
+      { href: '/movimientos', texto: TEXTOS.movimientos.titulo, permiso: 'inventory.read', conMes: false },
       // La hoja de conteo pide `count.write`, que BODEGA tiene: cuenta a ciegas.
       { href: '/inventario', texto: TEXTOS.inventario.titulo, permiso: 'count.write', conMes: true },
     ],

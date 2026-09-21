@@ -4,6 +4,36 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Pantalla 17 · El libro de movimientos · 2026-09-21
+
+`/movimientos`: todo lo que entró y salió de la sucursal elegida, lo más reciente primero, con
+filtros de insumo, tipo y rango de fechas, y «Ver más» por cursor. Nada se edita ni se borra, porque
+el libro es **append-only** (R3): «Corregido» y «Es una corrección» se enseñan como estado, y la
+corrección en sí llega con la pantalla 19.
+
+Entrada nueva en la barra lateral con **`inventory.read`**, que **BODEGA no tiene**: del libro se
+despeja el consumo teórico y de ahí la receta (§4.3). BODEGA escribe movimientos —esa puerta llega
+con la pantalla 18— pero no los lee.
+
+Dos decisiones de esta pantalla: los filtros **viajan en la consulta a la API** y no se aplican
+sobre lo cargado (D-16.207) —con paginación por cursor, filtrar en el navegador daría «la primera
+página filtrada» con cara de ser el libro entero—, y el **estado vacío va debajo de los filtros, no
+en su lugar** (D-16.206), porque ese vacío casi siempre lo causa un filtro y quitar el cuerpo se
+llevaría el control que hay que tocar para salir.
+
+**Lo que esta pantalla destapó, y no se arregla aquí:** el importe se enseña **sin signo**, porque
+así vive en el libro (`total_cost` es magnitud, el signo está en `quantity`, ADR-009 §2). Una
+corrección de `−100 kg` aparece con `115,00` en positivo. Es la cara visible de INC-029 y **la
+arregla la API**, no el navegador: calcular `signo × importe` en dos sitios es exactamente cómo
+nació esa incidencia. Queda anotado en «Después del piloto» de `ESTADO.md`; mientras tanto la
+pantalla lo dice bajo la tabla y no enseña ningún total.
+
+El libro del tenant sintético estaba vacío —el reseteo de P16-I2 resembró el catálogo y no el
+libro— y se sembró para poder verificar de verdad: compras con IVA desglosado, una corrección,
+merma, ajuste y una transferencia con sus dos caras.
+
+---
+
 ## Pantalla 16 · Propagación de recetas y su reversión · 2026-09-21
 
 `/productos/[id]/propagar`: copiar la receta de la sucursal elegida a las demás, con la
