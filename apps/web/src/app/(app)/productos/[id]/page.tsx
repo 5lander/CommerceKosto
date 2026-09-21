@@ -61,10 +61,12 @@ export default function FichaDelProducto(): ReactNode {
 }
 
 /**
- * Volver, la receta de la sucursal elegida y su historial.
+ * Volver, la receta de la sucursal elegida, su historial y la propagación.
  *
- * **EL HISTORIAL PIDE `recipe.read` Y LA RECETA `recipe.write`**: quien audita
- * un costo de hace tres meses no tiene por qué poder cambiarlo.
+ * **CADA UNA CON SU PERMISO, Y SON TRES DISTINTOS**: `recipe.read` para auditar
+ * un costo de hace tres meses, `recipe.write` para cambiar la receta de aquí, y
+ * `recipe.propagate` —de nivel company (R11)— para cambiársela a las demás
+ * sucursales. La frontera de verdad sigue siendo el 403 de la API.
  */
 function AccionesDelProducto({ id, conReceta }: { readonly id: string; readonly conReceta: boolean }): ReactNode {
   const { tiene } = usePermisos();
@@ -80,6 +82,11 @@ function AccionesDelProducto({ id, conReceta }: { readonly id: string; readonly 
       {conReceta && tiene('recipe.read') && (
         <Link href={`/productos/${id}/receta/versiones`} className="boton">
           {TEXTOS.versionesDeReceta.enlace}
+        </Link>
+      )}
+      {conReceta && tiene('recipe.propagate') && (
+        <Link href={`/productos/${id}/propagar`} className="boton">
+          {TEXTOS.propagacion.enlace}
         </Link>
       )}
     </div>

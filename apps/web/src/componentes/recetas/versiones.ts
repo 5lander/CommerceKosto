@@ -10,18 +10,16 @@
  * que una versión `VOID` gana igual que cualquier otra y deja al producto **sin**
  * receta. Un `vigenteId` nulo con versiones en la lista significa exactamente eso.
  *
- * **EL NOMBRE DEL PRODUCTO SE PIDE AUNQUE YA SE TENGA EN LA FICHA.** Es lo que
- * convierte el id de otra company en un «no encontrado» en su sitio: las
- * versiones de un producto ajeno son una lista vacía —RLS hace su trabajo en
- * silencio—, y una lista vacía no se distingue de un producto recién creado.
- * El 404 de `GET /productos/:id` sí.
+ * **EL NOMBRE DEL PRODUCTO SE PIDE AUNQUE YA SE TENGA EN LA FICHA**, y por qué
+ * está en `contexto.ts`: es lo que convierte el id de otra company en un «no
+ * encontrado» en su sitio.
  */
 
 import { useMemo } from 'react';
 
 import { llamar } from '../../lib/api';
-import type { Sucursal } from '../../lib/sesion';
 import { useCarga, type Lectura } from '../../lib/useLectura';
+import { contextoDelProducto } from './contexto';
 import type { InsumoParaReceta, LineaLeida } from './receta';
 
 export interface VersionLeida {
@@ -56,17 +54,16 @@ export function useVersionesDeReceta(productId: string, sucursal: string | null)
     const destino = `locationId=${sucursal}&productId=${productId}`;
 
     return async (): Promise<HistorialDeReceta> => {
-      const [historial, hoy, insumos, producto, sucursales] = await Promise.all([
+      const [historial, hoy, insumos, contexto] = await Promise.all([
         llamar<Versiones>({ ruta: `/recetas/versiones?${destino}` }),
         llamar<{ readonly vigente: { readonly id: string } | null }>({ ruta: `/recetas?${destino}` }),
         llamar<readonly InsumoParaReceta[]>({ ruta: '/catalogo/items?incluirInactivos=true' }),
-        llamar<{ readonly nombre: string }>({ ruta: `/productos/${productId}` }),
-        llamar<readonly Sucursal[]>({ ruta: '/ubicaciones' }),
+        contextoDelProducto(productId, sucursal),
       ]);
 
       return {
-        nombre: producto.nombre,
-        sucursal: sucursales.find((una) => una.id === sucursal)?.nombre ?? '',
+        nombre: contexto.nombre,
+        sucursal: contexto.sucursal,
         versiones: historial.versiones,
         vigenteId: hoy.vigente?.id ?? null,
         ultimaVersionId: historial.ultimaVersionId,

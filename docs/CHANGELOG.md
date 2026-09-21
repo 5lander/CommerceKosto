@@ -4,6 +4,27 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Pantalla 16 · Propagación de recetas y su reversión · 2026-09-21
+
+`/productos/[id]/propagar`: copiar la receta de la sucursal elegida a las demás, con la
+previsualización que **R11 exige** —cada destino marcado o no como «Tiene receta propia»—, y el
+historial de lo ya propagado con su reversión. Pide **`recipe.propagate`**, que hoy solo tiene
+DUEÑA: un gerente de local no decide la receta de los demás locales.
+
+**Ninguna sucursal con receta propia viene marcada** (D-16.204). Propagar sobre ella borra el ajuste
+que alguien hizo ahí, y una casilla marcada de entrada convierte esa pérdida en un descuido de un
+clic. Si aun así se marca, la confirmación **la nombra**, en vez de preguntar «¿estás seguro?».
+
+Verificado con la ida y la vuelta completas contra la API: Bodega Norte tenía su receta propia
+(`0.35`), la propagación la dejó con la de Local Centro (`0.2 · 0.1 · 0.02`) y **revertir le devolvió
+la suya como versión nueva** — tres versiones en el historial y **nada borrado**, que es lo que hace
+que los costeos de los meses de por medio sigan siendo correctos.
+
+`contexto.ts` sale de la tercera repetición del mismo par de lecturas (producto + sucursales), donde
+CLAUDE.md §3 dice que toca extraer y donde `audit:duplication` lo paró.
+
+---
+
 ## Pantalla 15 · Versiones de receta · 2026-09-21
 
 `/productos/[id]/receta/versiones`: el historial de la receta de un producto en la sucursal elegida,

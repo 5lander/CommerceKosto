@@ -218,6 +218,39 @@ export const TEXTOS = {
     vacioAyuda: 'Guarda la receta del producto en esta sucursal y su primera versión aparecerá aquí.',
   },
 
+  /** Pantalla 16: propagar la receta a otras sucursales, y deshacerlo. */
+  propagacion: {
+    enlace: 'Propagar',
+    titulo: 'Propagar la receta',
+    ayuda: 'Copia la receta de esta sucursal a las que elijas. En cada una queda una versión nueva desde hoy; lo que costearon antes no cambia.',
+    desde: 'Desde',
+    aDonde: '¿A qué sucursales?',
+    // R11: el aviso dice qué se pierde, no «ten cuidado».
+    avisoPersonalizadas:
+      'Las sucursales marcadas como «Tiene receta propia» ya ajustaron la suya. Propagar sobre ellas la reemplaza: su versión anterior queda en el historial, pero deja de mandar.',
+    tieneReceta: 'Tiene receta propia',
+    sinReceta: 'Todavía sin receta',
+    propagar: 'Propagar a las elegidas',
+    propagando: 'Propagando…',
+    ningunaElegida: 'Elige al menos una sucursal.',
+    preguntaPersonalizadas:
+      'Vas a reemplazar la receta propia de {n}. Quedará en su historial, pero dejará de mandar. ¿Propagar de todos modos?',
+    confirmarPropagar: 'Sí, propagar',
+    sinDestinos: 'Este producto no está en ninguna otra sucursal: no hay a dónde propagar.',
+    historial: 'Lo que ya se propagó',
+    sinHistorial: 'Todavía no se ha propagado nunca.',
+    cuando: 'Cuándo',
+    sucursales: 'Sucursales',
+    estado: 'Estado',
+    aplicada: 'Aplicada',
+    revertida: 'Revertida',
+    revertir: 'Revertir',
+    revirtiendo: 'Revirtiendo…',
+    preguntaRevertir:
+      'Revertir devuelve a cada sucursal la receta que tenía antes, como versión nueva desde hoy. No borra nada y no cambia lo ya costeado.',
+    confirmarRevertir: 'Sí, revertir',
+  },
+
   /** Pantalla 13: los componentes de un combo. */
   componentes: {
     titulo: 'Componentes',
