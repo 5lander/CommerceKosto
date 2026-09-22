@@ -4,6 +4,36 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Pantallas 20 y 21 · Transferencia y producción · 2026-09-22
+
+`/transferencias/nueva` mueve producto de la sucursal elegida a otra: la API escribe el par de
+movimientos en una sola transacción y el total de la company no cambia (R2). La cantidad va en
+positivo y aquí no se niega nada.
+
+`/producciones/nueva` registra un lote: entra lo producido **al costo estándar** (R10) y salen los
+insumos que se usaron. **La receta da la lista de insumos; las cantidades se escriben a mano**
+(D-16.213). Precargar «lo que la receta manda por este lote» sería multiplicar decimales en el
+navegador y, peor, invitar a confirmar sin pesar: la varianza de R10 saldría cero por construcción.
+
+Verificado produciendo de verdad desde la pantalla: los tres insumos llegan precargados y **sin
+cantidad**, el lote de `2 kg` entra a `16,00` (2 × 8,00), el camarón baja de `32,5` a `31,2` y la
+salsa sube de `0` a `2`.
+
+### Dos hallazgos
+
+**`BODEGA` tiene `inventory.transfer` y no puede transferir nunca.** Una transferencia exige las dos
+ubicaciones en alcance y `BODEGA` alcanza una sola: la API responde 403 aunque la petición se mande
+saltándose la pantalla. La pantalla dice la verdad; el permiso es letra muerta para el rol que más lo
+necesitaría. Anotado en «Después del piloto» con sus dos salidas.
+
+**`INC-032`: un insumo sin precio a la fecha del lote se valora en `0,00` y se sigue.** El lote queda
+con costo real cero, la varianza de R10 dice que producir salió gratis, y la fila mal valorada se
+queda en un libro append-only. La misma función **sí** se detiene cuando el que no tiene precio es el
+ítem producido: la regla ya existe y se aplica a un solo lado. **Esto corrompe un número, así que por
+la regla 1 del modo cierre la pasada se detiene aquí.**
+
+---
+
 ## Pantalla 19 · Corregir un movimiento · 2026-09-22
 
 `/movimientos/[id]/corregir`: la ficha de lo que se va a corregir y **un solo campo**, el motivo. No

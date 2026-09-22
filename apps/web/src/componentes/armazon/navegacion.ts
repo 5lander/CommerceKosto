@@ -73,6 +73,10 @@ export const NAVEGACION: readonly GrupoDeNavegacion[] = [
       // la sección de `inventory.read`, que es justo la que BODEGA no tiene.
       { href: '/movimientos/nuevo', texto: TEXTOS.movimientoNuevo.enlace, permiso: 'inventory.write', conMes: false },
       { href: '/movimientos', texto: TEXTOS.movimientos.titulo, permiso: 'inventory.read', conMes: false },
+      // Transferir lo hace BODEGA; producir, no: el alta de un lote entra al costo
+      // estandar (R10) y esa es una decision de costeo, no de almacen.
+      { href: '/transferencias/nueva', texto: TEXTOS.transferencia.enlace, permiso: 'inventory.transfer', conMes: false },
+      { href: '/producciones/nueva', texto: TEXTOS.produccion.enlace, permiso: 'inventory.produce', conMes: false },
       // La hoja de conteo pide `count.write`, que BODEGA tiene: cuenta a ciegas.
       { href: '/inventario', texto: TEXTOS.inventario.titulo, permiso: 'count.write', conMes: true },
     ],

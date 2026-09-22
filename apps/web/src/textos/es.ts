@@ -292,6 +292,54 @@ export const TEXTOS = {
     } as Record<string, string>,
   },
 
+  /** Pantalla 20: mover producto de una sucursal a otra. */
+  transferencia: {
+    enlace: 'Transferir',
+    titulo: 'Transferir a otra sucursal',
+    // R2: el total de la company no cambia. Decirlo evita que alguien la use
+    // para «dar de baja» producto, que es lo que hace una merma.
+    ayuda: 'Mueve producto de una sucursal a otra. Se anotan las dos caras a la vez: sale de una y entra en la otra, y el total de la company no cambia.',
+    desde: 'Sale de',
+    hacia: 'Entra en',
+    mismaSucursal: 'El destino tiene que ser una sucursal distinta de la de origen.',
+    insumo: 'Insumo',
+    cantidad: 'Cuánto se mueve',
+    cantidadAyuda: 'En positivo. El signo lo pone el sistema: negativo donde sale, positivo donde entra.',
+    fecha: 'Cuándo se movió',
+    fechaAyuda: 'La fecha del traslado. Los dos meses tienen que estar abiertos, el de origen y el de destino.',
+    nota: 'Nota',
+    notaAyuda: 'Qué se mandó y por qué. Queda en las dos sucursales.',
+    transferir: 'Registrar la transferencia',
+    transfiriendo: 'Registrando…',
+    hecho: 'Transferencia registrada en las dos sucursales.',
+    sinOtras: 'No hay otra sucursal a la que transferir. Una transferencia necesita dos.',
+  },
+
+  /** Pantalla 21: producir una preparación. */
+  produccion: {
+    enlace: 'Producir',
+    titulo: 'Registrar una producción',
+    // R10: el alta va al costo estándar; el costo real del lote genera varianza.
+    ayuda: 'Un lote de una preparación: entra lo producido y salen los insumos que se usaron. Lo producido se valora a su costo estándar; la diferencia con lo que costó de verdad queda como varianza.',
+    preparacion: 'Qué se preparó',
+    sinPreparaciones: 'No hay preparaciones con stock en el catálogo. Una producción necesita un insumo de tipo preparación que lleve stock.',
+    cantidad: 'Cuánto salió',
+    cantidadAyuda: 'El lote terminado, en la unidad de la preparación.',
+    insumos: 'Qué se usó',
+    // Y por qué NO vienen con cantidad: la varianza de R10 depende de que esto
+    // sea lo que de verdad entró, no lo que la receta decía.
+    insumosAyuda: 'La receta de esta sucursal dice qué lleva; las cantidades las escribes tú, porque lo que cuenta es lo que de verdad entró al lote. De esa diferencia sale la varianza.',
+    sinReceta: 'Esta preparación no tiene receta en esta sucursal. Puedes añadir los insumos a mano, o escribir su receta primero.',
+    anadir: 'Añadir insumo',
+    quitar: 'Quitar',
+    sinInsumos: 'Una producción necesita al menos un insumo.',
+    fecha: 'Cuándo se produjo',
+    nota: 'Nota',
+    producir: 'Registrar la producción',
+    produciendo: 'Registrando…',
+    hecho: 'Producción registrada.',
+  },
+
   /** Pantalla 19: corregir un movimiento del libro. */
   correccion: {
     enlace: 'Corregir',
