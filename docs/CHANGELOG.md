@@ -4,6 +4,28 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Pantalla 19 · Corregir un movimiento · 2026-09-22
+
+`/movimientos/[id]/corregir`: la ficha de lo que se va a corregir y **un solo campo**, el motivo. No
+hay nada que editar porque no se edita nada: la API escribe una fila nueva de signo contrario con la
+fecha del original, y las dos se quedan en el libro (R3).
+
+La pantalla **no adelanta el número** (D-16.211). Podría pintar «quedará −25 kg» invirtiendo la
+cantidad, y eso sería calcular en el navegador lo que ya calcula el dominio. Se describe la operación
+con palabras y el resultado lo enseña el libro.
+
+Los dos casos en que no se puede —ya corregido, o es una corrección— se dicen **en sitio**, antes de
+hacer escribir un motivo que se iba a perder; el segundo además sugiere el ajuste, que es lo que de
+verdad toca. Sin `inventory.write` se ve el movimiento y no un «no tienes acceso» (D-16.212). El
+enlace «Corregir» aparece en el libro solo en las filas corregibles: 7 de 9 en el tenant de ensayo.
+
+Verificado corrigiendo **de verdad** desde la pantalla, a 360 px: fila nueva de `−25 kg` con la
+**misma fecha**, la original marcada «Corregido», **10 filas donde había 9** y el saldo de Arroz de
+`125` a `100`. Y el gerente, pidiendo un movimiento de otra sucursal, recibe «Esa ubicación no está
+en tu alcance» — R2 desde la API, no desde la pantalla.
+
+---
+
 ## Pantalla 18 · Registrar compra, merma o ajuste · 2026-09-21
 
 `/movimientos/nuevo`: los tres movimientos que se escriben sueltos, preguntando lo que cada uno

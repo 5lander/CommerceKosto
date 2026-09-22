@@ -292,6 +292,33 @@ export const TEXTOS = {
     } as Record<string, string>,
   },
 
+  /** Pantalla 19: corregir un movimiento del libro. */
+  correccion: {
+    enlace: 'Corregir',
+    titulo: 'Corregir un movimiento',
+    // R3: la corrección no edita ni borra. Decirlo aquí evita que alguien espere
+    // que la fila original desaparezca.
+    ayuda: 'Corregir no borra ni cambia la fila original: escribe otra de signo contrario, y las dos se quedan en el libro. Así el saldo vuelve a su sitio y queda por qué.',
+    elMovimiento: 'El movimiento que se va a corregir',
+    fecha: 'Fecha',
+    tipo: 'Tipo',
+    insumo: 'Insumo',
+    cantidad: 'Cantidad',
+    importe: 'Importe',
+    notaOriginal: 'Nota',
+    queDeja: 'Lo que va a quedar',
+    // Sin calcular nada: se describe la operación, no se adelanta el número.
+    queDejaAyuda:
+      'Una fila nueva, con la misma fecha y el mismo insumo, y la cantidad al revés. El saldo de este insumo vuelve a como estaba antes del movimiento.',
+    motivo: 'Por qué se corrige',
+    motivoAyuda: 'Lo que explique la corrección a quien mire el libro dentro de seis meses. Es lo único que se escribe a mano.',
+    corregir: 'Registrar la corrección',
+    corrigiendo: 'Registrando…',
+    yaCorregido: 'Este movimiento ya se corrigió. Un movimiento se corrige una sola vez.',
+    esCorreccion: 'Esto ya es una corrección, y una corrección no se corrige. Si sigue sin cuadrar, registra un ajuste.',
+    hecho: 'Corrección registrada. El libro ya la enseña.',
+  },
+
   /** Pantalla 18: registrar una compra, una merma o un ajuste. */
   movimientoNuevo: {
     enlace: 'Registrar',

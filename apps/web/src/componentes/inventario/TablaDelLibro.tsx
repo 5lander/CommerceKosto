@@ -17,12 +17,14 @@
  * lo tiene que dar la API (pendiente, anotado en `ESTADO.md`).
  */
 
+import Link from 'next/link';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { llamar } from '../../lib/api';
 import { comoImporte, sinCerosDeSobra } from '../../lib/decimales';
 import { comoFecha } from '../../lib/fechas';
+import { usePermisos } from '../../lib/permisos';
 import { useEnvio } from '../../lib/useEnvio';
 import { TEXTOS } from '../../textos/es';
 import { Error as Fallo } from '../ui/Estados';
@@ -66,6 +68,7 @@ export function TablaDelLibro({ leido, consulta }: { readonly leido: LibroLeido;
             <th className="numero">{texto.cantidad}</th>
             <th className="numero">{texto.importe}</th>
             <th className="izquierda">{texto.estado}</th>
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -110,7 +113,27 @@ function FilaDelLibro({
       <td className="izquierda">
         <EstadoDelMovimiento movimiento={movimiento} />
       </td>
+      <td className="izquierda">
+        <Corregir movimiento={movimiento} />
+      </td>
     </tr>
+  );
+}
+
+/**
+ * El enlace a corregir, solo donde tiene sentido: ni sobre una fila ya
+ * corregida ni sobre una corrección (la API lanza `CorreccionDeCorreccionError`
+ * en el segundo caso). **Esto es cortesía, no la regla**: la regla está allá.
+ */
+function Corregir({ movimiento }: { readonly movimiento: MovimientoLeido }): ReactNode {
+  const { tiene } = usePermisos();
+  const corregible = movimiento.corregidoPor === null && movimiento.corrigeA === null;
+  if (!corregible || !tiene('inventory.write')) return null;
+
+  return (
+    <Link href={`/movimientos/${movimiento.id}/corregir`} className="boton">
+      {TEXTOS.correccion.enlace}
+    </Link>
   );
 }
 
