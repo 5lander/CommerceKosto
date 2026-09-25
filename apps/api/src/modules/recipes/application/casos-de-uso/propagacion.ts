@@ -43,6 +43,7 @@ import type { DependenciasDeRecetas } from './recetas';
 import type {
   DestinoDePropagacion as DestinoPropagacion,
   DestinoPropagado,
+  PropagacionLeida,
 } from '../ports/repositorio-de-recetas.port';
 
 export interface Previsualizacion {
@@ -111,7 +112,7 @@ async function copiarComoVersion(entrada: {
       ? []
       : await deps.repositorio.lineasDe({ companyId: sesion.companyId, recipeId: desde });
 
-  return deps.repositorio.guardarVersion({
+  const resultado = await deps.repositorio.guardarVersion({
     companyId: sesion.companyId,
     destino: { clase: 'producto', productId },
     locationId,
@@ -127,7 +128,17 @@ async function copiarComoVersion(entrada: {
     // Sin receta de origen, la version deja constancia de «aqui no hay
     // receta». Una receta vacia costaria cero, que es otra cosa.
     estado: desde === null ? 'VOID' : 'ACTIVE',
+    // Propagar y revertir SOBRESCRIBEN por definición: R11 ya obligó a ver qué
+    // se pierde. Pasan por el candado igual, para que un formulario abierto en
+    // esa ubicación reciba 409 en vez de pisar lo propagado (D-16.101).
+    testigo: { clase: 'sobrescribir' },
   });
+
+  // Con `sobrescribir` no hay conflicto posible; el tipo no lo sabe.
+  if (resultado.clase !== 'guardada') {
+    throw new RecetaInvalidaError('No se pudo escribir la versión propagada.');
+  }
+  return resultado.id;
 }
 
 /** Las dos comprobaciones baratas, antes de tocar la base. */
@@ -305,6 +316,27 @@ export class RevertirPropagacion {
       desde: entrada.destino.anterior,
       ahora: entrada.ahora,
       nota: 'Reversión de propagación',
+    });
+  }
+}
+
+/** Cuántas propagaciones se devuelven como mucho: el historial de una pantalla, no una exportación. */
+export const PROPAGACIONES_POR_CONSULTA = 50;
+
+/**
+ * Las propagaciones de un producto, la más reciente primero — lo que la
+ * pantalla de propagación enseña para poder revertir (R11: «registro de quién
+ * propagó qué, con reversión por local»). Pide el mismo permiso que propagar:
+ * quien no puede propagar no tiene nada que revertir.
+ */
+export class ListarPropagaciones {
+  public constructor(private readonly deps: DependenciasDeRecetas) {}
+
+  public async ejecutar(sesion: SesionActiva, productId: ProductId): Promise<readonly PropagacionLeida[]> {
+    return this.deps.repositorio.propagacionesDe({
+      companyId: sesion.companyId,
+      productId,
+      limite: PROPAGACIONES_POR_CONSULTA,
     });
   }
 }

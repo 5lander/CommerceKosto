@@ -36,7 +36,11 @@ import { unidadDeUso, type UnidadDeUso } from '../../../../shared/domain/unidad/
 import type { ItemLeido } from '../../../catalog/application/ports/repositorio-de-catalogo.port';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import type { CostosDeItems } from '../../../pricing/application/casos-de-uso/costos-de-items';
-import { ItemDelLibroNoEncontradoError, ItemNoProducibleError } from '../../domain/errores';
+import {
+  InsumoSinPrecioError,
+  ItemDelLibroNoEncontradoError,
+  ItemNoProducibleError,
+} from '../../domain/errores';
 import {
   producirLote,
   type InsumoDelLote,
@@ -78,6 +82,7 @@ export class RegistrarProduccion {
   /**
    * @throws {UbicacionFueraDeAlcanceError} @throws {ItemNoProducibleError}
    * @throws {ItemDelLibroNoEncontradoError} @throws {ProduccionSinInsumosError}
+   * @throws {InsumoSinPrecioError}
    * @throws {FechaFuturaError} @throws {SignoIncoherenteError}
    */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeProduccion): Promise<ProductionId> {
@@ -103,7 +108,7 @@ export class RegistrarProduccion {
       itemId: datos.itemId,
       cantidadProducida: Quantity.of(datos.cantidad, unidadDeUso(preparacion.unidadDeUso)),
       costoEstandarDeUso: estandar.costoNetoDeUso,
-      insumos: datos.insumos.map((insumo) => resolver(insumo, porId, costos.porItem)),
+      insumos: resolverInsumos(datos, porId, costos.porItem),
       ocurridoEn: datos.occurredAt,
     });
 
@@ -174,26 +179,45 @@ function exigirPreparacionConStock(
 }
 
 /**
- * Un insumo sin precio confirmado entra al lote con costo CERO.
+ * Un insumo sin precio confirmado a la fecha del lote DETIENE la producción.
  *
- * Es deliberado y tiene consecuencia visible: abarata el costo real y por tanto
- * la varianza sale negativa, que es la señal de «faltan precios» y no la de «se
- * produjo barato». Rechazar la producción entera sería peor —bloquearía la
- * operación de la cocina por un dato de administración— pero el hueco no se
- * puede esconder, así que el evento de auditoría lleva la varianza dentro.
+ * Hasta INC-032 entraba valorado en `Money.CERO` y se seguía, con el argumento
+ * de que una varianza negativa ya era la señal de «faltan precios». No lo era:
+ * un lote con los tres insumos a cero informa de que producir salió gratis, que
+ * es indistinguible de un ahorro real, y R3 impide corregir la fila después.
+ *
+ * Es exactamente la regla que `SIN_ESTANDAR` ya aplicaba al ítem producido. Se
+ * aplicaba a un solo lado; ahora a los dos.
  */
-function resolver(
-  insumo: InsumoDeclarado,
+/** Los insumos del lote, todos valorados o ninguno: el primero sin precio detiene. */
+function resolverInsumos(
+  datos: DatosDeProduccion,
   porId: ReadonlyMap<ItemId, ItemLeido>,
   costos: ReadonlyMap<ItemId, { readonly costoNetoDeUso: Money }>,
-): InsumoDelLote {
+): InsumoDelLote[] {
+  return datos.insumos.map((insumo) =>
+    resolver({ insumo, porId, costos, ocurridoEn: datos.occurredAt }),
+  );
+}
+
+function resolver(entrada: {
+  readonly insumo: InsumoDeclarado;
+  readonly porId: ReadonlyMap<ItemId, ItemLeido>;
+  readonly costos: ReadonlyMap<ItemId, { readonly costoNetoDeUso: Money }>;
+  readonly ocurridoEn: Date;
+}): InsumoDelLote {
+  const { insumo, porId, costos, ocurridoEn } = entrada;
+
   const item = porId.get(insumo.itemId);
   if (item === undefined) throw new ItemDelLibroNoEncontradoError();
+
+  const costo = costos.get(insumo.itemId);
+  if (costo === undefined) throw new InsumoSinPrecioError(item.nombre, ocurridoEn);
 
   return {
     itemId: insumo.itemId,
     cantidad: Quantity.of(insumo.cantidad, unidadDe(item)),
-    costoNetoDeUso: costos.get(insumo.itemId)?.costoNetoDeUso ?? Money.CERO,
+    costoNetoDeUso: costo.costoNetoDeUso,
   };
 }
 
@@ -208,6 +232,8 @@ function comoFila(valorizado: MovimientoValorizado, note: string | null): Movimi
     tipo: valorizado.movimiento.tipo,
     cantidad: valorizado.movimiento.cantidad.toStorageString(),
     costoTotal: valorizado.costoTotal.toStorageString(),
+    // PRODUCCION no se netea: su importe es el costo estandar (R10), ya neto.
+    desglose: null,
     purchaseArticleId: null,
     reversesMovementId: null,
     occurredAt: valorizado.movimiento.ocurridoEn,

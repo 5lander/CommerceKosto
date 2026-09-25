@@ -10,6 +10,7 @@
  */
 
 import { ErrorDeDominio, type CodigoDeDominio } from '../../../shared/domain/errors/error-de-dominio';
+import { mensajeDeProblemas, type ProblemaDelLote } from '../../../shared/domain/lote/problemas';
 
 /**
  * Un movimiento de cantidad cero.
@@ -111,6 +112,36 @@ export class ItemNoProducibleError extends ErrorDeDominio {
 
   public constructor(motivo: string) {
     super(`No se puede registrar producción de ese ítem: ${motivo}`, { motivo });
+  }
+}
+
+/** Los diez primeros caracteres de un ISO 8601: `AAAA-MM-DD`. */
+const LARGO_DE_LA_FECHA = 10;
+
+/**
+ * Un insumo del lote no tiene precio de referencia vigente a la fecha del lote.
+ *
+ * ES LA MISMA REGLA QUE `SIN_ESTANDAR`, aplicada al otro lado. Antes de INC-032
+ * el insumo sin precio entraba valorado en `Money.CERO` y se seguía: el costo
+ * real del lote salía más barato de lo que fue —o directamente cero— y la
+ * varianza de R10 informaba de un ahorro que no existió. Y como el libro es
+ * append-only (R3), esa fila mal valorada no se edita: se queda.
+ *
+ * Rechazar es fricción **el día que ocurre**, que es cuando el precio se puede
+ * confirmar. El número malo es fricción seis meses después, cuando ya decidió
+ * precios de carta. La decisión es del usuario, 2026-09-25, opción (a).
+ */
+export class InsumoSinPrecioError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(nombre: string, ocurridoEn: Date) {
+    const fecha = ocurridoEn.toISOString().slice(0, LARGO_DE_LA_FECHA);
+    super(
+      `«${nombre}» no tiene precio de referencia confirmado al ${fecha}, así que no ` +
+        'se puede saber lo que costó el lote. Confirma su precio a esa fecha y vuelve ' +
+        'a registrar la producción.',
+      { nombre, fecha },
+    );
   }
 }
 
@@ -224,6 +255,67 @@ export class ConteoNoConfirmadoError extends ErrorDeDominio {
     super(
       'Ese conteo todavia esta en borrador. Confirmalo antes de cerrar el periodo: ' +
         'un mes cerrado sin conteo confirmado no puede producir food cost real.',
+    );
+  }
+}
+
+/**
+ * Un lote de movimientos que no se puede escribir, con todos sus problemas.
+ *
+ * El libro es append-only (R3): una vez dentro, una fila mala solo se arregla
+ * con otra de signo contrario. Por eso el lote se para ANTES de escribir nada y
+ * se devuelven todos los motivos de una vez.
+ */
+export class MovimientoDeLoteInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(public readonly problemas: readonly ProblemaDelLote[]) {
+    super(mensajeDeProblemas(problemas));
+  }
+}
+
+/**
+ * Una COMPRA sin el total de la factura.
+ *
+ * El esquema del endpoint ya lo exige con un refinamiento de objeto, y un
+ * refinamiento de objeto no corre si otro campo falló antes (INC-008): la
+ * petición se rechaza igual, pero el dominio no puede fiarse de eso. Sin
+ * importe no hay neto, y sin neto `compras_del_mes` (SPEC §16) queda corto.
+ */
+export class CompraSinImporteError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('Una compra necesita el total de la factura: sin él no hay costo que netear.');
+  }
+}
+
+/**
+ * Una COMPRA nueva sin desglose (D-16.25). No la escribe ninguna ruta de hoy:
+ * es la guarda para la ruta de mañana que construya una compra sin pasar por
+ * `desglosarCompra` (§23 HACCP, back office, un script), porque la base no
+ * puede distinguirla de una anterior a P16-A1.
+ */
+export class CompraSinDesgloseError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super(
+      'Una compra se registra con su total de factura y su tarifa de IVA: el libro no acepta ' +
+        'una compra nueva sin desglose.',
+    );
+  }
+}
+
+/** Un bruto negativo no es una factura. Guarda de `inventory_movement_desglose_en_rango`. */
+export class CompraConImporteInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(importe: string) {
+    super(
+      `El total de una compra es una magnitud sin signo: «${importe}» no lo es. ` +
+        'Para deshacer una compra existe la corrección.',
+      { importe },
     );
   }
 }

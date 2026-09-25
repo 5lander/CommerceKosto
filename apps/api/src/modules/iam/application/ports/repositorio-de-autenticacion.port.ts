@@ -8,6 +8,7 @@
  * arquitectura intenta impedir.
  */
 
+import type { CorreoAEncolar } from '../../../../shared/application/correo/correo-a-encolar';
 import type { AuditOutcome } from '../../../../shared/application/ports/audit-log.port';
 import type {
   CompanyId,
@@ -16,6 +17,7 @@ import type {
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { VigenciaDeSesion } from '../../domain/politica-de-sesion';
+import type { FalloPorIp } from '../../domain/politica-de-intentos';
 
 export const REPOSITORIO_DE_AUTENTICACION = 'REPOSITORIO_DE_AUTENTICACION';
 
@@ -39,13 +41,26 @@ export interface CredencialDeLogin {
  */
 export interface FallosRecientes {
   readonly porCuenta: readonly Date[];
-  readonly porIp: readonly Date[];
+  /**
+   * Los fallos de esa IP, CON LA CUENTA de cada uno: el eje de IP cuenta
+   * cuentas distintas —la firma del rociado—, no fallos (D-16.196).
+   */
+  readonly porIp: readonly FalloPorIp[];
 }
 
 export interface NuevaSesion {
   readonly companyId: CompanyId;
   readonly userId: UserId;
   readonly tokenHash: string;
+  /**
+   * El token anti-CSRF, EN CLARO y no hasheado (ADR-021).
+   *
+   * Es la excepcion a la regla de la linea de arriba, y tiene su razon: del
+   * token de sesion se guarda el hash porque es la CREDENCIAL; este no lo es
+   * —sin la cookie no sirve para nada— y guardarlo en claro es lo que permite
+   * devolverlo en `GET /auth/sesion` tras recargar la pagina sin rotarlo.
+   */
+  readonly csrfToken: string;
   readonly expiresAt: Date;
   readonly ip: string | null;
   readonly userAgent: string | null;
@@ -73,11 +88,77 @@ export interface ContextoDeSesion {
   /** Capacidades efectivas, ya resueltas desde los roles (SPEC §4). */
   readonly permisos: readonly string[];
   readonly alcance: AlcanceDeUsuario;
+  /**
+   * TODAS las ubicaciones de la company, independientemente del alcance.
+   *
+   * NO ES EL ALCANCE Y NO LO SUSTITUYE: es el conjunto contra el que se
+   * comprueba que un `locationId` recibido pertenece siquiera a esta company.
+   * `alcance` responde «puede este usuario»; esto responde «existe esto aqui»,
+   * y son dos preguntas distintas — un OWNER puede con todas las suyas y con
+   * ninguna ajena.
+   *
+   * Viaja en `session_lookup`, que ya se ejecuta en cada peticion, para que la
+   * comprobacion no cueste una consulta mas. Y por eso mismo NO se queda rancio:
+   * una ubicacion creada hace un segundo esta en la siguiente peticion.
+   */
+  readonly ubicacionesDeCompany: readonly LocationId[];
+  /**
+   * El token anti-CSRF de esta sesion.
+   *
+   * `null` SOLO en las sesiones abiertas antes de P16-A2. `ValidarSesion` las
+   * trata como invalidas, asi que por encima de el el token es `string` y
+   * nadie tiene que acordarse de comprobar el caso.
+   */
+  readonly csrfToken: string | null;
+}
+
+/** Lo que devuelve `password_reset_consume`: a quien pertenece el token que se acaba de gastar. */
+export interface UsuarioRestablecido {
+  readonly userId: UserId;
+  readonly companyId: CompanyId;
 }
 
 export interface RepositorioDeAutenticacion {
   /** Unica lectura sin tenant efectivo del sistema. Va por `auth_lookup`. */
   buscarCredencial(email: string): Promise<CredencialDeLogin | null>;
+
+  /**
+   * Crea el token de restablecimiento y encola su correo en UNA operacion, sin
+   * tenant (`password_reset_request`, D-16.47). Sin usuario activo no hace
+   * nada y devuelve lo mismo: la respuesta no dice si el correo existe.
+   */
+  solicitarRestablecimiento(entrada: {
+    readonly email: string;
+    readonly tokenHash: string;
+    readonly expiraEn: Date;
+    readonly correo: CorreoAEncolar;
+  }): Promise<void>;
+
+  /**
+   * Gasta el token si no estaba usado ni caducado (`password_reset_consume`).
+   * `null` para inexistente, usado o caducado: los tres iguales, a proposito.
+   */
+  consumirRestablecimiento(entrada: {
+    readonly tokenHash: string;
+    readonly ahora: Date;
+  }): Promise<UsuarioRestablecido | null>;
+
+  /**
+   * El correo de un usuario de la company, bajo tenant. La politica de
+   * contrasenas lo necesita para rechazar una que lo contenga.
+   */
+  correoDelUsuario(entrada: { readonly companyId: CompanyId; readonly userId: UserId }): Promise<string | null>;
+
+  /**
+   * Deja un correo en `email_outbox` bajo el tenant del usuario. Hoy lo usa
+   * solo el aviso de bloqueo del login: lo entrega el despachador, como la
+   * invitacion y el restablecimiento (ADR-025). La API no envia nada.
+   */
+  encolarCorreo(entrada: {
+    readonly companyId: CompanyId;
+    readonly userId: UserId;
+    readonly correo: CorreoAEncolar;
+  }): Promise<void>;
 
   fallosRecientes(entrada: {
     readonly email: string;

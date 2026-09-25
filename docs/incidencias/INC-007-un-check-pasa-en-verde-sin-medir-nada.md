@@ -6,7 +6,7 @@
 | **Paquete** | P0 |
 | **Área** | build |
 | **Tiempo perdido** | ~2 h repartidas en siete apariciones. La octava y la novena se cazaron en un minuto cada una, y **la novena la cazo la regla que dejo escrita la octava** |
-| **Recurrencias** | **9** |
+| **Recurrencias** | **14** |
 
 > **Es una sola ficha para seis problemas porque lo que se repite es el MODO DE FALLO, no la causa.** Las causas no se parecen entre sí: un parser ausente, un `exclude` demasiado ancho, un glob que no cubría una carpeta, unos patrones de ignorar mal anclados, una clave de configuración que la herramienta ignora, y un intercept que solo cubría dos de las tres formas de llamar a una función. Lo que sí es idéntico las seis veces es la forma de manifestarse —el check dice que todo está bien— y la única forma de detectarlo: provocarle un fallo a propósito y comprobar que se entera.
 >
@@ -128,6 +128,69 @@ Tiene su prueba del guardian: se vuelve a meter el retroceso en `tools/audit/mig
 
 **Esta es la primera prevencion de INC-007 que ataca la CAUSA y no el sintoma.** Las siete anteriores enseñaban a desconfiar del verde; esta impide que el fallo se escriba.
 
+### Caso 14 (P16-G2) — la regla funcionó, la costumbre no
+
+El mismo retroceso, **la tercera vez con esta causa exacta**, escribiendo la regex de M12 desde un
+generador. Se anota aquí y no en una ficha nueva porque no añade nada al diagnóstico: añade la única
+cosa que faltaba saber, que es que **la prevención del caso 8 aguanta**. `sin-caracteres-de-control`
+lo paró antes del commit, con archivo, línea y columna, y el arreglo fue de un minuto.
+
+Lo que sí cambió: esa regex ya no usa ``. Donde un límite de palabra se puede sustituir por algo
+que no se degrada en silencio —aquí `(?!FUNCTION)`— se sustituye, porque la regla caza el carácter
+pero no obliga a nadie a dejar de escribirlo.
+
+## Caso 10 (P14) — la misma trampa, ahora con la extensión del archivo
+
+**Otra vez lo delató el contador de archivos, y otra vez porque NO se movió.**
+
+### Qué pasó
+
+P14 añade tres `.tsx` a `apps/web` y borra uno. Después del cambio, el check
+seguía diciendo lo mismo que antes:
+
+```
+audit:forbidden  OK — 34 reglas sobre 346 archivos
+```
+
+Tres archivos más y uno menos, y el número clavado. O el contador no cuenta, o
+esos archivos no los mira nadie.
+
+### La causa
+
+Todos los patrones dicen `apps/*/src/**/*.ts`. **Ninguno decía `.tsx`.**
+
+Las 34 reglas —`: any`, `as any`, `@ts-ignore`, `eslint-disable`, marcadores
+pendientes— **nunca examinaron una sola línea del frontend**. La Fase C construyó
+2.000 líneas en cinco pantallas y ninguna pasó por aquí.
+
+Es exactamente el caso 9 con otra ropa: allí el glob fallaba por la ruta, aquí
+por la extensión. En los dos el efecto es el mismo —una regla que no mira nada
+no falla nunca— y en los dos lo único que chirrió fue un número.
+
+### El arreglo
+
+Los siete patrones, en seis archivos de reglas, pasan a:
+
+```js
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts'];
+```
+
+El contador se mueve a **359**, que son los 13 `.tsx` que faltaban, contados uno
+a uno.
+
+**Y el guardián, que es la otra mitad:** con un `// @ts-ignore` y un
+`const colado: any = 1` metidos a propósito en `ui/Tabla.tsx`, el check pasa a
+`FALLO — 2 infraccion(es)` y las nombra con su línea. Antes las dos pasaban en
+silencio.
+
+### La lección, que es nueva
+
+**Un glob de extensión es un alcance con fecha de caducidad.** El día que el
+repositorio ganó un tipo de archivo nuevo, treinta y cuatro reglas se quedaron
+mirando a otro lado sin que nada fallara. No hay forma de que un check avise de
+lo que no está mirando: **lo único que lo delata es que el contador no se mueva
+cuando el repositorio sí lo hace.** Por eso ese número se lee en cada paquete.
+
 ## Caso 9 (P6) — la regla llevaba desde P0 sin mirar una sola migración
 
 **Lo encontró la regla del caso 8**, la que dice que hay que contar en cuántos sitios falla un check. Sin ella habría pasado por un guardián en verde.
@@ -211,6 +274,152 @@ Momentos ya identificados en los que esto toca hacerse:
 | **P12** | Workspace `apps/web`: globs, `tsconfig`, reglas de capa y de complejidad nuevas | **Los once**, sobre el workspace nuevo |
 | Cualquiera | Se añade una carpeta que no casa con los globs existentes | Los checks cuyo glob se amplió |
 | Cualquiera | Se sube una herramienta de auditoría a un major nuevo | Los checks que la usan: las claves de configuración cambian de nombre y de semántica sin avisar (caso 5) |
+
+## Caso 11 (P16-A2) — no era un check: era una 🔴, y su titulo mentia
+
+**El modo de fallo es el mismo y por eso vive aqui, pero el sujeto es nuevo: una PRUEBA, no un check.**
+
+### Que paso
+
+La etapa del token anti-CSRF cerro con una 🔴 titulada «volver a entrar rota el token, y el anterior
+deja de servir». La prueba estaba en verde. El titulo era falso —`IniciarSesion` no revoca ninguna
+sesion— y lo que la prueba media era **cookie nueva + token viejo**, que es exactamente el caso de la
+prueba de al lado («con el token de OTRA sesion es 403»). Dos pruebas para un solo hecho, y el hecho
+del titulo sin cubrir.
+
+La afirmacion falsa no se quedo en el archivo de pruebas: viajo al contrato publico
+(`docs/apis/app-cliente.md`), al comentario de `iniciar-sesion.ts` y a **ADR-021**, donde era el
+argumento con el que se descarto rotar el token en cada mutacion. **Una prueba en verde firmando una
+afirmacion falsa es peor que no tener la prueba**, porque el resto de la documentacion se apoya en
+ella.
+
+### Que lo caza
+
+Lo mismo de siempre, aplicado a una prueba: **preguntarle que pasaria si el sistema NO cumpliera lo
+que el titulo dice.** Si la respuesta es «pasaria igual», la prueba no lo mide. Aqui bastaba con
+ejecutar la sonda contraria —sesion anterior con SU token— y ver el 201.
+
+La segunda mitad del mismo paquete es el hermano gemelo, y ese si se automatizo: desde P16-A2 hay
+**dos** 403 distintos (`PERMISO_DENEGADO` y `CSRF_INVALIDO`) y el guard de CSRF corre primero, asi
+que 26 aserciones de autorizacion que solo miraban el ESTADO habrian pasado igual sin ejercitar
+ningun permiso. La regla `403-de-integracion-sin-su-code` de `audit:forbidden` lo impide, y se
+verifico borrando una asercion a mano para comprobar que **falla**.
+
+### La leccion, que es nueva
+
+> **Un titulo de prueba es una afirmacion sobre el sistema, y nadie lo verifica.** El cuerpo se
+> revisa; el titulo se cree. Cuando el titulo dice mas de lo que el cuerpo mide, la diferencia acaba
+> copiada en la documentacion y en un ADR, donde ya nadie puede distinguirla de un hecho.
+
+## Caso 12 (P16-B) — el bench medía el `dist` que hubiera en disco
+
+**El sujeto vuelve a ser un check, y esta vez no le faltaba alcance: le sobraba antigüedad.**
+
+### Qué pasó
+
+`npm run bench` siembra `costeo_bench`, aplica las migraciones del árbol de trabajo y lanza el
+medidor `apps/api/dist/bench.js`. **Nadie compilaba ese `dist`**: ni el script, ni `npm run audit`,
+ni ningún paso del protocolo. Al medir P16-B el archivo era del 2026-09-10 16:45 —anterior a todo el
+paquete— y no contenía ni una línea de lo que P16-B cambió en el propio `bench.ts`
+(`grep -c ultimaVersionId dist/bench.js` → `0`). La base tenía el esquema nuevo y el código medido
+era el viejo.
+
+Esta vez **reventó** (`Cannot read properties of undefined (reading 'toFixed')`), y por eso se vio.
+Lo normal habría sido lo contrario: un paquete que no toca el `bench.ts` mide el código del paquete
+anterior, imprime cuatro presupuestos con su ✓ y el número va a `AUDITORIA-RESULTADO.md` como
+evidencia del paquete que no midió. **Los números de bench de P16-A1 y P16-A2 no se pueden atribuir
+con certeza al código que se commiteó**: dependían de cuándo se hubiera compilado por última vez.
+
+### La prevención, que es de construcción y no de disciplina
+
+`scripts/bench.mjs` gana `compilar()`: `tsc --build tsconfig.build.json` sobre `apps/api` **antes de
+crear la base**, siempre. Es incremental —si nada cambió, solo comprueba— y un error de compilación
+aborta antes de sembrar. Verificado: tras la corrida, `dist/bench.js` contiene `ultimaVersionId`.
+
+### Y dos más del mismo paquete que NO suben el contador, porque los cazó el guardián
+
+Los dos son el modo de fallo del caso 11 —una prueba que afirma más de lo que mide— y los dos
+murieron antes del commit, que es exactamente para lo que existe el guardián:
+
+1. **«Diez escrituras a la vez» no era una carrera.** Con `Promise.all`, la transacción del producto
+   es tan corta que en local no se solapa: devolviendo la escritura a un leer-comparar-escribir, la
+   🔴 seguía en verde. Se rehízo determinista —otra conexión bloquea la fila con `FOR UPDATE`, se
+   espera en `pg_locks` a que las cinco escrituras estén paradas y se suelta— y ahora el mismo
+   guardián da cinco 200 en vez de uno. `test/soporte/bloqueos.ts`, ADR-023.
+2. **«Cuarta recurrencia: una presentación de cero» no lo era.** Devolviendo el esquema a la regex
+   vieja, la prueba seguía en 400 porque el dominio la paraba desde P2. Se retituló; la ficha de
+   INC-012 lo cuenta.
+
+> **La lección, que amplía la del caso 11:** preguntar «¿qué pasaría si el sistema no cumpliera el
+> título?» no basta si la respuesta se imagina. **Hay que escribir el sistema que no lo cumple** —el
+> `if` previo, el esquema viejo, el `dist` sin compilar— y verlo fallar.
+
+## Caso 13 (P16 · Armazón) — `typecheck` del web no comprobaba las rutas tipadas en un clon limpio
+
+**Dos checks del mismo commit con el mismo modo de fallo.** Uno se destapó solo; el otro, al
+preguntarse si el primero tenía hermano.
+
+### Qué pasó
+
+1. **Las rutas tipadas.** `apps/web` tiene `typedRoutes`: un `<Link href="/ruta-que-no-existe">` no
+   compila. **Pero los tipos de las rutas los genera Next en `.next/types/`**, y `npm run typecheck`
+   era `tsc --noEmit` a secas. Tras mover las cuatro páginas a `(app)/`, `tsc` falló contra un
+   `.next/types/validator.ts` rancio que aún importaba `src/app/costeo/page.js`. El hermano, que es el
+   grave: **en un clon limpio —el de CI— no hay `.next/` ni `next-env.d.ts`, y `tsc` no ve la
+   restricción**. Sonda, con un `href` a una ruta inexistente:
+
+   ```
+   --- sin tipos generados (lo que ve CI):
+   (sin salida: tsc en verde)
+   --- con tipos generados:
+   src/app/sonda-rutas.tsx:5:16 - error TS2322: Type '"/ruta-que-no-existe"' is not assignable to type 'UrlObject | RouteImpl<"/ruta-que-no-existe">'.
+   ```
+
+   CI nunca construye `apps/web`, así que **ningún check del proyecto validaba las rutas tipadas**.
+
+2. **La complejidad de los `.tsx`.** `audit:complexity` solo tenía el glob `apps/*/src/**/*.ts`.
+   Estaba dicho —el commit 0 lo dejó para el armazón—, pero no medido: con el glob `.tsx` añadido, el
+   árbol de P16-C, que salió con `audit exit=0`, tiene **diez** incumplimientos (`Ventas` de 163 líneas
+   y complejidad 15, `Inventario` de 141 y 15, `Marco` de 87, `Entrar` de 79, `ElegirSucursal` de 71,
+   `HojaDeConteo` de 58, `Cuadrante` de 49, `MenuEngineering` de 43). El armazón los deja en cero.
+
+### La prevención
+
+`"typecheck": "next typegen && tsc --noEmit"`: los tipos se regeneran **siempre** antes de comprobar,
+así que no hay `.next/` rancio en local ni ausente en CI. Guardián, borrando `.next/types` y
+`next-env.d.ts` como en un clon limpio:
+
+```
+--- ROJO esperado (sonda con href inexistente):
+✓ Types generated successfully
+src/app/sonda-rutas.tsx:5:16 - error TS2322: Type '"/ruta-que-no-existe"' is not assignable to type 'UrlObject | RouteImpl<"/ruta-que-no-existe">'.
+--- VERDE esperado (sonda retirada):
+✓ Types generated successfully
+```
+
+Y el glob `'apps/*/src/**/*.tsx'` en `eslint.complexity.config.mjs`, con los diez de arriba como
+guardián: la configuración vieja no los veía, la nueva sí.
+
+### Y dos más, al mover la base de puerto, que no suben el contador porque se cazaron antes
+
+El usuario pidió publicar la base de desarrollo en el 5442. Antes de hacerlo se buscó quién tenía el
+5432 escrito, y dos checks lo tenían **con el `.env` fuera de su alcance**:
+
+1. **La guardia de «unitarias sin base»** (`test/soporte/guardia-sin-base.ts`) vigilaba
+   `POSTGRES_PORT ?? 5432` de `process.env`, y el proyecto `unit` no carga el `.env`. Con la base en el
+   5442, una unitaria que abriera un socket a la base de verdad **pasaba en verde** —comprobado con
+   una sonda, salida en `docs/pasos/P16/CONSTRUCCION.md`—.
+2. **La sonda de `audit:tests`** preguntaba al mismo `POSTGRES_PORT ?? 5432`, y este proceso tampoco
+   carga el `.env`. En el pre-commit, con `--solo-unitarias`, un puerto vacío es un **PARCIAL en verde
+   sin una sola prueba de integración**.
+
+Las dos leen ahora **las cadenas de conexión**, del entorno o del `.env` leído con `util.parseEnv` y
+**sin cargarlo** (las unitarias no deben ver sus variables). La guardia vigila además el puerto de
+PgBouncer: una unitaria tampoco debe llegar a la base por el pooler.
+
+> **La lección que añade:** un número escrito en un check no es una constante, es una suposición sobre
+> el entorno. Cuando el entorno se puede configurar, el check tiene que leer **la misma fuente** que el
+> código que vigila, no un valor por defecto que coincidía.
 
 ## Referencias
 

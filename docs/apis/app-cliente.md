@@ -5,9 +5,22 @@
 
 ## Reglas que valen para toda la superficie
 
-**Ningún endpoint acepta `company_id`.** El tenant sale de la sesión, y solo de ahí (Barrera 3, ADR-006). Todos los esquemas de entrada son `.strict()`: una clave de más **se rechaza con 400**, no se limpia en silencio. Mandar `companyId` es un error, no un campo ignorado.
+**Ningún endpoint acepta `company_id`.** El tenant sale de la sesión, y solo de ahí (Barrera 3, ADR-006). Todo esquema de **cuerpo** es `.strict()`: una clave de más **se rechaza con 400**, no se limpia en silencio. Mandar `companyId` es un error, no un campo ignorado.
 
-**Autenticación por cookie, nunca por cabecera.** La sesión viaja en una cookie `HttpOnly; SameSite=Strict; Path=/` (más `Secure` en producción). No se acepta `Authorization: Bearer`: admitir las dos vías reabriría el CSRF que `SameSite=Strict` cierra.
+**Y desde P16-A2 también los ocho esquemas de consulta** (`/analitica/*`, `/consolidado`, `/costeo`, `/recetas`, `/inventario/saldos`, `/inventario/movimientos`, `/conteos`, `/periodos`). Hasta entonces eran laxos: un `?utm_source=…` o un `?companyId=…` **se descartaba en silencio y la respuesta era 200**. Ahora un parámetro de más devuelve `400 ENTRADA_INVALIDA` diciendo cuál sobra —con el nombre de la clave recortado, que el cuerpo de un error no es el eco de la petición—. Construye la URL con los parámetros documentados y ninguno más; si un enlace tuyo pega parámetros de rastreo, quítalos antes de llamar.
+
+> **Desde P16-B lo hacen todas** (D-16.111). Las cinco que P16-A2 dejó nombradas aquí —`GET /precios?itemId=`, `GET /precios/costo/:itemId?fecha=`, `GET /catalogo/articulos?itemId=`, `GET /catalogo/items?incluirInactivos=` y `GET /recetas/propagacion/previsualizacion?productId=&origen=`— pasaron a esquema `.strict()`: una clave de más es 400, y una `fecha` que no es ISO 8601 también (antes era un 404 «sin precio» que mentía).
+
+**CORS.** En producción no hay CORS: el frontend y la API se sirven desde el mismo origen y `CORS_ORIGENES` está vacío a propósito. Cuando sí se declaran orígenes (desarrollo, o un frontend en otro dominio), la lista es **exacta** —jamás `*`, que con credenciales el navegador rechaza— y la política permite `GET, POST, PUT, PATCH, DELETE`, las cabeceras `Content-Type` y `X-CSRF-Token`, y **expone** `x-correlation-id` y `Retry-After` para que el JavaScript de la página pueda leerlos. *(`DELETE` entra en P16-A2: existía la ruta y el preflight la rechazaba.)*
+
+**Autenticación por cookie, nunca por cabecera.** La sesión viaja en una cookie `HttpOnly; SameSite=Strict; Path=/` (más `Secure` en producción). No se acepta `Authorization: Bearer`: hoy el único cliente es un navegador y admitir las dos vías duplicaría la superficie sin que nadie lo pida.
+
+**Toda mutación exige la cabecera `X-CSRF-Token`** *(P16-A2, U4, ADR-021)*. Es decir: `POST`, `PUT`, `PATCH` y `DELETE`. Las lecturas no la necesitan —un CSRF sirve para provocar un efecto, y el sitio cruzado no puede leer la respuesta— y las **cuatro rutas públicas tampoco**: sin sesión no hay credencial que el navegador adjunte, luego no hay nada que suplantar. *(El login es la excepción interesante: ahí una petición cruzada no usaría una credencial, la crearía. Lo que lo cierra es que **el cuerpo de toda petición va en `application/json`** —la API no analiza formularios—, así que un `<form>` cruzado no llega a nada. Ver ADR-021.)*
+
+- El token se obtiene del **cuerpo** de `POST /auth/login`, y se recupera tras recargar la página con `GET /auth/sesion`. Nunca viaja en una cookie: una cookie la manda el navegador sola, justo en la petición cruzada de la que este token defiende.
+- Es **el de tu sesión**: uno de otra sesión da 403 igual que ninguno, aunque las dos sesiones sean del mismo usuario. Volver a entrar abre una sesión **nueva** con su propio token; **la anterior no se cierra** y sigue funcionando con el suyo — el móvil y el ordenador a la vez son dos sesiones vivas, cada una con su token. Dentro de una sesión el token **no rota**: dura lo que dure ella.
+- Si falta o no coincide: **403 `CSRF_INVALIDO`**. Se arregla recargando la página, no pidiendo permisos — por eso tiene código propio y no comparte el de `PERMISO_DENEGADO`.
+- **Por qué existe si la cookie ya es `SameSite=Strict`:** porque `SameSite` lo aplica el navegador y no la API (un navegador viejo lo ignora entero), y porque mira el *sitio* y no el *origen* (un subdominio del mismo dominio manda la cookie con normalidad). ADR-021 lo desarrolla.
 
 **Deny by default.** Toda ruta exige sesión salvo las cuatro marcadas como públicas abajo.
 
@@ -21,14 +34,28 @@
 | `CREDENCIALES_INVALIDAS` | 401 | Correo o contraseña incorrectos. **Idéntico** exista o no la cuenta |
 | `SESION_INVALIDA` | 401 | Sin sesión, caducada, inactiva o revocada |
 | `PERMISO_DENEGADO` | 403 | Autenticado, pero le falta la capacidad. El mensaje dice cuál |
+| `CSRF_INVALIDO` | 403 | La mutación no trae `X-CSRF-Token`, o el que trae no es el de esta sesión. Recarga y reintenta *(P16-A2)* |
 | `RECURSO_NO_ENCONTRADO` | 404 | No existe **en tu company** |
+| `PERIODO_SIN_DATOS` | 404 | Ese **mes no se ha abierto** en esa ubicación: ni ventas, ni movimientos, ni conteo. No es un enlace roto ni un mes en cero *(P16-A2, D-16.2)* |
 | `LIMITE_DEL_PLAN` | 409 | El permiso está bien; lo que no da es el plan |
 | `CONFLICTO` | 409 | La petición está bien formada; lo que choca es el estado que ya hay (un nombre repetido) |
-| `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos. Escala: 1 → 5 → 15 → 60 min |
+| `CONFLICTO_DE_VERSION` | 409 | Alguien guardó este mismo producto, ítem o receta **después de que tú lo leyeras**. Recarga y vuelve a decidir: reenviar lo tuyo pisaría lo suyo *(P16-B, ADR-023)* |
+| `ACCESO_BLOQUEADO` | 429 | Demasiados intentos de login fallidos **de esa cuenta**. Escala: 1 → 5 → 15 → 60 min |
 | `TOO_MANY_REQUESTS` | 429 | El limitador de peticiones. **No es lo mismo** que el anterior |
+| `LIMITE_DE_SOLICITUDES` | 429 | Demasiadas veces la **misma solicitud**: olvido, restablecimiento, invitar o reenviar, por IP o por destinatario. Trae `Retry-After` en segundos y el minuto en el mensaje *(P16-A1)* |
 | `INTERNAL_ERROR` | 5xx | Fallo inesperado. Cita `x-correlation-id` en el ticket |
 
-Los dos 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dice «espera un momento», el otro «tu cuenta está bloqueada».
+**Los dos 404 también se distinguen por el `code`, y esto importa en pantalla.** `RECURSO_NO_ENCONTRADO` es un error: el enlace está roto o el id no es tuyo. `PERIODO_SIN_DATOS` **no lo es**: es un estado normal del producto —el mes todavía no se ha trabajado— y lo que corresponde enseñar no es un aviso rojo sino «este mes está sin abrir» con el camino para abrirlo (cargar las ventas). Lo devuelven las **seis vistas** de analítica; `GET /analitica/ventas` y `GET /analitica/costos-fijos` **no**, porque para ellas un mes sin abrir es la lista vacía.
+
+**Un identificador mal formado es 400, no 500** *(P16-A2, INC-012)*. Un `:id` de ruta o un `?itemId=` que no sea un UUID, una `unidadDeUso` que no tenga la forma de un código corto en minúsculas (`kg`, `lt`, `unid`) y un decimal con más de 30 decimales devuelven `400 ENTRADA_INVALIDA` con un mensaje que dice qué corregir. Antes los tres salían como `INTERNAL_ERROR` y no decían nada. **Desde P16-C todos los `:id` de ruta pasan por el mismo pipe** (D-16.130), así que la respuesta es la misma en cualquier ruta —incluida `POST /usuarios/:id/reenvio-de-invitacion`, que hasta entonces respondía `BAD_REQUEST`—.
+
+**Concurrencia optimista** *(P16-B, D-16.100, ADR-023)*. Cinco escrituras de reemplazo total piden de vuelta lo que se leyó: `PUT /catalogo/items/:id`, `PUT /productos/:id/ubicaciones`, `PUT /productos/:id/empaque` y `PUT /productos/:id/componentes` llevan `version` (la de la ficha); `PUT /recetas` lleva `basadaEn` (el `ultimaVersionId` de `GET /recetas`). Si alguien escribió entre medias, **409 `CONFLICTO_DE_VERSION`**, y el cuerpo es `{ code, message }` **sin la versión actual** (D-16.104): con el número dentro lo fácil sería reenviar con él, que es pisar al otro con un paso más. Las cuatro con `version` responden **200 `{ "version": n }`** en vez de 204, para que el formulario pueda seguir guardando sin releer. Sin `version` o sin `basadaEn` es 400, no una escritura sin comprobar. Un recurso que no existe sigue siendo 404, nunca 409.
+
+**Y desde P16-C, la carga del mes** (D-16.121): `POST /analitica/ventas` y `POST /analitica/costos-fijos` llevan la `version` que devolvió su `GET` y responden **200 `{ "version": n }`**. Las dos comparten la versión del período: guardar una deja obsoleto el formulario abierto de la otra, en ese mes y esa ubicación. Un mes que todavía no tiene fila se lee con `version: 1`.
+
+**Los números del cuerpo dicen qué aceptan** *(P16-B, INC-012)*. Un precio, un PVP, un rendimiento por lote, una presentación o una cantidad de combo de `"0"` o negativos son **400**; un importe de movimiento negativo, también. Hasta P16-B varios salían como 500 del `CHECK` de la base.
+
+Los tres 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dice «espera un momento», otro «tu cuenta está bloqueada» y el tercero «ya pediste esto demasiadas veces». **La IP que cuenta es la del cliente, no la del proxy**: detrás de Caddy se toma el último salto de `X-Forwarded-For` solo porque Caddy está en `PROXY_DE_CONFIANZA`; una cabecera falseada desde fuera no cambia nada (D-16.49).
 
 ---
 
@@ -40,11 +67,36 @@ Los dos 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dic
 { "email": "ana@snacklab.ec", "contrasena": "tres cebollas moradas" }
 ```
 
-**200** → `{ "expiraEn": "2026-09-05T00:00:00.000Z" }` más `Set-Cookie: sesion=…`.
+**200** → `{ "expiraEn": "2026-09-05T00:00:00.000Z", "csrf": "8Kb…" }` más `Set-Cookie: sesion=…`.
 
-**El token no viaja en el cuerpo.** Devolverlo además en el JSON anularía el `HttpOnly`: cualquier script de la página podría leerlo de la respuesta.
+**El token de sesión no viaja en el cuerpo.** Devolverlo además en el JSON anularía el `HttpOnly`: cualquier script de la página podría leerlo de la respuesta.
+
+**`csrf` sí, y no es lo mismo** *(P16-A2)*. Es el token anti-CSRF de la sesión recién abierta, y **tiene** que ser legible por la página: su trabajo es que la página lo ponga en la cabecera `X-CSRF-Token` de cada mutación, algo que un sitio cruzado no puede hacer. No es una credencial: sin la cookie no sirve para nada. Guárdalo en memoria; si se pierde, `GET /auth/sesion` lo devuelve.
 
 **401** con el mismo cuerpo exista o no la cuenta, y con el mismo coste en tiempo. **429** `ACCESO_BLOQUEADO` tras cinco fallos de la cuenta en quince minutos.
+
+**Y un segundo 429, con OTRO código: `LIMITE_DE_SOLICITUDES`** *(P16-F, ADR-028; umbral de D-16.199)*, cuando la **IP** ha tanteado **50 cuentas distintas** en la última hora — la firma del rociado de contraseñas. Dura **15 minutos fijos** (`Retry-After`), no escala y **no bloquea ninguna cuenta**: los fallos de una sola cuenta, por muchos que sean, nunca lo disparan. Un cliente tiene que distinguir los dos: «tu cuenta está bloqueada» y «esta conexión tiene que esperar» se arreglan de formas distintas. Con el quinto fallo se **encola** un aviso al titular (`email_outbox`, plantilla `BLOQUEO`, sin enlace y sin datos); lo entrega el despachador, como los demás correos *(P16-A1; antes salía de la API por `MailerPort`, que en producción es `fake`)*.
+
+### `GET /auth/sesion` — sesión *(P16-A2)*
+
+**200** →
+
+```json
+{
+  "userId": "018f2b8c-2222-7000-8000-000000000002",
+  "permisos": ["catalog.read", "inventory.write"],
+  "alcance": { "clase": "ubicaciones", "ids": ["018f…"] },
+  "csrf": "8Kb…"
+}
+```
+
+**Es la primera llamada de cada carga de página.** Devuelve quién eres, qué puedes, sobre qué, y el token con el que firmar las mutaciones — que es lo que permite recargar sin rotar el token ni guardarlo en `localStorage`.
+
+`alcance` es una **unión discriminada**, no una lista: `{ "clase": "company" }` cuando el usuario puede con todas las ubicaciones de su company, o `{ "clase": "ubicaciones", "ids": [...] }` cuando su rol es de ubicación. **No se aplana**: un `ids: []` que significara «todas» es la convención que alguien lee al revés una vez y convierte en fuga.
+
+**No lleva `companyId`, y no es un olvido.** El tenant no es un dato que el cliente pueda usar —ningún endpoint lo acepta, Barrera 3— y publicarlo solo invitaría a intentarlo.
+
+**401** `SESION_INVALIDA` sin cookie válida. No exige ninguna capacidad: el mínimo de la API es estar autenticado, y esto no devuelve nada que el usuario no sea ya.
 
 ### `POST /auth/logout` — sesión
 
@@ -59,6 +111,28 @@ Los dos 429 son mecanismos distintos y el `code` es cómo se distinguen: uno dic
 **200** → `{ "sesionesRevocadas": 3 }`. Revoca **todas** las sesiones, la que hace la petición incluida: hay que volver a entrar. La contraseña actual se exige aunque ya haya sesión, para que una sesión robada no deje al titular fuera de su cuenta.
 
 La nueva debe tener 12–128 caracteres, no estar en la lista de filtradas y no contener la parte local del correo. **No hay reglas de composición**: `Password1!` está en cualquier diccionario.
+
+### `POST /auth/password/olvido` — público *(P16-A1)*
+
+```json
+{ "email": "ana@snacklab.ec" }
+```
+
+**202, siempre, con cuerpo vacío** — exista o no el correo, y con el mismo trabajo en los dos casos: la API genera el token, calcula la caducidad y llama a la base; es la función `password_reset_request` la que decide, sin decirlo, si hay un usuario **activo** detrás. Si lo hay, se crea el token (hasheado) y se **encola** un correo con el enlace `APP_URL/restablecer?token=…`, que caduca en `HORAS_DE_RESTABLECIMIENTO` (1 por defecto) y sirve **una sola vez**. Un invitado que aún no activó no recibe nada: no tiene contraseña que restablecer, tiene una invitación.
+
+El correo lo entrega el despachador, no esta petición: un 202 dice «encolado», no «enviado». **400** `ENTRADA_INVALIDA` ante cualquier clave de más. **429** `LIMITE_DE_SOLICITUDES` a partir del undécimo por IP en una hora o del cuarto para el mismo correo (exista o no), con `Retry-After`; el golpe cuenta aunque la respuesta sea 202 (D-16.50).
+
+**Lo que el tiempo sí delata, y cuánto.** La respuesta es idéntica y el trabajo en Node también; lo que difiere es lo que la base hace por dentro: con usuario, dos `INSERT` más (milisegundos). Ese residuo no se disimula: lo acota el límite de tasa (10/h por IP, 3/h por destinatario), que impide muestrearlo, y una prueba fija que la diferencia de medianas se queda por debajo de lo que cuesta un hash (ADR-025).
+
+### `POST /auth/password/restablecimiento` — público *(P16-A1)*
+
+```json
+{ "token": "…", "contrasena": "pimientos del piquillo asados" }
+```
+
+**204.** Gasta el token, guarda la contraseña nueva y **revoca todas las sesiones** del usuario (SEGURIDAD.md §2.2): la que hubiera abierta en otro navegador deja de valer en la siguiente petición. No devuelve cuántas eran; quien restablece no tenía sesión.
+
+**400** `ENTRADA_INVALIDA` con el mismo mensaje para token vacío, inexistente, **ya usado** o **caducado** — los cuatro son indistinguibles a propósito. El mismo código, con su mensaje propio, si la contraseña no cumple la política (las mismas reglas que en `POST /auth/password`). **El token se gasta antes de mirar la contraseña**: una contraseña débil obliga a pedir otro enlace. Es el orden que impide reutilizar un token contra el que ya se falló. **429** `LIMITE_DE_SOLICITUDES` a partir del undécimo intento por IP en una hora, cuenten como cuenten los anteriores (diez tokens inválidos son diez golpes), y **antes** de tocar el token.
 
 ---
 
@@ -76,9 +150,38 @@ La nueva debe tener 12–128 caracteres, no estar en la lista de filtradas y no 
 
 `tipo` ∈ `BODEGA` · `LOCAL` · `AMBOS`. **201** con la ubicación creada. **409** `LIMITE_DEL_PLAN` al llegar al máximo del plan — comprobado dentro de la misma transacción que inserta, así que dos pestañas abiertas no lo saltan.
 
+### `PUT /ubicaciones/:id` — `location.update` *(P16-C)*
+
+El mismo cuerpo que crear, `{ "nombre": "…", "tipo": "…" }`. **200** con la ubicación como queda: `{ id, nombre, tipo, estado }`. Solo `OWNER` y `ADMIN` tienen el permiso.
+
+**No edita el estado** (D-16.127): hoy `INACTIVE` no tiene ningún efecto en el sistema —una ubicación inactiva seguiría vendiendo y contando—, y un interruptor que no hace nada engaña. **No lleva versión** (D-16.13): la señal para añadirla es el primer cambio perdido.
+
+**409 `CONFLICTO`** con el nombre dentro si otra ubicación de la company ya lo usa. **403 `PERMISO_DENEGADO`** si la ubicación no está en tu alcance **o es de otra company** —como en toda ruta por ubicación desde P15—. Queda en `audit_log` como `location.updated`.
+
 ---
 
 ## Usuarios y roles
+
+### `GET /usuarios` — `user.read` *(P16-C)*
+
+```jsonc
+[
+  { "id": "…", "email": "nuevo@snacklab.ec", "estado": "INVITED",
+    "roles": [ { "rol": "GERENTE_LOCAL", "locationId": "…" } ],
+    "invitacionCaducaEn": "2026-09-19T15:02:11.000Z",
+    // El ÚLTIMO correo de invitación: PENDIENTE · ENVIADO · FALLIDO.
+    // `error`, solo si lo hay. `null` si ya activó o si nunca se encoló uno.
+    "correoInvitacion": { "estado": "FALLIDO", "error": "Resend respondio 422 al enviar el correo." } }
+]
+```
+
+Ordenados por correo. **Por alcance** (D-16.126): un rol de company ve a todos; un `GERENTE_LOCAL` ve solo a quien tiene un rol en **sus** ubicaciones, y solo esas asignaciones. `BODEGA` no tiene `user.read`: **403**.
+
+**`correoInvitacion` es para decidir si reenviar**, y por eso no trae nada más que el estado y el error: **nunca los datos del correo**, que llevan el enlace con el token mientras está en vuelo. No se filtran aquí: el rol de la aplicación no puede leer esa columna (ADR-025). Un `FALLIDO` es la señal para `POST /usuarios/:id/reenvio-de-invitacion`.
+
+### `GET /roles` — `user.read` *(P16-C)*
+
+`[{ "codigo": "GERENTE_LOCAL", "requiereUbicacion": true, "permisos": ["count.read", "…"] }]`, ordenado por código. Es el catálogo —el mismo para todas las companies— que la pantalla de usuarios necesita para saber qué roles piden ubicación al asignarlos.
 
 ### `POST /usuarios` — `user.invite`
 
@@ -86,7 +189,13 @@ La nueva debe tener 12–128 caracteres, no estar en la lista de filtradas y no 
 { "email": "nuevo@snacklab.ec" }
 ```
 
-**202**, siempre, con cuerpo vacío. **No dice si el correo ya existe**: la unicidad es global, y una respuesta franca convertiría el endpoint en un oráculo para averiguar quién más usa el sistema. Si el correo estaba libre, se envía una invitación con un código de un solo uso que caduca en siete días.
+**202**, siempre, con cuerpo vacío. **No dice si el correo ya existe**: la unicidad es global, y una respuesta franca convertiría el endpoint en un oráculo para averiguar quién más usa el sistema. Si el correo estaba libre, se crea el invitado y **se encola** —en la misma transacción, `email_outbox`— una invitación con el enlace `APP_URL/activacion?token=…`, de un solo uso, que caduca en siete días *(desde P16-A1; antes el correo llevaba el token pelado y se enviaba fuera de la transacción)*. Si el correo no estaba libre no se encola nada. **429** `LIMITE_DE_SOLICITUDES` a partir de la trigésimo primera invitación por IP en una hora o de la cuarta al mismo correo, aunque haya sesión: un administrador con la cuenta robada es justamente quien inundaría un buzón (D-16.50).
+
+### `POST /usuarios/:id/reenvio-de-invitacion` — `user.invite` *(P16-A1)*
+
+Sin cuerpo. **202**: el invitado recibe un enlace **nuevo** y **el anterior deja de servir** (el token se sustituye; `app_user` tiene como mucho una invitación viva). Se encola otro correo, con la misma caducidad de siete días contada desde ahora.
+
+**404** `RECURSO_NO_ENCONTRADO` si el usuario no está **invitado en tu company**: ya activó, no existe, o existe en otra company — los tres iguales. **400** `ENTRADA_INVALIDA` si `:id` no es un UUID *(P16-C; antes `BAD_REQUEST`, el único `:id` de la API que respondía distinto)*. Mismo permiso que invitar: es la misma acción, repetida. **429** `LIMITE_DE_SOLICITUDES` a partir del trigésimo primer reenvío por IP en una hora (los 404 también cuentan) o del cuarto al mismo invitado.
 
 ### `POST /usuarios/activacion` — público
 
@@ -116,9 +225,25 @@ La nueva debe tener 12–128 caracteres, no estar en la lista de filtradas y no 
 
 > **Los decimales entran y salen como CADENA, nunca como número.** `"0.85"`, no `0.85`. ADR-003: un `double` de JavaScript no representa exactamente ni `0.1`, y este es el sistema donde un centavo de diferencia se acumula hasta romper la conciliación. Mandar un número JSON devuelve **400**.
 
+### `GET /catalogo/unidades` — `catalog.read` *(P16-A2)*
+
+El catálogo **global** de unidades, para que una pantalla ofrezca una lista en vez de un campo libre.
+
+```json
+[{ "codigo": "kg", "nombre": "kilogramo", "dimension": "MASA" }]
+```
+
+`dimension` ∈ `MASA` · `VOLUMEN` · `CONTEO`. **Ordenadas por dimensión y dentro por tamaño** —`mg, g, oz, lb, kg`—, que se lee como una escala; alfabéticamente no se lee como nada.
+
+No lleva tenant: un kilogramo pesa lo mismo en todas las companies, la tabla es semilla de migración y el rol de la aplicación no tiene `INSERT` sobre ella. Sigue exigiendo sesión.
+
+**No se publica el factor a base.** Es para multiplicar, no para enseñar, y serializarlo expondría el interior del tipo decimal (ADR-003). El `factorDeConversion` de un artículo lo calcula el servidor.
+
+> **Por qué existe este endpoint.** `unidadDeUso` valida la FORMA del código y deja pasar `"l"`, que está bien escrito y no existe: el litro es `lt`. Eso llegaba al `INSERT` y moría en una clave foránea con un **500** (INC-012). Desde P16-A2 el alta de ítem lo rechaza con **400** y la lista de válidas dentro — y esta ruta es para que el usuario no llegue a escribirlo.
+
 ### `GET /catalogo/items?incluirInactivos=true` — `catalog.read`
 
-Los ítems de la company. Por defecto solo los activos.
+Los ítems de la company. Por defecto solo los activos. `incluirInactivos` solo acepta `true` o `false`: `"si"` es **400**, no un `false` silencioso, y cualquier otro parámetro también *(P16-B, D-16.111)*.
 
 `GERENTE_LOCAL` y `BODEGA` también tienen este permiso: necesitan ver los ítems para contar inventario. Un ítem no revela ninguna receta.
 
@@ -142,24 +267,67 @@ Los ítems de la company. Por defecto solo los activos.
 
 **`llevaStock` es obligatorio en una preparación y prohibido en un ítem comprado.** Dice si se produce en lote —y aparece en inventario— o si al vender se explota su receta.
 
-**201** con `{ id }`. **409** si el nombre ya existe.
+**`unidadDeUso` tiene que EXISTIR en `GET /catalogo/unidades`**, no solo estar bien escrita *(P16-A2)*. `"l"`, `"Kg"` o `"litro"` son **400** `ENTRADA_INVALIDA`, y el mensaje enumera las diez válidas. Antes `"l"` era un **500** de la clave foránea.
+
+**201** con `{ id }`. **409** `CONFLICTO` si el nombre ya existe en tu company. El índice es `(company_id, nombre)`: que otra company use ese nombre no estorba.
+
+### `GET /catalogo/items/:id` — `catalog.read` *(P16-A2)*
+
+**La ficha del insumo en una sola llamada**: el ítem, su grupo entero y sus artículos de compra.
+
+```json
+{
+  "id": "…", "nombre": "Leche", "tipo": "COMPRADO", "unidadDeUso": "ml",
+  "rendimiento": "0.950000000000", "grupoId": "…", "estado": "ACTIVE",
+  "confianzaDePrecio": "FACTURA", "llevaStock": null, "version": 3,
+  "grupo": { "id": "…", "nombre": "Lácteos", "ivaTarifa": "0.000000000000" },
+  "articulos": [{ "id": "…", "itemId": "…", "nombre": "Leche entera 1lt", "marca": null,
+                  "proveedor": null, "presentacion": "1.000000000000",
+                  "unidadDePresentacion": "lt", "factorDeConversion": "1000.000000000000",
+                  "ivaTarifa": "0.000000000000", "estado": "ACTIVE" }]
+}
+```
+
+Es un **superconjunto de la fila de la lista**: `grupoId` sigue estando, para que el cliente pueda usar el mismo tipo en las dos pantallas. `grupo` es `null` si el ítem no tiene; `articulos` es `[]` si aún no tiene ninguno. La `ivaTarifa` del grupo es la que heredan las **compras sin artículo** de este ítem (D-16.9).
+
+**404** `RECURSO_NO_ENCONTRADO` si el ítem no existe **o es de otra company** — las dos respuestas son idénticas palabra por palabra, y esa indistinción es la defensa: decir «existe pero no es tuyo» convertiría la ruta en un oráculo del catálogo del vecino. **400** `ENTRADA_INVALIDA` si `:id` no es un UUID.
 
 ### `PUT /catalogo/items/:id` — `catalog.update`
 
 ```json
 { "nombre": "…", "rendimiento": "0.85", "grupoId": null,
-  "confianzaDePrecio": "FACTURA", "estado": "INACTIVE" }
+  "confianzaDePrecio": "FACTURA", "estado": "INACTIVE", "llevaStock": null, "version": 3 }
 ```
 
-**204.** `PUT` y no `PATCH`: el cuerpo trae el estado completo de lo editable, para que «no mandé el grupo» y «quiero quitarle el grupo» no sean la misma petición.
+**200 `{ "version": 4 }`** *(P16-B; antes 204)*. `version` es la de `GET /catalogo/items/:id`; si otro guardó después, **409 `CONFLICTO_DE_VERSION`** y la base conserva lo suyo. `PUT` y no `PATCH`: el cuerpo trae el estado completo de lo editable, para que «no mandé el grupo» y «quiero quitarle el grupo» no sean la misma petición.
 
 **El tipo y la unidad de uso no se pueden cambiar.** Cambiar la unidad de un ítem que ya tiene recetas y movimientos convertiría cada cantidad histórica en otra magnitud sin tocarla: 200 «g» pasarían a ser 200 «kg». Si hace falta, se crea un ítem nuevo y se archiva el viejo.
 
 **No hay `DELETE`.** Se archiva con `"estado": "INACTIVE"`.
 
+**404** si el ítem no existe en tu company. **409** `CONFLICTO` si el nombre nuevo ya lo usa otro ítem *(P16-A2: antes era un **500** del índice único)*.
+
 ### `GET /catalogo/articulos?itemId=…` — `catalog.read`
 
-Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem.
+Los artículos de compra. `itemId` es opcional y es el único parámetro: otro cualquiera es **400** *(P16-B)*. **N artículos → 1 ítem**: tres marcas de harina son tres artículos y un solo ítem, y en las recetas aparece solo el ítem. Cada uno trae su `ivaTarifa` *(P16-A1)*.
+
+### `GET /catalogo/articulos/:id` — `catalog.read` *(P16-A2)*
+
+El artículo con **su ítem dentro**, que es lo que la pantalla titula.
+
+```json
+{
+  "id": "…", "itemId": "…", "nombre": "Harina Ya 2kg", "marca": "Ya", "proveedor": null,
+  "presentacion": "2.000000000000", "unidadDePresentacion": "kg",
+  "factorDeConversion": "2000.000000000000", "ivaTarifa": "0.150000000000",
+  "estado": "ACTIVE",
+  "item": { "id": "…", "nombre": "Harina de trigo", "tipo": "COMPRADO", "unidadDeUso": "g",
+            "rendimiento": "1.000000000000", "grupoId": null, "estado": "ACTIVE",
+            "confianzaDePrecio": "FACTURA", "llevaStock": null }
+}
+```
+
+**404** si no existe o es de otra company, igual que en la ficha del ítem. **400** si `:id` no es un UUID.
 
 ### `POST /catalogo/articulos` — `catalog.create`
 
@@ -171,23 +339,48 @@ Los artículos de compra. **N artículos → 1 ítem**: tres marcas de harina so
   "proveedor": null,
   "presentacion": "2",
   "unidadDePresentacion": "kg",
-  "factorExplicito": null
+  "factorExplicito": null,
+  "ivaTarifa": "0"
 }
 ```
+
+**`ivaTarifa` es obligatoria y es DEL ARTÍCULO** *(P16-A1, D-16.9)*: la factura del saco de harina dice 0 % y la del detergente 15 %, y ninguna company tiene «una» tarifa. Es una fracción —`"0.15"`, nunca `"15"`— y se valida en el campo: **400** si falta o no está entre 0 y 1. Los artículos anteriores a P16-A1 nacieron con `0.15` de **semilla, no de verdad**: se corrigen con el `PUT` de abajo.
 
 **`factorDeConversion` no se manda: lo calcula el servidor.** Cuando la presentación y la unidad de uso del ítem comparten dimensión —kg y g— el factor sale de la física: 2 kg medidos en gramos son 2000. Mandar uno explícito en ese caso es **400**, no una preferencia: un saco de 2 kg con «factor 1500» escrito a mano produce un costo por gramo un 33 % más alto y el número es plausible en pantalla.
 
 **`factorExplicito` hace falta cuando las dimensiones NO coinciden** —cuántas unidades de uso salen de una de compra, «un huevo pesa 50 g»— porque ahí no hay física que lo deduzca. Omitirlo es **400** con el motivo dentro.
 
-**201** con `{ id }`. **404** si el ítem no existe en tu company. **409** si el nombre ya existe.
+**`unidadDePresentacion` tiene que EXISTIR en `GET /catalogo/unidades`.** Ya se comprobaba; lo que
+cambia en P16-A2 es el **mensaje**: ahora enumera las diez válidas, igual que en el alta de ítem y en
+los dos lotes del importador. Antes cada uno de los cuatro decía una cosa distinta y solo uno servía
+para corregir.
+
+**201** con `{ id }`. **404** si el ítem no existe en tu company. **409** `CONFLICTO` si el nombre ya
+existe en tu company.
+
+### `PUT /catalogo/articulos/:id` — `catalog.update` *(P16-A1)*
+
+```json
+{ "nombre": "Harina Ya 2kg", "marca": "Ya", "proveedor": null, "ivaTarifa": "0", "estado": "ACTIVE" }
+```
+
+**204.** Estado completo de lo editable, como en los ítems. **La presentación, su unidad y el factor no se cambian**: son lo que convierte cada compra histórica a unidades de uso, y cambiarlos reescribiría meses cerrados. Si el saco pasa de 2 kg a 2,5 kg, es otro artículo. **400** tarifa fuera de 0..1 · **404** no existe en tu company · **409** nombre repetido.
 
 ### `GET /catalogo/grupos` · `POST /catalogo/grupos` — `catalog.read` / `catalog.create`
 
 ```json
-{ "nombre": "Lácteos" }
+{ "nombre": "Lácteos", "ivaTarifa": "0" }
 ```
 
-**201** con `{ id }`. **409** si ya existe.
+**201** con `{ id }`. **409** si ya existe. `ivaTarifa` es opcional (`null` u omitida = «el grupo no define»): es la tarifa que heredan las **compras sin artículo** de los ítems del grupo. La lista devuelve `{ id, nombre, ivaTarifa }`.
+
+### `PUT /catalogo/grupos/:id` — `catalog.update` *(P16-A1)*
+
+```json
+{ "nombre": "Lácteos y huevos", "ivaTarifa": null }
+```
+
+**204.** Aquí `ivaTarifa` es obligatoria (anulable): es un `PUT`. **404** · **409** como arriba.
 
 ---
 
@@ -199,7 +392,7 @@ Los diez números de SPEC §11 y `DECISIONES.md` D3. **Ninguno está en el códi
 
 ```json
 { "ivaVenta": "0.150000000000", "ivaCompraRecuperable": true,
-  "ivaCompra": "0.150000000000", "provisionMerma": "0.020000000000",
+  "provisionMerma": "0.020000000000",
   "foodCostObjetivo": "0.250000000000", "foodCostUmbralVerde": "0.280000000000",
   "foodCostMaximo": "0.320000000000", "primeCostMaximo": "0.650000000000",
   "reglaPopularidad": "0.700000000000", "diasOperativosMes": 22, "diasCobertura": 7 }
@@ -207,7 +400,7 @@ Los diez números de SPEC §11 y `DECISIONES.md` D3. **Ninguno está en el códi
 
 ### `PUT /ajustes` — `settings.update`
 
-**204.** El cuerpo completo, no un parche. **400** si un ratio no es una fracción —«un IVA se escribe 0.15, no 15»— o si los umbrales de food cost no van en orden: objetivo ≤ verde ≤ máximo, o el semáforo no puede pintar los tres colores.
+**204.** El cuerpo completo, no un parche. **Ya no lleva `ivaCompra`** *(P16-B, D-16.109)*: la tarifa de compra vive en el artículo y en el grupo desde P16-A1, y mandarla es **400** (el esquema es estricto) en vez de guardarse en una columna que nadie leía. **400** si un ratio no es una fracción —«un IVA se escribe 0.15, no 15»— o si los umbrales de food cost no van en orden: objetivo ≤ verde ≤ máximo, o el semáforo no puede pintar los tres colores.
 
 > **La provisión de merma es `0.02` y no `0.04`, y merece no tocarse a la ligera.** Antes un único 4 % cubría cáscara, hoja botada, derrame y error de pase. Hoy cada insumo declara su rendimiento y el costo neto absorbe ahí su propia merma: el 2 % es **solo lo que ningún rendimiento explica**. Subirlo cobraría la merma dos veces, que es lo que **R12** prohíbe.
 
@@ -219,7 +412,38 @@ Los diez números de SPEC §11 y `DECISIONES.md` D3. **Ninguno está en el códi
 
 ### `GET /precios?itemId=…` — `pricing.read`
 
-El historial completo de un ítem, del más reciente al más antiguo, con estado y autor.
+El historial completo de un ítem, del más reciente al más antiguo, con estado y autor. **Cada fila trae `vigente`** *(P16-B)*: `true` en una como mucho, la confirmada que manda **hoy** —la de vigencia más reciente que ya empezó—. Lo decide la API, no la pantalla: con dos confirmados de la misma vigencia, el desempate es una regla (D-16.3).
+
+### `GET /precios/pendientes?limite=50&despuesDe=…` — `pricing.read` *(P16-B)*
+
+La bandeja de R5: los precios `SUGGESTED`, cada uno con lo que hace falta para decidirlo sin abrir otra pantalla.
+
+```json
+{ "pendientes": [
+    { "id": "…", "itemId": "…", "purchaseArticleId": "…", "precio": "2.450000000000",
+      "ivaCompra": "0.150000000000", "origen": "MANUAL", "estado": "SUGGESTED",
+      "validFrom": "2026-02-01T00:00:00.000Z", "createdAt": "…", "nota": null,
+      "itemNombre": "Harina de trigo", "articuloNombre": "Saco 2kg",
+      "precioVigente": "2.100000000000" } ],
+  "siguiente": "…" }
+```
+
+**`precioVigente` es el confirmado que manda hoy para ese ítem**, o `null` si todavía no tiene: sin él al lado, «2.45» es un número suelto y no «subió de 2.10 a 2.45». `articuloNombre` es `null` en una preparación (R10).
+
+**Por cursor, nunca `OFFSET`** (CLAUDE.md §5): `limite` entre 1 y 200, 50 por defecto; `siguiente` es el `despuesDe` de la página siguiente, o `null` en la última.
+
+### `GET /precios/costos?fecha=…` — `pricing.read` *(P16-B)*
+
+El costo por unidad de uso de **todos** los ítems a una fecha —el listado de insumos—, en cuatro consultas fijas.
+
+```json
+{ "fecha": "2026-03-01T00:00:00.000Z",
+  "costos": [ { "itemId": "…", "precioNeto": "2.000000000000", "costoBrutoDeUso": "0.001000000000",
+                "costoNetoDeUso": "0.001176470588", "sobrecostoDeMerma": "0.000176470588" } ],
+  "sinPrecio": ["…"] }
+```
+
+**Los que no tienen precio confirmado van en `sinPrecio`, no con un cero**: un cero parecería un costo, y un insumo a cero abarata el plato sin avisar. Los importes salen con su escala de almacenamiento: son costos de uso, que se multiplican por la cantidad de cada línea. `fecha` ausente = ahora; una fecha que no es ISO 8601 es **400**.
 
 ### `POST /precios` — `pricing.suggest`
 
@@ -231,9 +455,13 @@ El historial completo de un ítem, del más reciente al más antiguo, con estado
 
 **201** con `{ id }`. Nace en estado `SUGGESTED`: **no cuenta para ningún costo** hasta que alguien lo confirme.
 
-**`ivaCompra` es la tasa de ESE precio, no la de la company.** El SPEC nombra `iva_compra` en la fórmula de §12 y no dice dónde vive; vive aquí porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %: una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. Si se omite, se usa la de `company_settings` como valor por defecto.
+**`precio` es mayor que cero** *(P16-B)*: `"0"` o `"-1"` son **400**. Hasta P16-B salían como 500 del `CHECK` (INC-012, cuarta recurrencia). Si todavía no se sabe el precio, no se registra.
+
+**`ivaCompra` es la tasa de ESE precio, no la de la company.** El SPEC nombra `iva_compra` en la fórmula de §12 y no dice dónde vive; vive aquí porque en Ecuador el alimento sin procesar es 0 % y el detergente 15 %: una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. **Con `null` se toma la del artículo o, sin artículo, la del grupo del ítem; sin ninguna, 400** *(P16-A1, D-16.43: ya no hay valor por defecto de company)*.
 
 **`purchaseArticleId` es obligatorio para un ítem `COMPRADO` y prohibido para uno `PRODUCIDO`** — **400** en los dos casos, con el motivo. Un importe sin presentación no dice nada: «2.30» solo significa algo junto a «el saco de 2 kg». Una preparación producida no se compra: su precio es el costo estándar por unidad de uso (**R10**).
+
+**Y una preparación no lleva IVA de compra** *(P16-A1, D-16.51)*: su `ivaCompra` nace **`"0"`** ignore lo que diga su grupo —el costo estándar ya es neto, y netearlo otra vez subcostearía el plato—, y mandar cualquier tarifa distinta de cero es **400** con el motivo. `null` y `"0"` son las dos formas válidas. Lo mismo en el CSV `PRECIOS`: la columna `iva` de una preparación va vacía o en `0`.
 
 **`origen`**: `MANUAL` · `ULTIMA_COMPRA` · `EXTERNO`. El tercero existe y no se usa: deja la puerta abierta sin acoplar nada (D8).
 
@@ -255,7 +483,7 @@ La cadena de costo de SPEC §12 entera, a una fecha:
   "costoNetoDeUso": "0.002352941176", "sobrecostoDeMerma": "0.000352941176" }
 ```
 
-**`fecha` es un parámetro, no «ahora».** Preguntar por el mes pasado devuelve el precio que estaba vigente entonces. **404** si el ítem no tiene ningún precio **confirmado** a esa fecha — que es distinto de que valga cero.
+**`fecha` es un parámetro, no «ahora».** Preguntar por el mes pasado devuelve el precio que estaba vigente entonces. **404** si el ítem no tiene ningún precio **confirmado** a esa fecha — que es distinto de que valga cero. **Una `fecha` que no es ISO 8601 es 400** *(P16-B, D-16.111)*: hasta entonces `fecha=basura` llegaba como fecha inválida y respondía ese mismo 404, que mentía.
 
 ---
 
@@ -265,35 +493,64 @@ La cadena de costo de SPEC §12 entera, a una fecha:
 
 ### `GET /productos` — `product.read`
 
+### `GET /productos/:id` — `product.read` *(P16-B)*
+
+```json
+{ "id": "…", "nombre": "Empanada de verde", "tipo": "SIMPLE", "categoria": "SNACK ATTACK",
+  "estado": "ACTIVE", "empaqueItemId": null, "version": 4 }
+```
+
+**La ficha, con la `version` que las tres escrituras del producto piden de vuelta** (ADR-023). La versión es del **agregado**: sube con el empaque, con la configuración de **cualquier** ubicación y con los componentes. **404** idéntico si el producto no existe o es de otra company. `BODEGA` no tiene `product.read`: **403**.
+
+### `GET /productos/:id/ubicaciones` — `product.read` *(P16-B)*
+
+`[{ "locationId": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "1" }]` — dónde está configurado el producto. **Filtrado por alcance** (D-16.113): `ADMIN` ve todas; un `GERENTE_LOCAL`, solo la suya.
+
+### `GET /productos/ubicaciones?locationId=…` — `product.read` *(P16-B)*
+
+`[{ "productId": "…", "nombre": "…", "tipo": "SIMPLE", "categoria": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "1" }]` — **la carta de una ubicación**, con nombre: lo que la rejilla de ventas necesita. La ubicación tiene que estar en tu alcance (**403** si no). `BODEGA` no la recibe: la respuesta lleva PVP.
+
 ### `POST /productos` — `product.write`
 
 ```json
 { "nombre": "Empanada de verde", "tipo": "SIMPLE", "categoria": "SNACK ATTACK" }
 ```
 
-**201** con `{ id }`. `tipo`: `SIMPLE` (receta a ítems) o `COMBO` (componentes que son productos simples). **409** si el nombre ya existe en la company.
+**201** con `{ id }`. `tipo`: `SIMPLE` (receta a ítems) o `COMBO` (componentes que son productos simples). **409 `CONFLICTO`** si el nombre ya existe en la company.
+
+**El conflicto es POR COMPANY, y sale del índice `product_company_id_name_key`** *(D-16.194)*: dos clientes pueden vender los dos su «Arroz marinero» y ninguno se entera del otro — 201 en las dos. Un índice global sobre el nombre sería una fuga de aislamiento con forma de conflicto. **Hasta la verificación multi-tenant este caso salía como 400** aunque esta página ya decía 409; lo fija la 🔴 de `productos.spec.ts`.
 
 ### `PUT /productos/:id/ubicaciones` — `product.write`
 
 ```json
-{ "locationId": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "185" }
+{ "locationId": "…", "activo": true, "pvp": "2.50", "rendimientoPorciones": "185", "version": 4 }
 ```
 
-**204.** `PUT` y no `PATCH`: los tres valores se leen juntos y su coherencia se comprueba junta.
+**200 `{ "version": 5 }`** *(P16-B; antes 204)*. `version` es la de `GET /productos/:id`; **409 `CONFLICTO_DE_VERSION`** si otra escritura del producto llegó antes — **aunque fuera en otra ubicación**, que es la deuda aceptada de D-16.20 (ADR-023). `PUT` y no `PATCH`: los tres valores se leen juntos y su coherencia se comprueba junta.
 
 **`pvp` incluye IVA** (R14): `venta_neta = pvp / (1 + iva_venta)`. **Un producto activo necesita PVP** — **400** si `activo: true` con `pvp: null`, porque sin él se podría vender sin saber a cuánto y su margen saldría indefinido. Un plato a medio configurar se deja `activo: false`.
 
-**`rendimientoPorciones` es cuántas porciones salen del lote.** Divide el costo de la receta. Con `0` o `null`, el costo por porción sale `0` en vez de dividir por cero (SPEC §14), y el lote sí se calcula: lo que falta es en cuántas partes repartirlo.
+**`rendimientoPorciones` es cuántas porciones salen del lote.** Divide el costo de la receta. Con `null`, el costo por porción sale `0` en vez de dividir por cero (SPEC §14), y el lote sí se calcula: lo que falta es en cuántas partes repartirlo. **`"0"` ya no es una forma de decir «sin capturar»: es 400**, igual que un `pvp` de `"0"` *(P16-B; hasta entonces los dos salían como 500 del `CHECK`, INC-012)*.
 
 ### `PUT /productos/:id/empaque` — `product.write` *(P5)*
 
 ```json
-{ "empaqueItemId": "…" }
+{ "empaqueItemId": "…", "version": 5 }
 ```
 
-**204.** `null` quita el empaque y su `empaque_neto` pasa a cero.
+**200 `{ "version": 6 }`** *(P16-B; antes 204)*, con la misma regla de `version` y **409** que la configuración por ubicación. `null` quita el empaque y su `empaque_neto` pasa a cero.
 
-**El empaque es un ÍTEM, no una tabla propia.** Se compra, tiene artículo, tiene precio con vigencia y un día se cuenta en el inventario; darle tabla propia habría duplicado la cadena de costo entera. `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso` de ese ítem. El razonamiento completo está en **ADR-008**. **404** si el ítem no existe en tu company.
+**El empaque es un ÍTEM, no una tabla propia.** Se compra, tiene artículo, tiene precio con vigencia y un día se cuenta en el inventario; darle tabla propia habría duplicado la cadena de costo entera. `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso` de ese ítem. El razonamiento completo está en **ADR-008**. **400 `ENTRADA_INVALIDA`** si el ítem de empaque no existe en tu company *(P16-B, D-16.112; antes un 404 «producto no encontrado» que señalaba lo que sí existía)*. **404** si el que no existe es el producto.
+
+### `GET /productos/:id/componentes` · `PUT /productos/:id/componentes` — `product.read` / `product.write` *(P16-B)*
+
+```json
+{ "version": 6, "componentes": [ { "productId": "…", "nombre": "Café americano", "cantidad": "1" } ] }
+```
+
+La lectura trae los componentes de un combo con su nombre y la `version` del combo. La escritura manda `{ "version": 6, "componentes": [{ "productId": "…", "cantidad": "1" }] }` y **reemplaza la lista entera**: lo que no venga deja de ser componente. **200 `{ "version": 7 }`**, **409** con versión vieja (y la lista no cambia).
+
+**400 con su motivo, antes de tocar la base** (D-16.114): el destino no es un `COMBO`; un componente no es `SIMPLE` —un combo dentro de otro—; el propio combo como componente; un producto repetido; un producto de otra company; `cantidad` de `"0"`; más de 50. `GERENTE_LOCAL` lee y no escribe: el combo es de la company entera.
 
 ---
 
@@ -303,17 +560,25 @@ La cadena de costo de SPEC §12 entera, a una fecha:
 
 ### `GET /recetas?locationId=…&productId=…&itemId=…&fecha=…` — `recipe.read`
 
-La versión **vigente a una fecha**. `productId` o `itemId`, exactamente uno: el destino de una receta es un producto de venta o una subpreparación. `fecha` ausente = hoy. Devuelve `null` si no hay ninguna activa.
+La versión **vigente a una fecha**, y sobre cuál se edita. `productId` o `itemId`, exactamente uno: el destino de una receta es un producto de venta o una subpreparación. `fecha` ausente = hoy.
+
+```json
+{ "vigente": { "id": "…", "locationId": "…", "estado": "ACTIVE", "validFrom": "…", "nota": null,
+               "lineas": [ { "itemId": "…", "cantidad": "18.14", "base": "EP", "estado": "ACTIVA", "orden": 0 } ] },
+  "ultimaVersionId": "…" }
+```
+
+**Cambió de forma en P16-B** (antes devolvía la receta suelta, o `null`). `vigente` es `null` si no hay ninguna activa a esa fecha. **`ultimaVersionId` es la última versión CREADA** —en cualquier estado y con cualquier vigencia— y es lo que `PUT /recetas` pide de vuelta como `basadaEn`: no tiene por qué ser la vigente, porque se puede haber guardado una con vigencia futura.
 
 ### `PUT /recetas` — `recipe.write`
 
 ```json
-{ "destino": { "clase": "producto", "productId": "…" },
+{ "basadaEn": "…", "destino": { "clase": "producto", "productId": "…" },
   "locationId": "…", "validFrom": "2026-03-01T00:00:00.000Z", "nota": null,
   "lineas": [ { "itemId": "…", "cantidad": "18.14", "base": "EP", "estado": "ACTIVA" } ] }
 ```
 
-**201** con `{ id }`. **No es «editar»: crea una versión nueva** con su vigencia, y la anterior queda consultable — los costeos históricos no se recalculan (SPEC §9). Un trigger impide el `UPDATE` que lo rompería.
+**201** con `{ id }`, que es el `basadaEn` del siguiente guardado. **`basadaEn` es obligatorio** *(P16-B, ADR-023)*: el `ultimaVersionId` que se leyó, o `null` si no había ninguna. Si otra versión se creó entre medias —otro editor, una propagación, una importación— es **409 `CONFLICTO_DE_VERSION`** y no se escribe nada. El testigo es por **destino y ubicación**: guardar la receta de un local no bloquea a quien edita la de otro. **No es «editar»: crea una versión nueva** con su vigencia, y la anterior queda consultable — los costeos históricos no se recalculan (SPEC §9). Un trigger impide el `UPDATE` que lo rompería.
 
 **`base` es `AP` o `EP`, y es la condicional más frágil del modelo (R4).** Si la cantidad está en `EP` —producto ya limpio— se aplica el rendimiento del ítem; si está en `AP` —tal como se compra— no. Implementarla al revés produce números plausibles y equivocados.
 
@@ -321,9 +586,22 @@ La versión **vigente a una fecha**. `productId` o `itemId`, exactamente uno: el
 
 **400 si la receta crea un ciclo** (**R9**), directo o a cualquier profundidad, **al guardar y no al calcular**. El mensaje trae el camino dentro: `mayonesa → salsa → mayonesa`.
 
-### `GET /recetas/propagacion/previsualizacion?productId=…&locationId=…` — `recipe.propagate`
+### `GET /recetas/versiones?locationId=…&productId=…&itemId=…` — `recipe.read` *(P16-B)*
 
-**R11 exige mostrarlo antes de tocar nada:** cuántas ubicaciones se verían afectadas y **cuáles ya tienen receta propia que se perdería**.
+`{ "versiones": [ …como vigente… ], "ultimaVersionId": "…" }` — todas las versiones de ese destino en esa ubicación, de la vigencia más reciente a la más antigua, `VOID` incluidas. La ubicación tiene que estar en tu alcance.
+
+### `GET /recetas/propagacion?productId=…` — `recipe.propagate` *(P16-B)*
+
+```json
+[ { "id": "…", "productId": "…", "propagadaEn": "…", "revertidaEn": null,
+    "destinos": [ { "locationId": "…", "anterior": "…", "creada": "…" } ] } ]
+```
+
+Las propagaciones de un producto, la más reciente primero, **50 como mucho**. Pide el permiso de propagar y no el de leer: la lista existe para revertir una, y quien no puede propagar no tiene nada que revertir. `anterior` es `null` donde no había receta.
+
+### `GET /recetas/propagacion/previsualizacion?productId=…&origen=…` — `recipe.propagate`
+
+**R11 exige mostrarlo antes de tocar nada:** cuántas ubicaciones se verían afectadas y **cuáles ya tienen receta propia que se perdería**. `origen` es la ubicación cuya receta se copiaría; los dos parámetros son UUID y **no admite otros** *(P16-B: antes eran dos `@Query` sueltos sin esquema; esta documentación decía `locationId`, y el parámetro siempre fue `origen`)*.
 
 ### `POST /recetas/propagacion` — `recipe.propagate`
 
@@ -331,7 +609,7 @@ La versión **vigente a una fecha**. `productId` o `itemId`, exactamente uno: el
 { "productId": "…", "origen": "…", "destinos": ["…", "…"] }
 ```
 
-**201** con `{ id }`. **`recipe.propagate` es un permiso separado y de nivel company**, y de ahí sale E18 sin un solo `if`: un `GERENTE_LOCAL` tiene `recipe.write` y no éste, así que gestiona su receta y recibe **403** al intentar sobrescribir la del local de al lado. Un gerente no decide cómo cocina otro local.
+**201** con `{ id }`. Propagar **sobrescribe por definición** —R11 ya obligó a ver qué se pisaba—, así que no lleva `basadaEn`; pero crea versiones nuevas, y un editor abierto en una ubicación destino recibe **409** al guardar en vez de pisar lo propagado. **`recipe.propagate` es un permiso separado y de nivel company**, y de ahí sale E18 sin un solo `if`: un `GERENTE_LOCAL` tiene `recipe.write` y no éste, así que gestiona su receta y recibe **403** al intentar sobrescribir la del local de al lado. Un gerente no decide cómo cocina otro local.
 
 ### `POST /recetas/propagacion/:id/reversion` — `recipe.propagate`
 
@@ -364,7 +642,12 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
         "costoConMerma":     { "mostrar": "0.52", "exacto": "0.5202" },
         "empaqueNeto":       { "mostrar": "0.04", "exacto": "0.043478260870" },
         "costoTotalUnidad":  { "mostrar": "0.56", "exacto": "0.563678260870" },
-        "impactoMerma": "0"
+        "impactoMerma": "0",
+        "lineas": [
+          { "itemId": "…", "nombre": "Masa de maíz", "cantidad": "0.120000000000", "base": "EP",
+            "estado": "ACTIVA", "costo": { "mostrar": "0.31", "exacto": "0.3120" },
+            "participacion": "0.611764705882" }
+        ]
       },
       "venta": {
         "vendible": true,
@@ -374,11 +657,23 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
         "mcPct": "0.639872222222", "foodCostPct": "0.360127777778",
         "sumaControl": "1", "multiplicador": "2.776792187906"
       },
-      "itemsSinCosto": []
+      "itemsSinCosto": [],
+      "sinReceta": false,
+      "semaforoFoodCost": "AMBAR"
     }
   ]
 }
 ```
+
+**`sinReceta` dice si hay algo que costear** *(P16-D)*. `true` cuando el producto no tiene ninguna línea
+`ACTIVA` en esa ubicación —no hay receta, está vacía o todas sus líneas están excluidas— o, en un
+`COMBO`, ningún componente. Sus costos salen en `"0.00"` porque no hay nada que sumar, y **no son un
+costo**: una pantalla no los enseña como tal. `semaforoFoodCost` es entonces `SIN_DATO`, también con
+`?pvp=`.
+
+**`semaforoFoodCost` lo decide la API** *(P16-B, D-16.105)*: `VERDE` hasta el `foodCostUmbralVerde` de la company, `AMBAR` hasta el `foodCostMaximo`, `ROJO` por encima. **Los bordes son del lado bueno**: exactamente en el umbral es verde, exactamente en el máximo es ámbar. `SIN_DATO` cuando el producto no es vendible —sin PVP no está en verde, está sin medir— **o no tiene receta** (`sinReceta`, P16-D). La pantalla lo pinta y no compara nada (la copia en el navegador fue INC-020).
+
+**`costos.lineas` es el desglose de SPEC §13**, una entrada por línea de la receta y en su orden: el ítem, cuánto lleva, su costo y cuánto pesa en el costo neto del lote. **Sale solo si la sesión tiene `recipe.read`; si no, `null`** (D-16.106): hoy los cuatro roles con `costing.read` también leen recetas, y la regla es para el rol que algún día no lo haga — las cantidades son la receta misma (§4.3).
 
 **Todo decimal sale como cadena, en dos escalas.** Un `number` en JSON es un binario de doble precisión y `0.1 + 0.2` deja de ser `0.3` en cuanto alguien suma en el cliente. `mostrar` es la escala de presentación —el `ROUND(x, 2)` del SPEC—; `exacto` es la nativa, para sumar sin acumular error.
 
@@ -401,7 +696,9 @@ La carta entera de una ubicación, costeada. `fecha` ausente = hoy.
 
 ### `GET /costeo/:productId?locationId=…&fecha=…` — `costing.read`
 
-Un solo producto, con la misma forma que un elemento de `productos`. **404** si el producto no existe en tu company.
+Un solo producto, con la misma forma que un elemento de `productos`, más `pvpSimulado`. **404** si el producto no existe en tu company.
+
+**`?pvp=3.00` simula un precio de venta sin guardarlo** *(P16-B, D-16.107)*: recalcula solo el lado de venta —venta neta, margen, food cost, multiplicador y semáforo— con la **misma** función que el costeo real, y deja los costos intactos. `pvpSimulado` repite el valor usado, o `null` sin simulación. Nada se escribe. Un `pvp` de `"0"` es **400**.
 
 > **Pide un solo producto y por dentro se costea la carta entera.** Es deliberado y no un descuido: dos rutas distintas para el mismo número son dos oportunidades de que den respuestas distintas, y en este sistema eso no se ve en pantalla. La carga completa está medida y cabe en el presupuesto.
 
@@ -459,6 +756,7 @@ El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
 |---|---|
 | `locationId` | obligatorio |
 | `itemId` | opcional |
+| `tipo` | opcional *(P16-C)*: `COMPRA` · `TRANSFERENCIA_SALIDA` · `TRANSFERENCIA_ENTRADA` · `PRODUCCION` · `MERMA` · `AJUSTE` · `CONSUMO_POR_VENTA`. Otro valor es 400 |
 | `desde` · `hasta` | ISO 8601, sobre `occurredAt` |
 | `limite` | 1–200, por defecto 50 |
 | `cursor` | opaco. Es el `siguiente` de la página anterior |
@@ -470,7 +768,14 @@ El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
       "id": "…",
       "tipo": "COMPRA",
       "cantidad": "10.000000000000",
-      "costoTotal": "25.000000000000",
+      "costoTotal": "100.000000000000",     // en una COMPRA con desglose, el NETO
+      // P16-A1: los cuatro importes de una COMPRA nueva (D-16.10). Una fila
+      // anterior, o una MERMA/AJUSTE, trae "desglose": "SIN_DESGLOSE" y NINGUNO
+      // de los tres campos siguientes — ausentes, no en null.
+      "desglose": "CONOCIDO",
+      "totalBruto": "115.000000000000",
+      "ivaTarifaAplicada": "0.150000000000",
+      "ivaRecuperableAplicado": true,
       // Cuándo ocurrió en el negocio, y cuándo entró al libro. La diferencia
       // dice cuánto se tardó en registrar, que es dato de auditoría.
       "occurredAt": "2026-03-15T00:00:00.000Z",
@@ -486,6 +791,10 @@ El libro, **paginado por cursor** (CLAUDE.md §5: nunca `OFFSET`).
 }
 ```
 
+### `GET /inventario/movimientos/:id` — `inventory.read` *(P16-C)*
+
+Un movimiento, **con la misma forma que una fila del libro** —desglose incluido—: es lo que la pantalla de corrección enseña antes de anularlo. **404** si no existe en tu company; **403 `PERMISO_DENEGADO`** si es de una ubicación que no está en tu alcance; **400** si `:id` no es un UUID. `BODEGA` no lee el libro y tampoco esto (§4.3).
+
 ### `POST /inventario/movimientos` — `inventory.write`
 
 Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el signo lo pone el tipo. `AJUSTE` es la excepción: existe para mover el saldo en la dirección que haga falta, y ahí el signo sí es de quien escribe.
@@ -496,8 +805,9 @@ Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el si
   "itemId": "…",
   "tipo": "COMPRA",              // COMPRA · MERMA · AJUSTE
   "cantidad": "10",              // "-2" solo válido en AJUSTE
-  "costoTotal": "25.00",         // obligatorio en COMPRA; de ahí sale SPEC §16
+  "costoTotal": "115.00",        // obligatorio en COMPRA: EL TOTAL DE LA FACTURA, CON IVA
   "purchaseArticleId": "…",      // solo en COMPRA: en qué presentación se compró
+  "ivaTarifa": null,             // solo en COMPRA, opcional: manda sobre artículo y grupo
   "occurredAt": "2026-03-15T00:00:00.000Z",
   "note": null
 }
@@ -505,9 +815,11 @@ Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el si
 
 → `201 { "id": "…" }` — **y nada más.** Ver la nota de cabecera.
 
+**Una `COMPRA` se netea al entrar** *(P16-A1, D-16.9, D-16.10)*. El bodeguero teclea el total de la factura; la tarifa sale de **cuerpo > artículo > grupo del ítem**, la recuperabilidad de `GET /ajustes`, y el libro guarda los cuatro importes: bruto, tarifa aplicada, recuperabilidad aplicada y `total_cost` = neto (`neto = recuperable ? bruto / (1 + tarifa) : bruto`, SPEC §12). Son la foto del momento: cambiar el ajuste después no reescribe el libro. **Nunca se asume una tarifa**: sin ninguna, **400** con el mensaje que dice dónde ponerla.
+
 | Error | Cuándo |
 |---|---|
-| `400` | cantidad cero · signo contrario al tipo · fecha futura (con un minuto de holgura de reloj) · `COMPRA` sin importe |
+| `400` | cantidad cero · signo contrario al tipo · fecha futura (con un minuto de holgura de reloj) · `COMPRA` sin importe · **`COMPRA` sin tarifa de IVA en ningún nivel** · `ivaTarifa` fuera de 0..1 o en un tipo que no es `COMPRA` · artículo de otro ítem |
 | `403` | la ubicación no está en tu alcance |
 | `404` | el ítem no existe en tu company |
 
@@ -515,7 +827,7 @@ Compra, merma o ajuste. **La cantidad se captura como magnitud positiva**; el si
 
 **R3, la única forma de deshacer.** Inserta un movimiento **del mismo tipo**, de cantidad e importe invertidos, con la **fecha del original** — corregir es decir «esto que registré el día 3 no pasó», y ponerle fecha de hoy dejaría el saldo del día 3 mal para siempre.
 
-Que conserve el tipo no es un detalle: es lo que hace que `compras_del_mes` (SPEC §16) se cancele sola.
+Que conserve el tipo no es un detalle: es lo que hace que `compras_del_mes` (SPEC §16) se cancele sola. **Y copia el desglose entero** *(P16-A1, D-16.41)*: la corrección de una compra con los cuatro importes lleva los cuatro, así Σ(bruto) del mes se cancela igual que Σ(neto).
 
 ```jsonc
 { "note": "me equivoqué de bodega" }
@@ -564,7 +876,16 @@ El alcance se exige **en las dos puntas**. Comprobar solo el origen dejaría abi
 
 | Error | Cuándo |
 |---|---|
-| `400` | el ítem es `COMPRADO` (se compra, no se produce) · es una preparación **sin stock propio** (al vender se explota su receta) · **no tiene precio de referencia confirmado** a esa fecha, y sin costo estándar no hay contra qué medir la varianza |
+| `400` | el ítem es `COMPRADO` (se compra, no se produce) · es una preparación **sin stock propio** (al vender se explota su receta) · **no tiene precio de referencia confirmado** a esa fecha, y sin costo estándar no hay contra qué medir la varianza · **alguno de los INSUMOS no tiene precio de referencia confirmado a esa fecha** (INC-032) |
+
+**Sobre el último: es la misma regla, aplicada a los dos lados.** Hasta INC-032 un insumo sin precio entraba valorado en `0,00` y el lote se registraba igual, así que la varianza de R10 informaba de un ahorro que no existió. Como el libro es append-only (R3), esa fila no se podía corregir después. El mensaje nombra **el insumo y la fecha**, porque quien produce necesita saber qué precio confirmar:
+
+```jsonc
+{ "code": "ENTRADA_INVALIDA",
+  "message": "«Camarón» no tiene precio de referencia confirmado al 2026-03-15, …" }
+```
+
+Nada se escribe: ni el movimiento, ni la cabecera del lote.
 
 ### `POST /inventario/consumos` — `inventory.produce`
 
@@ -840,23 +1161,36 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
 }
 ```
 
-**`estadoDelPeriodo` no es decorativo.** El período es de una ubicación (ADR-010 §1), así que el total puede mezclar meses cerrados con meses todavía abiertos —cuyo número aún puede cambiar—, y quien lo lee tiene derecho a saberlo.
+**`estadoDelPeriodo` no es decorativo.** El período es de una ubicación (ADR-010 §1), así que el total puede mezclar meses cerrados con meses todavía abiertos —cuyo número aún puede cambiar—, y quien lo lee tiene derecho a saberlo. **Desde P16-C sale del estado real del período** (D-16.124), igual que `cerradas` y `abiertas`: hasta entonces se deducía de si había conteo confirmado, y un mes **reabierto** que conservaba su conteo salía `CERRADO`.
 
 ### `POST /analitica/ventas` — `sales.write`
 
 ```json
-{ "locationId": "…", "anio": 2026, "mes": 3,
+{ "locationId": "…", "anio": 2026, "mes": 3, "version": 4,
   "ventas": [ { "productId": "…", "unidades": "320" } ] }
 ```
 
-**204.** **Reemplaza la carga entera del mes**: lo que se manda es lo que queda. Es lo que hace posible la grilla de CLAUDE.md §10 —«una grilla editable con el período anterior precargado, no un formulario por producto»—, y lo que D9 pide: el caso de uso recibe un lote «sin importar si viene de digitación, importación o un sistema externo».
+**200 `{ "version": 5 }`** *(P16-C; antes 204)*. `version` es la del `GET` de ventas o de costos fijos —comparten la de la carga del mes—; si otra carga del mismo mes y la misma ubicación llegó antes, **409 `CONFLICTO_DE_VERSION`** y no se borra nada. **Reemplaza la carga entera del mes**: lo que se manda es lo que queda. Es lo que hace posible la grilla de CLAUDE.md §10 —«una grilla editable con el período anterior precargado, no un formulario por producto»—, y lo que D9 pide: el caso de uso recibe un lote «sin importar si viene de digitación, importación o un sistema externo».
 
 `unidades` es un **entero**: el dominio lo modela como `Count`, y la base lo hace cumplir con `units = trunc(units)`.
 
 | Código | Cuándo |
 |---|---|
 | `400` | El mismo producto dos veces en el lote |
-| `409` | El período está cerrado (D6): si la cifra de ventas de un mes sellado cambiara, su food cost real cambiaría con ella |
+| `409` `CONFLICTO` | El período está cerrado (D6): si la cifra de ventas de un mes sellado cambiara, su food cost real cambiaría con ella |
+| `409` `CONFLICTO_DE_VERSION` | Otra carga del mismo mes llegó después de tu lectura *(P16-C)* |
+
+**Manda todas las filas con valor, no solo las que cambiaron.** Es un reemplazo: una fila que no viaja deja de tener ventas ese mes. La pantalla de ventas mandaba solo las cambiadas hasta P16-C, y guardar tres casillas borraba las demás.
+
+### `GET /analitica/ventas` — `sales.read`
+
+```json
+{ "version": 4, "ventas": [ { "productId": "…", "nombre": "Bolón de verde", "unidades": "320" } ] }
+```
+
+**Cambió de forma en P16-C** (antes, la lista suelta): `version` es la que el guardado pide de vuelta. **200 siempre, y `ventas: []` con `version: 1` si el mes no se ha abierto** (D-16.122). No devuelve `PERIODO_SIN_DATOS`: para una carga, un mes sin fila de período no tiene ventas, y la lista vacía es la verdad. Ese 404 es de las **seis vistas**, no de aquí.
+
+`nombre` desde P16-A2, con el mismo contrato que en menu engineering: vacío si el producto ya no está en la carta.
 
 ### `POST /analitica/costos-fijos` — `cost.write`
 
@@ -868,13 +1202,19 @@ confirmado se lee lo congelado, y da el mismo número dentro de un año.
     { "concepto": "Comision tarjeta", "clasificacion": "VARIABLE", "importe": "0.03" } ] }
 ```
 
-**204.** T6 del Excel, con el campo que SPEC §17 pide por su nombre.
+Con `"version"`, como las ventas: **200 `{ "version": n }`** y **409 `CONFLICTO_DE_VERSION`** si otra carga del mes llegó antes *(P16-C)*. `GET /analitica/costos-fijos` devuelve `{ "version": n, "costos": [ … ] }`. T6 del Excel, con el campo que SPEC §17 pide por su nombre.
 
 **`clasificacion` es un enum, no texto libre.** El Excel identifica la mano de obra por el prefijo `"Sueldos*"` y su propia nota dice que «es frágil»: un concepto llamado «Nómina» quedaría fuera del prime cost sin que nada avisara, y el prime cost decide si un local es viable.
 
 **`importe` significa dos cosas según la clasificación:** `VARIABLE` lo trae como **fracción de la venta neta** (`0.03` es 3 %); las otras dos, como **monto mensual**. Lo declara el catálogo, no el nombre del concepto.
 
 **`400` si un concepto se repite**, comparando sin espacios de sobra y sin distinguir mayúsculas: «Arriendo» y «arriendo » son el mismo gasto, y contarlo dos veces daría una utilidad operativa plausible y equivocada.
+
+### Las seis vistas y el mes sin abrir
+
+`GET /analitica/resumen`, `/menu-engineering`, `/food-cost-real`, `/punto-de-equilibrio`, `/inventario` y `/reposicion` devuelven **`404 PERIODO_SIN_DATOS`** cuando en esa ubicación y ese mes no hay nada registrado —ni ventas, ni movimientos, ni conteo—. No es un error de la petición: es un mes que nadie ha trabajado todavía, y devolver ceros haría creer que se analizó. Distíngase de `RECURSO_NO_ENCONTRADO` **por el `code`**, no por el estado (D-16.2).
+
+El consolidado es la excepción: no propaga el 404, lo convierte en su lista `sinDatos` (ADR-012).
 
 ### `GET /analitica/food-cost-real` — `analytics.read`
 
@@ -895,11 +1235,13 @@ Los porcentajes son `null` —no cero— cuando la venta neta del mes es cero: u
 ### `GET /analitica/menu-engineering` — `analytics.read`
 
 ```json
-{ "productos": [ { "productId": "…", "unidades": "210",
+{ "productos": [ { "productId": "…", "nombre": "Bolón de verde", "unidades": "210",
     "popularidad": "0.233333333333", "indicePopularidad": "1",
     "margenContribucion": "6.65", "cuadrante": "ESTRELLA" } ],
   "mcPromedio": "2", "unidadesTotales": "900", "productosActivos": 3 }
 ```
+
+**`nombre` desde P16-A2.** Antes había que pedir `GET /costeo` en paralelo —la carta entera costeada— solo para traducir ids a texto. Sale vacío si el producto ya no está en la carta de la company: la venta ocurrió igual y la fila no se esconde.
 
 `cuadrante` es `ESTRELLA`, `CABALLO`, `ROMPECABEZAS`, `PERRO`, `SIN_DATOS` (activo sin unidades, o sin PVP) o `INACTIVO`. **`índice ≥ 1` es popular**, y el empate exacto es determinista: el índice se calcula con una sola división para que un producto que debe dar `1` dé `1` y no `0.999999999999`.
 
@@ -934,6 +1276,39 @@ Los indicadores clave con su semáforo: `VERDE`, `AMBAR`, `ROJO` o **`SIN_DATO`*
 Tres campos, y **ninguno es una cantidad**. `FALTAN_COMPRAS` y `REPONER` colapsan en `REPONER`; `SIN_CONSUMO` y `OK`, en `OK`: distinguirlos ya sería un dato sobre el stock teórico.
 
 Se construye desde otro caso de uso y con otro tipo, **no filtrando la vista de inventario**. Un campo que se calcula y luego se quita ya viajó por el cable alguna vez.
+
+## Importaciones (P16-H)
+
+**Subir un archivo NO es un endpoint**: la importación se opera desde la línea de comandos
+(`npm run importar`) hasta que exista su pantalla (P20). Deshacerla sí lo es, y la asimetría es a
+propósito: el comando puede dejar cientos de filas en el libro de un cliente, y hasta D-16.200 la
+única forma de revertirlas era corregirlas a mano, una a una.
+
+### `POST /importaciones/:importJobId/anulacion` — `import.write`
+
+Emite los movimientos de signo contrario de todo lo que escribió esa importación, **en una sola
+transacción**, y la deja en `ANULADA`. No borra ni una fila: es R3.
+
+```jsonc
+// cuerpo
+{ "note": "El archivo traía el mes cambiado" }   // o null
+
+// 201
+{ "id": "01a0bc30-…", "estado": "ANULADA", "filasAnuladas": 2 }
+```
+
+`filasAnuladas` cuenta movimientos, no cantidades: de ahí no se despeja ninguna receta (CLAUDE.md
+§4.3). La respuesta **no lleva saldo**, como ninguna escritura del libro.
+
+| Código | Cuándo |
+|---|---|
+| **404 `RECURSO_NO_ENCONTRADO`** | No existe **o es de otra company**: el mismo 404 para los dos |
+| **409 `CONFLICTO`** | Ya estaba anulada · nunca se confirmó · no es de `MOVIMIENTOS` · alguno de sus movimientos cae en un **mes cerrado**. El mensaje dice cuál de las cuatro |
+| **403** | `BODEGA` no tiene `import.write` |
+
+**Volver a lanzarla es seguro:** lo ya corregido se salta. Entre escribir las filas contrarias y
+marcar el estado hay dos transacciones que no se pueden juntar —el libro lo escribe `inventory`
+dentro de la suya—, y si se cae en medio, repetir la petición la termina.
 
 ## Salud
 

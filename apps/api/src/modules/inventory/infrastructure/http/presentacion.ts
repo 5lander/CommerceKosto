@@ -14,7 +14,8 @@
 
 import type { SaldoConNombre } from '../../application/casos-de-uso/movimientos';
 import type { MovimientoLeido } from '../../application/ports/repositorio-de-inventario.port';
-import type { MovimientoDto, SaldoDto } from './inventario.dto';
+import type { DesgloseDeCompra } from '../../domain/compra';
+import type { DesgloseDto, MovimientoDto, SaldoDto } from './inventario.dto';
 
 export function comoSaldoDto(saldo: SaldoConNombre): SaldoDto {
   return {
@@ -25,8 +26,19 @@ export function comoSaldoDto(saldo: SaldoConNombre): SaldoDto {
   };
 }
 
+function comoDesgloseDto(desglose: DesgloseDeCompra | null): DesgloseDto {
+  if (desglose === null) return { desglose: 'SIN_DESGLOSE' };
+  return {
+    desglose: 'CONOCIDO',
+    totalBruto: desglose.totalBruto,
+    ivaTarifaAplicada: desglose.ivaTarifaAplicada,
+    ivaRecuperableAplicado: desglose.ivaRecuperableAplicado,
+  };
+}
+
 export function comoMovimientoDto(movimiento: MovimientoLeido): MovimientoDto {
   return {
+    ...comoDesgloseDto(movimiento.desglose),
     id: movimiento.id,
     locationId: movimiento.locationId,
     itemId: movimiento.itemId,

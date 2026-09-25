@@ -57,3 +57,41 @@ export function partesDeConexion(cadena) {
     base: url.pathname.replace(/^\//, ''),
   };
 }
+
+/**
+ * La conexion de SUPERUSUARIO, apuntando a `postgres`.
+ *
+ * VIVE AQUI PORQUE LA NECESITAN TRES SCRIPTS —respaldo, restauracion y bench— y
+ * tenerla copiada tres veces significa que el dia que cambie el nombre de la
+ * variable, dos de las tres se enteran tarde. `audit:duplication` lo caza a la
+ * tercera copia, que es justo para lo que esta.
+ *
+ * ES LA UNICA CONEXION QUE PUENTEA RLS del proyecto, y por eso no se usa nunca
+ * desde la aplicacion: solo desde scripts operados a mano.
+ *
+ * @returns {string}
+ */
+export function conexionDeSuperusuario() {
+  const usuario = opcional('POSTGRES_SUPERUSER', 'postgres');
+  const contrasena = exigir('POSTGRES_SUPERUSER_PASSWORD');
+  const credencial = `${encodeURIComponent(usuario)}:${encodeURIComponent(contrasena)}`;
+  const host = opcional('POSTGRES_HOST', 'localhost');
+  const puerto = opcional('POSTGRES_PORT', '5432');
+  return `postgresql://${credencial}@${host}:${puerto}/postgres`;
+}
+
+/**
+ * La misma cadena de conexion, apuntando a otra base.
+ *
+ * Vivia copiada en `bench`, `respaldo`, `restaurar` y `restaurar-tenant`: cuatro
+ * veces la misma linea, y `audit:duplication` la caza en cuanto dos de ellas
+ * quedan juntas. El nombre de la base es un IDENTIFICADOR y por eso viaja en la
+ * URL y no en el SQL (ver `consultar` en `psql.mjs`).
+ *
+ * @param {string} conexion @param {string} base @returns {string}
+ */
+export function apuntandoA(conexion, base) {
+  const url = new URL(conexion);
+  url.pathname = `/${base}`;
+  return url.toString();
+}

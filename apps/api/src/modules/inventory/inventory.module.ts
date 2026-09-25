@@ -34,6 +34,7 @@ import {
 } from './application/casos-de-uso/conteos';
 import {
   ConsultarSaldos,
+  ConsultarMovimiento,
   CorregirMovimiento,
   ListarMovimientos,
   RegistrarMovimiento,
@@ -47,6 +48,8 @@ import {
   ConsultarConteoConfirmado,
 } from './application/casos-de-uso/para-analitica';
 import { REPOSITORIO_DE_CONTEOS } from './application/ports/repositorio-de-conteos.port';
+import { AnularMovimientosDeImportacion } from './application/casos-de-uso/anulacion-de-importacion';
+import { RegistrarMovimientosEnLote } from './application/casos-de-uso/lotes';
 import { REPOSITORIO_DE_INVENTARIO } from './application/ports/repositorio-de-inventario.port';
 import { DependenciasDeInventarioNest } from './infrastructure/dependencias-de-inventario';
 import {
@@ -116,6 +119,11 @@ type Deps = DependenciasDeInventarioNest;
       inject: [DependenciasDeInventarioNest],
       useFactory: (d: Deps): ListarMovimientos => new ListarMovimientos(d),
     },
+    {
+      provide: ConsultarMovimiento,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (d: Deps): ConsultarMovimiento => new ConsultarMovimiento(d),
+    },
 
     {
       provide: ListarConteos,
@@ -183,12 +191,29 @@ type Deps = DependenciasDeInventarioNest;
     },
     {
       provide: LecturasDelLibro,
-      inject: [ConsultarSaldos, ListarMovimientos],
-      useFactory: (saldos: ConsultarSaldos, movimientos: ListarMovimientos): LecturasDelLibro =>
-        new LecturasDelLibro(saldos, movimientos),
+      inject: [ConsultarSaldos, ListarMovimientos, ConsultarMovimiento],
+      useFactory: (
+        saldos: ConsultarSaldos,
+        movimientos: ListarMovimientos,
+        movimiento: ConsultarMovimiento,
+      ): LecturasDelLibro => new LecturasDelLibro(saldos, movimientos, movimiento),
+    },
+    {
+      provide: RegistrarMovimientosEnLote,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (deps: DependenciasDeInventarioNest): RegistrarMovimientosEnLote =>
+        new RegistrarMovimientosEnLote(deps),
+    },
+    {
+      provide: AnularMovimientosDeImportacion,
+      inject: [DependenciasDeInventarioNest],
+      useFactory: (deps: DependenciasDeInventarioNest): AnularMovimientosDeImportacion =>
+        new AnularMovimientosDeImportacion(deps),
     },
   ],
-  exports: [
+  exports: [RegistrarMovimientosEnLote,
+    AnularMovimientosDeImportacion,
+
     ConsultarSaldos,
     ListarMovimientos,
     LeerConciliacion,

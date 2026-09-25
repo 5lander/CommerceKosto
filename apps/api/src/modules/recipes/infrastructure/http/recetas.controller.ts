@@ -19,24 +19,28 @@ import {
   itemId,
   locationId,
   productId,
+  recipeId,
   recipePropagationId,
   type LocationId,
 } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import type { Previsualizacion } from '../../application/casos-de-uso/propagacion';
-import { RecetaInvalidaError } from '../../domain/errores';
-import { GuardarReceta, LeerReceta } from '../../application/casos-de-uso/recetas';
-import type {
-  DestinoDeReceta,
-  RecetaLeida,
-} from '../../application/ports/repositorio-de-recetas.port';
 import {
+  GuardarReceta,
+  LeerReceta,
+  type RecetaParaEditar,
+} from '../../application/casos-de-uso/recetas';
+import { destinoDeConsulta } from './destino-de-consulta';
+import {
+  CONSULTA_DE_PREVISUALIZACION,
   CONSULTA_DE_RECETA,
   CUERPO_DE_PROPAGACION,
   CUERPO_DE_RECETA,
+  type ConsultaDePrevisualizacion,
   type ConsultaDeReceta,
   type CuerpoDePropagacion,
   type CuerpoDeReceta,
@@ -74,9 +78,9 @@ export class RecetasController {
   public vigente(
     @SesionActual() sesion: SesionActiva,
     @Query(new EsquemaPipe(CONSULTA_DE_RECETA)) consulta: ConsultaDeReceta,
-  ): Promise<RecetaLeida | null> {
+  ): Promise<RecetaParaEditar> {
     return this.leer.ejecutar(sesion, {
-      destino: destinoDe(consulta.productId, consulta.itemId),
+      destino: destinoDeConsulta(consulta),
       locationId: locationId(consulta.locationId),
       fecha: consulta.fecha === undefined ? new Date() : new Date(consulta.fecha),
     });
@@ -97,6 +101,7 @@ export class RecetasController {
       locationId: locationId(cuerpo.locationId),
       validFrom: new Date(cuerpo.validFrom),
       nota: cuerpo.nota,
+      basadaEn: cuerpo.basadaEn === null ? null : recipeId(cuerpo.basadaEn),
       lineas: cuerpo.lineas.map((l) => ({
         itemId: itemId(l.itemId),
         cantidad: l.cantidad,
@@ -116,12 +121,11 @@ export class RecetasController {
   @Requiere('recipe.propagate')
   public previsualizar(
     @SesionActual() sesion: SesionActiva,
-    @Query('productId') producto: string,
-    @Query('origen') origen: string,
+    @Query(new EsquemaPipe(CONSULTA_DE_PREVISUALIZACION)) consulta: ConsultaDePrevisualizacion,
   ): Promise<Previsualizacion> {
     return this.propagacion.previsualizar.ejecutar(sesion, {
-      productId: productId(producto),
-      origen: locationId(origen),
+      productId: productId(consulta.productId),
+      origen: locationId(consulta.origen),
     });
   }
 
@@ -152,23 +156,8 @@ export class RecetasController {
   @HttpCode(HttpStatus.NO_CONTENT)
   public async revertir(
     @SesionActual() sesion: SesionActiva,
-    @Param('id') id: string,
+    @Param('id', IdentificadorDeRuta) id: string,
   ): Promise<void> {
     await this.propagacion.revertir.ejecutar(sesion, recipePropagationId(id));
   }
-}
-
-/**
- * El destino sale de los parámetros de consulta, y exactamente uno de los dos
- * tiene que venir. Se valida aquí y no en un esquema porque son parámetros de
- * URL, no cuerpo.
- */
-function destinoDe(producto: string | undefined, item: string | undefined): DestinoDeReceta {
-  if (producto !== undefined && item === undefined) {
-    return { clase: 'producto', productId: productId(producto) };
-  }
-  if (item !== undefined && producto === undefined) {
-    return { clase: 'item', itemId: itemId(item) };
-  }
-  throw new RecetaInvalidaError('Indica productId o itemId, exactamente uno de los dos.');
 }

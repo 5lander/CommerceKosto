@@ -30,6 +30,7 @@ import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { MOTIVO_TRANSPORTE, SE_EXIGE_EL_PRESUPUESTO } from '../soporte/transporte';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CONTRASENA = 'tres cebollas moradas';
@@ -122,7 +123,7 @@ describe('rendimiento del inventario con volumen realista', () => {
     const respuesta = await request(servidor())
       .post('/auth/login')
       .send({ email: correo, contrasena: CONTRASENA });
-    cookie = (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    cookie = cookieConCsrf(respuesta);
   }, 180_000);
 
   /**
@@ -217,7 +218,7 @@ describe('rendimiento del inventario con volumen realista', () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: ubicacion })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       tiempos.push(performance.now() - inicio);
 
       expect(respuesta.status).toBe(OK);

@@ -17,9 +17,9 @@ import type {
   FilaDeReposicion,
   InventarioConNombres,
   ItemConNombre,
+  MenuConNombres,
 } from '../../application/casos-de-uso/vistas';
 import type { FoodCostReal } from '../../domain/food-cost-real';
-import type { Menu } from '../../domain/menu-engineering';
 import type { PuntoDeEquilibrio } from '../../domain/punto-de-equilibrio';
 import type { Resumen } from '../../domain/resumen';
 import type {
@@ -53,10 +53,12 @@ function opcional(valor: Decimal | null): string | null {
   return valor === null ? null : valor.toExactString();
 }
 
-export function comoMenuDto(menu: Menu): MenuDto {
+export function comoMenuDto(vista: MenuConNombres): MenuDto {
+  const { menu } = vista;
   return {
     productos: menu.productos.map((producto) => ({
       productId: producto.productId,
+      nombre: vista.nombres.get(producto.productId) ?? '',
       unidades: texto(producto.unidades),
       popularidad: opcional(producto.popularidad),
       indicePopularidad: opcional(producto.indicePopularidad),
@@ -64,6 +66,9 @@ export function comoMenuDto(menu: Menu): MenuDto {
       cuadrante: producto.cuadrante,
     })),
     mcPromedio: opcional(menu.mcPromedio),
+    mcTotal: opcional(menu.mcTotal),
+    unidadesConMargen: texto(menu.unidadesConMargen),
+    metodoMcPromedio: menu.metodoMcPromedio,
     unidadesTotales: texto(menu.unidadesTotales),
     productosActivos: menu.productosActivos,
   };

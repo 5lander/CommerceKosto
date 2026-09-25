@@ -1,0 +1,925 @@
+/*
+ * Estilos globales. Todo valor sale de `tokens.css` — cero literales.
+ *
+ * ============================================================================
+ * AQUÍ VIVE LA APARIENCIA. EN LOS COMPONENTES NO.
+ * ============================================================================
+ *
+ * Antes de P14 la capa visual estaba repartida en 107 bloques `style={{…}}`
+ * dentro de las páginas, y `components/ui` no existía. Eso hacía que la promesa
+ * de CLAUDE.md §10 —«la capa visual debe poder reemplazarse sin tocar la
+ * lógica»— no fuera cierta estructuralmente: para cambiar el aspecto había que
+ * entrar en los archivos que traen los datos.
+ *
+ * P14 lo paga: las páginas ponen `className` y el aspecto está aquí y en
+ * `componentes/ui/`. La prueba de que funciona es que este archivo se puede
+ * reescribir entero sin abrir una sola página.
+ */
+
+@import './tipografia.css';
+@import './tokens.css';
+
+/* ==========================================================================
+ * BASE
+ * ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /*
+   * La aplicación va en claro y se lo dice al navegador, para que no oscurezca
+   * por su cuenta los controles nativos. Es la decisión del manual, p. 30.
+   */
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-fondo);
+  color: var(--color-texto);
+  font-family: var(--fuente);
+  font-size: var(--texto-base);
+  line-height: var(--texto-cuerpo-alto);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+/*
+ * EL FOCO SE VE SIEMPRE, y con contorno propio.
+ *
+ * La rejilla de ventas se recorre con el teclado y sin tocar el ratón: si el
+ * foco no se ve, esa pantalla es inutilizable. Es la razón de que NO exista
+ * ninguna regla `outline: none` en este proyecto.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-foco);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+ * DISPOSICIÓN · la retícula del manual, p. 23
+ * ========================================================================== */
+
+/*
+ * La lámina ancha: las cuatro pantallas con tabla.
+ *
+ * EL MARGEN LATERAL ES `--f3`, NO `--f6`, y la diferencia se midió. El manual
+ * llama a `--f6` (144 px) «margen lateral», pero lo dice de una LÁMINA de
+ * 1600 × 900: en una barra de aplicación a 1280 px, 144 px por lado dejan la
+ * navegación sin sitio y la parten en dos filas. La medida sigue saliendo de la
+ * serie de Fibonacci del manual —que es la regla—, con el término que le cabe a
+ * este lienzo.
+ *
+ * En móvil baja a `--f1`. La hoja de conteo y la rejilla de ventas se usan en un
+ * teléfono, de pie: ahí el margen de lámina es aire que le falta a la tabla.
+ */
+.lamina {
+  width: 100%;
+  max-width: calc(76rem + var(--f3) * 2);
+  margin: 0 auto;
+  padding: var(--f3) var(--f1);
+}
+
+@media (min-width: 60rem) {
+  .lamina {
+    padding: var(--f3);
+  }
+}
+
+/* La columna estrecha: entrar y elegir sucursal. */
+.pantalla {
+  width: 100%;
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: var(--f4) var(--f1);
+}
+
+.pantalla--angosta {
+  max-width: 24rem;
+}
+
+/* Pilas verticales. El hueco sale de la serie, nunca de un número suelto. */
+.pila {
+  display: grid;
+  gap: var(--f2);
+}
+
+.pila--apretada {
+  gap: var(--f1);
+}
+
+.pila--minima {
+  gap: var(--f-menos2);
+}
+
+/* Una línea de cosas, con su hueco y su salto cuando no caben. */
+.linea {
+  display: flex;
+  align-items: center;
+  gap: var(--f1);
+  flex-wrap: wrap;
+}
+
+.linea--separada {
+  justify-content: space-between;
+}
+
+.linea--base {
+  align-items: baseline;
+}
+
+/* ==========================================================================
+ * LA REGLA ROTA · manual p. 27
+ * ==========================================================================
+ *
+ * «Toda línea se parte en su sección áurea y el tramo menor va en Persimmon.
+ *  Para separadores, cintas y encabezados.»
+ *
+ * Con sus tres parámetros y sus tres formas de salir mal, que el manual también
+ * publica: el punto de rotura es `largo / φ` —si se parte a la mitad deja de
+ * decir nada—, el hueco es `grosor × φ` —sin hueco es una barra bicolor, no el
+ * recurso— y el tramo menor es SIEMPRE Persimmon: si el naranja es el mayor, se
+ * invirtió el significado.
+ *
+ * Aquí el largo es el ancho de la barra, así que el punto de rotura es el
+ * 61,8 %: a la izquierda el tramo mayor —los costos— en Jade, y a la derecha el
+ * menor —el margen— en Persimmon.
+ */
+.regla-rota {
+  --regla-grosor: 2px;
+  /* hueco = grosor × φ */
+  --regla-hueco: 3.24px;
+
+  height: var(--regla-grosor);
+  border: 0;
+  margin: 0;
+  background-image: linear-gradient(
+    to right,
+    var(--color-marca) 0 calc(61.8% - var(--regla-hueco) / 2),
+    transparent calc(61.8% - var(--regla-hueco) / 2) calc(61.8% + var(--regla-hueco) / 2),
+    var(--color-senal) calc(61.8% + var(--regla-hueco) / 2) 100%
+  );
+}
+
+/* ==========================================================================
+ * LA BARRA SUPERIOR
+ * ========================================================================== */
+
+.barra {
+  background: var(--color-superficie);
+  border-bottom: 1px solid var(--color-borde);
+}
+
+.barra__interior {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--f2);
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: calc(76rem + var(--f3) * 2);
+  margin: 0 auto;
+  padding: var(--f-menos1) var(--f1);
+}
+
+/* La barra alinea con la lámina: el mismo margen lateral, o el contenido y la
+   navegación quedarían en dos rejillas distintas. */
+@media (min-width: 60rem) {
+  .barra__interior {
+    padding: var(--f-menos1) var(--f3);
+  }
+}
+
+.barra__grupo {
+  display: flex;
+  align-items: center;
+  gap: var(--f-menos2);
+  flex-wrap: wrap;
+}
+
+/*
+ * Los enlaces de navegación.
+ *
+ * El activo va en el color de MARCA, no en el de acción: el sitio donde estás
+ * no es una acción que puedas pulsar. Y con `--tactil` de alto, porque esta
+ * barra se toca con el pulgar.
+ */
+.nav-enlace {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tactil);
+  padding: 0 var(--f1);
+  border-radius: var(--radio);
+  text-decoration: none;
+  color: var(--color-texto-suave);
+}
+
+.nav-enlace:hover {
+  color: var(--color-texto);
+}
+
+.nav-enlace[aria-current='page'] {
+  background: var(--color-marca);
+  color: var(--cloud-dancer);
+}
+
+/*
+ * Los datos de una ficha: etiqueta encima y valor debajo, en columnas que bajan
+ * de fila cuando no caben.
+ */
+.datos {
+  display: grid;
+  gap: var(--f2);
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  margin: 0;
+}
+
+.datos dd {
+  margin: 0;
+}
+
+/* El nombre de una fila que lleva a su ficha: se lee como texto, se ve que se pulsa. */
+.enlace-de-fila {
+  color: var(--color-texto);
+  text-decoration: underline;
+  text-decoration-color: var(--color-borde-fuerte);
+  text-underline-offset: 0.2em;
+}
+
+/* Un estado corto en una tabla. El color sale del tono, como el semáforo. */
+.pildora {
+  display: inline-block;
+  padding: 0 var(--f-menos1);
+  border: 1px solid currentColor;
+  border-radius: var(--radio);
+  font-size: var(--texto-sm);
+  color: var(--color-texto-suave);
+}
+
+.pildora[data-tono='bien'] {
+  color: var(--color-bien);
+}
+
+.pildora[data-tono='atencion'] {
+  color: var(--color-atencion);
+}
+
+.pildora[data-tono='mal'] {
+  color: var(--color-mal);
+}
+
+/*
+ * Un formulario de alta o edición: una columna de ancho de lectura, también en
+ * escritorio. Un campo de nombre de 70 caracteres de ancho no ayuda a nadie.
+ */
+.formulario {
+  max-width: 32rem;
+}
+
+/*
+ * Los filtros de un listado: en fila cuando caben, uno debajo de otro en el
+ * teléfono. Cada filtro con su etiqueta encima (`.campo`).
+ */
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--f1);
+}
+
+/*
+ * Una casilla con su texto: la línea entera es el objetivo táctil. La casilla
+ * no hereda el alto ni el relleno de `input`, que son de un campo de texto.
+ */
+.casilla {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--f-menos1);
+  min-height: var(--tactil);
+}
+
+.casilla input {
+  min-height: 0;
+  width: var(--f2);
+  height: var(--f2);
+  padding: 0;
+  accent-color: var(--color-marca);
+}
+
+/*
+ * Un enlace dentro del texto de una pantalla: «volver a entrar», «pedir otro».
+ * En el color de marca y subrayado, que es lo que dice «esto se pulsa» sin ser
+ * un botón. Con `--tactil` de alto mínimo: se toca con el pulgar.
+ */
+.enlace {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tactil);
+  color: var(--color-marca);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* ==========================================================================
+ * EL ARMAZÓN · U1, como Commerce
+ * ==========================================================================
+ *
+ * Barra lateral por grupos y lámina. EL CORTE ES EL MISMO `60rem` DE LA LÁMINA Y
+ * LA BARRA: por debajo, la navegación se esconde detrás de «Menú» y la lámina
+ * ocupa el ancho entero, porque en un teléfono —de pie, en la bodega— el ancho
+ * es de la hoja de conteo. Por encima, la barra se queda al costado.
+ *
+ * `.aplicacion` ocupa al menos el alto de la ventana, y la lateral se estira con
+ * ella: sin eso, en una sección corta el fondo de la barra acababa a media
+ * pantalla (visto en la captura a 1280, no deducido).
+ *
+ * La barra superior pasa a ancho completo (`--ancha`): con la lateral a la
+ * izquierda, centrarla en 76rem la desalinearía de las dos columnas.
+ */
+.barra__interior--ancha {
+  max-width: none;
+}
+
+.aplicacion {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.armazon {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lateral {
+  display: grid;
+  align-content: start;
+  gap: var(--f2);
+  padding: var(--f2) var(--f1);
+  background: var(--color-superficie);
+  border-bottom: 1px solid var(--color-borde);
+}
+
+.lateral[data-abierta='false'] {
+  display: none;
+}
+
+.lateral__grupo {
+  display: grid;
+  gap: var(--f-menos1);
+}
+
+.lateral__enlace {
+  width: 100%;
+}
+
+/*
+ * Sucursal y mes. EN EL TELÉFONO BAJAN A SU PROPIA FILA y la marca comparte la
+ * primera con «Salir»: con las cuatro cosas en fila, la cabecera ocupaba cuatro
+ * renglones —215 px de 780— en la pantalla que se usa de pie.
+ */
+.barra__contexto {
+  order: 1;
+  flex-basis: 100%;
+  column-gap: var(--f1);
+}
+
+.selector-compacto {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--f-menos1);
+}
+
+/*
+ * En el teléfono la etiqueta se oculta A LA VISTA, NO AL LECTOR DE PANTALLA: el
+ * control sigue diciendo qué es. Es la etiqueta o la tercera fila.
+ */
+.selector-compacto .etiqueta {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 60rem) {
+  .armazon {
+    grid-template-columns: 14rem minmax(0, 1fr);
+  }
+
+  .lateral,
+  .lateral[data-abierta='false'] {
+    display: grid;
+    border-bottom: 0;
+    border-right: 1px solid var(--color-borde);
+  }
+
+  .barra__contexto {
+    order: 0;
+    flex-basis: auto;
+    margin-left: auto;
+  }
+
+  .selector-compacto .etiqueta {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  /* Con la barra siempre a la vista, el botón que la abre sobra. */
+  .alternador {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+ * CABECERA DE PANTALLA
+ * ========================================================================== */
+
+.encabezado {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--f2);
+  flex-wrap: wrap;
+  margin-bottom: var(--f3);
+}
+
+.titulo {
+  font-size: var(--texto-xl);
+}
+
+.subtitulo {
+  color: var(--color-texto-suave);
+  font-size: var(--texto-lg);
+}
+
+/* ==========================================================================
+ * SUPERFICIES
+ * ==========================================================================
+ *
+ * Sin sombra y sin vidrio, a propósito: el manual acota el vidrio a «malla de
+ * gradientes» y prohíbe ponerlo detrás de una tabla densa (p. 20). Lo que
+ * separa un panel de su fondo es el borde y el blanco, no la elevación.
+ */
+.panel {
+  background: var(--color-superficie);
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio-lg);
+}
+
+.panel--relleno {
+  padding: var(--f2);
+}
+
+/* El estado vacío: borde discontinuo, para que se lea como un hueco a llenar. */
+.panel--pendiente {
+  padding: var(--f4) var(--f2);
+  text-align: center;
+  border-style: dashed;
+  border-color: var(--color-borde-fuerte);
+}
+
+/* ==========================================================================
+ * TABLAS
+ * ==========================================================================
+ *
+ * La tabla es la pantalla entera de este producto. Se desplaza en horizontal
+ * dentro de su marco y nunca empuja el cuerpo de la página.
+ */
+/*
+ * NO LLEVA `min-width: 0`, y se comprobó midiendo.
+ *
+ * Es el remiendo que se le pone por reflejo a un contenedor con desplazamiento
+ * dentro de una rejilla. Aquí no hace falta: un elemento de rejilla con
+ * `overflow` distinto de `visible` ya tiene mínimo automático cero por
+ * especificación. Medido a 320 px con y sin él, `scrollWidth` da lo mismo.
+ */
+.tabla-marco {
+  overflow-x: auto;
+}
+
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--texto-base);
+}
+
+.tabla--compacta {
+  font-size: var(--texto-sm);
+}
+
+/*
+ * Los encabezados son ETIQUETA del manual: Plex Mono 400, 11–13 px, versalitas
+ * espaciadas. Es literalmente lo que hace el propio manual con «FOOD COST» y
+ * «TU FUGA ESTIMADA».
+ */
+.tabla th {
+  font-family: var(--fuente-numeros);
+  font-size: var(--texto-xs);
+  font-weight: 400;
+  line-height: var(--texto-etiqueta-alto);
+  text-transform: uppercase;
+  letter-spacing: var(--etiqueta-espaciado);
+  color: var(--color-texto-suave);
+  text-align: right;
+  white-space: nowrap;
+  padding: var(--f1);
+  border-bottom: 1px solid var(--color-borde);
+}
+
+.tabla th:first-child,
+.tabla td:first-child {
+  text-align: left;
+}
+
+.tabla td {
+  padding: var(--f1);
+  border-bottom: 1px solid var(--color-borde);
+  vertical-align: top;
+}
+
+/* La última fila no lleva raya: la lleva el borde del panel. */
+.tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tabla--compacta th,
+.tabla--compacta td {
+  padding: var(--f-menos1) var(--f1);
+}
+
+/* Una fila que pide atención lleva la señal al costado, no el fondo teñido:
+   Persimmon se queda por debajo del 3 % de la superficie (manual p. 19). */
+.tabla tr[data-senal='true'] td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-senal);
+}
+
+/* ==========================================================================
+ * NÚMEROS Y ETIQUETAS · manual p. 22
+ * ========================================================================== */
+
+/*
+ * Los decimales llegan como cadena y se muestran como cadena: nunca se parsean
+ * (CLAUDE.md §3). Lo único que se hace es alinearlos para poder compararlos.
+ */
+.numero {
+  font-family: var(--fuente-numeros);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* La cifra que manda: Plex Mono 500, interlínea 1. */
+.cifra {
+  font-family: var(--fuente-numeros);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  font-size: var(--texto-2xl);
+  line-height: var(--texto-cifra-alto);
+}
+
+.cifra--menor {
+  font-size: var(--texto-xl);
+}
+
+.etiqueta {
+  font-family: var(--fuente-numeros);
+  font-size: var(--texto-xs);
+  font-weight: 400;
+  line-height: var(--texto-etiqueta-alto);
+  text-transform: uppercase;
+  letter-spacing: var(--etiqueta-espaciado);
+  color: var(--color-texto-suave);
+}
+
+.nota {
+  color: var(--color-texto-suave);
+  font-size: var(--texto-sm);
+}
+
+.tenue {
+  color: var(--color-texto-tenue);
+  font-size: var(--texto-xs);
+}
+
+.bloque {
+  display: block;
+}
+
+/* Los tres estados del semáforo, como color de TEXTO. */
+.bien {
+  color: var(--color-bien);
+}
+
+.atencion {
+  color: var(--color-atencion);
+}
+
+.mal {
+  color: var(--color-mal);
+}
+
+/* ==========================================================================
+ * AVISOS
+ * ==========================================================================
+ *
+ * Sin fondo teñido: una cinta al costado en el color del estado, que es el
+ * gesto de «regla» del manual y deja Persimmon y Oxblood muy por debajo de su
+ * cuota de superficie. Un bloque de color de lado a lado la rompería.
+ */
+.aviso {
+  padding: var(--f2);
+  background: var(--color-superficie);
+  border: 1px solid var(--color-borde);
+  border-left: 3px solid var(--color-mal);
+  border-radius: var(--radio-lg);
+  color: var(--color-mal);
+}
+
+/* ==========================================================================
+ * CONTROLES
+ * ==========================================================================
+ *
+ * Área táctil de 44 px en todo lo que se pulsa o se escribe, y bordes sin
+ * diluir: esta interfaz se usa de pie, con reflejo y las manos ocupadas.
+ */
+
+button,
+.boton {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tactil);
+  padding: 0 var(--f2);
+  border: 1px solid var(--color-borde-fuerte);
+  border-radius: var(--radio);
+  background: var(--color-superficie);
+  color: var(--color-texto);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+button:hover:not(:disabled),
+.boton:hover {
+  border-color: var(--color-texto);
+}
+
+/*
+ * El botón primario va en el color de ACCIÓN, que el manual separa a propósito
+ * del color de la pérdida: «el color de la pérdida nunca es el color del
+ * botón» (p. 21). Cloud Dancer sobre Persimmon Profundo da 5,64:1, que es el
+ * par que el propio manual calcula.
+ */
+button[data-variante='primario'],
+.boton[data-variante='primario'] {
+  background: var(--color-accion);
+  border-color: var(--color-accion);
+  color: var(--cloud-dancer);
+}
+
+button[data-variante='primario']:hover:not(:disabled),
+.boton[data-variante='primario']:hover {
+  background: var(--persimmon);
+  border-color: var(--persimmon);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input,
+select {
+  font: inherit;
+  min-height: var(--tactil);
+  padding: 0 var(--f1);
+  border: 1px solid var(--color-borde-fuerte);
+  border-radius: var(--radio);
+  background: var(--color-superficie);
+  color: var(--color-texto);
+}
+
+/* Las celdas de la rejilla de ventas y de la hoja de conteo llevan cifra. */
+input[inputmode='numeric'],
+input[type='number'] {
+  font-family: var(--fuente-numeros);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Un campo con su etiqueta encima. */
+.campo {
+  display: grid;
+  gap: var(--f-menos2);
+}
+
+/*
+ * Un `<select>` mide lo que su opción más larga —«Arroz funda 5 kg — 5 kg · IVA
+ * 0,0 %»— y, como elemento de rejilla, no baja de ahí: a 360 px empujaba la
+ * página 27 px de lado. Con mínimo cero ocupa el ancho del campo y recorta la
+ * opción, que se lee entera al abrirlo.
+ */
+.campo select {
+  min-width: 0;
+}
+
+/* ==========================================================================
+ * LISTAS
+ * ========================================================================== */
+
+.lista-limpia {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Un botón que ocupa la fila entera y alinea a la izquierda: elegir sucursal. */
+.opcion {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  gap: var(--f-menos1);
+}
+
+/* ==========================================================================
+ * LA MARCA · manual p. 16
+ * ==========================================================================
+ *
+ * Las cotas del manual se HACEN CUMPLIR aquí, no solo se documentan: si alguien
+ * encoge la marca por debajo del mínimo, el `min-width` la sostiene. «Ancho
+ * mínimo del logotipo 34 mm / 140 px · ancho mínimo del isotipo 5 mm / 16 px.»
+ */
+.marca {
+  display: block;
+  width: auto;
+}
+
+/*
+ * El isotipo de la barra va a `--f3` de alto. Con la proporción del manual
+ * —61,803 × 100— eso son 21 px de ancho, por encima de los 16 px de cota.
+ *
+ * ÁREA DE RESGUARDO: t × φ² es el 30,9 % del alto, o sea 10,5 px a este tamaño.
+ * El hueco de `.barra__grupo` es `--f-menos2` (5 px) y el de `.barra__interior`
+ * es `--f2` (21 px); el nombre escrito al lado es lo único que se le acerca, y
+ * por eso lleva su propio margen.
+ */
+.marca--isotipo {
+  height: var(--f3);
+  min-width: var(--isotipo-min);
+}
+
+/*
+ * El logotipo, en su ancho mínimo. A 140 px de ancho mide 44 px de alto, así
+ * que su resguardo es de 13,6 px: el hueco de `--f3` (34 px) que lo separa del
+ * formulario de entrar lo cumple con holgura.
+ */
+.marca--logotipo {
+  width: var(--logotipo-min);
+  min-width: var(--logotipo-min);
+}
+
+/* El nombre escrito junto al isotipo en la barra. */
+.marca-nombre {
+  margin-left: var(--f-menos1);
+  margin-right: var(--f1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-marca);
+  text-decoration: none;
+}
+
+/* ==========================================================================
+ * LOS CUADRANTES DE INGENIERÍA DE MENÚ · SPEC §15
+ * ==========================================================================
+ *
+ * El color de cada cuadrante vive AQUÍ y no en la pantalla. Hasta P14 había un
+ * mapa `Record<Cuadrante, string>` con `var(--color-…)` dentro del archivo que
+ * trae los datos: cambiar el aspecto obligaba a abrirlo.
+ *
+ * Se resuelve con un atributo de datos y una variable local, así que la página
+ * solo dice EN QUÉ CUADRANTE está cada plato —que es un dato— y esta hoja
+ * decide de qué color se pinta.
+ *
+ * Los tres colores son los del semáforo, y significan lo mismo: Jade sostiene,
+ * Persimmon Profundo pide trabajo, Oxblood es candidato a salir.
+ */
+.cuadrante {
+  border-left: 4px solid var(--cuadrante-color);
+}
+
+.cuadrante__titulo {
+  font-size: var(--texto-lg);
+  color: var(--cuadrante-color);
+}
+
+.cuadrante[data-cuadrante='ESTRELLA'] {
+  --cuadrante-color: var(--color-bien);
+}
+
+.cuadrante[data-cuadrante='CABALLO'],
+.cuadrante[data-cuadrante='ROMPECABEZAS'] {
+  --cuadrante-color: var(--color-atencion);
+}
+
+.cuadrante[data-cuadrante='PERRO'] {
+  --cuadrante-color: var(--color-mal);
+}
+
+.cuadrante[data-cuadrante='SIN_DATOS'],
+.cuadrante[data-cuadrante='INACTIVO'] {
+  --cuadrante-color: var(--color-texto-tenue);
+}
+
+/*
+ * La cifra de referencia junto a su etiqueta: el patrón que el manual usa en su
+ * propia maqueta de producto —«TU FUGA ESTIMADA» encima y «$983» debajo—, con
+ * la etiqueta en Plex Mono versalita y el número en Plex Mono 500.
+ */
+.dato {
+  display: grid;
+  gap: var(--f-menos2);
+}
+
+/*
+ * Los indicadores de Inicio: tarjetas que se reparten el ancho y bajan de fila
+ * cuando no caben —dos en un teléfono, cinco en escritorio—.
+ *
+ * EL COLOR SALE DEL SEMÁFORO QUE MANDÓ LA API, como el de los cuadrantes: la
+ * pantalla solo dice cuál es y esta hoja decide cómo se pinta. `SIN_DATO` no
+ * lleva color: no es un nivel, es que no se pudo medir.
+ */
+.indicadores {
+  display: grid;
+  gap: var(--f1);
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+}
+
+/* La cifra arranca a la misma altura en todas, lleven nota debajo o no. */
+.indicador {
+  align-content: start;
+}
+
+.indicador[data-semaforo='VERDE'] .cifra {
+  color: var(--color-bien);
+}
+
+.indicador[data-semaforo='AMBAR'] .cifra {
+  color: var(--color-atencion);
+}
+
+.indicador[data-semaforo='ROJO'] .cifra {
+  color: var(--color-mal);
+}
+
+/*
+ * La celda editable de la rejilla de ventas y de la hoja de conteo.
+ *
+ * Ancho fijo para que la columna no baile mientras se escribe, y `--tactil` de
+ * alto lo hereda de `input`. Es la pantalla que se usa DE PIE: si la celda se
+ * mueve al teclear, se pierde el sitio.
+ */
+.celda-editable {
+  width: 5rem;
+}
+
+/*
+ * En escritorio, más ancha. En un teléfono de 360 px la de 7rem hacía que la
+ * rejilla de ventas desbordara su marco y cortara la casilla y la cabecera
+ * «Unidades» (visto en la captura de la pantalla 3). 5rem caben seis cifras.
+ */
+@media (min-width: 60rem) {
+  .celda-editable {
+    width: 7rem;
+  }
+}
+
+/*
+ * Una columna de texto que no es la primera. Por defecto las celdas alinean a
+ * la derecha porque casi todas son cifras; la unidad de un ítem no lo es.
+ */
+.tabla th.izquierda,
+.tabla td.izquierda {
+  text-align: left;
+}

@@ -16,10 +16,13 @@ import { RELOJ } from '../../shared/application/ports/reloj.port';
 import { RelojDelSistema } from '../../shared/infrastructure/time/reloj-del-sistema';
 import { CatalogModule } from '../catalog/catalog.module';
 import {
+  ListarPropagaciones,
   PrevisualizarPropagacion,
   PropagarReceta,
   RevertirPropagacion,
 } from './application/casos-de-uso/propagacion';
+import { LeerComponentes, ReemplazarComponentes } from './application/casos-de-uso/componentes';
+import { LeerProducto, ProductosDeUbicacion, UbicacionesDeProducto } from './application/casos-de-uso/productos';
 import { AsignarEmpaque, LeerCarta } from './application/casos-de-uso/carta';
 import {
   ConfigurarProductoEnUbicacion,
@@ -29,9 +32,13 @@ import {
   ListarProductos,
   ListarVersionesDeReceta,
 } from './application/casos-de-uso/recetas';
+import { CrearProductosEnLote, GuardarRecetasEnLote } from './application/casos-de-uso/lotes';
 import { REPOSITORIO_DE_RECETAS } from './application/ports/repositorio-de-recetas.port';
 import { DependenciasDeRecetasNest } from './infrastructure/dependencias-de-recetas';
+import { ComponentesController } from './infrastructure/http/componentes.controller';
 import { EmpaqueController } from './infrastructure/http/empaque.controller';
+import { FichasDeProductoController } from './infrastructure/http/fichas-de-producto.controller';
+import { HistorialDeRecetasController } from './infrastructure/http/historial-de-recetas.controller';
 import { Propagacion } from './infrastructure/http/propagacion';
 import { ProductosController } from './infrastructure/http/productos.controller';
 import { RecetasController } from './infrastructure/http/recetas.controller';
@@ -41,7 +48,14 @@ type Deps = DependenciasDeRecetasNest;
 
 @Module({
   imports: [CatalogModule],
-  controllers: [ProductosController, EmpaqueController, RecetasController],
+  controllers: [
+    ProductosController,
+    EmpaqueController,
+    FichasDeProductoController,
+    ComponentesController,
+    RecetasController,
+    HistorialDeRecetasController,
+  ],
   providers: [
     { provide: REPOSITORIO_DE_RECETAS, useClass: PrismaRecetasRepositorio },
     { provide: RELOJ, useClass: RelojDelSistema },
@@ -98,7 +112,54 @@ type Deps = DependenciasDeRecetasNest;
           new RevertirPropagacion(d),
         ),
     },
+    {
+      provide: LeerProducto,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): LeerProducto => new LeerProducto(d),
+    },
+    {
+      provide: UbicacionesDeProducto,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): UbicacionesDeProducto => new UbicacionesDeProducto(d),
+    },
+    {
+      provide: ProductosDeUbicacion,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): ProductosDeUbicacion => new ProductosDeUbicacion(d),
+    },
+    {
+      provide: LeerComponentes,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): LeerComponentes => new LeerComponentes(d),
+    },
+    {
+      provide: ReemplazarComponentes,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): ReemplazarComponentes => new ReemplazarComponentes(d),
+    },
+    {
+      provide: ListarPropagaciones,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (d: Deps): ListarPropagaciones => new ListarPropagaciones(d),
+    },
+    {
+      provide: CrearProductosEnLote,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (deps: DependenciasDeRecetasNest): CrearProductosEnLote => new CrearProductosEnLote(deps),
+    },
+    {
+      provide: GuardarRecetasEnLote,
+      inject: [DependenciasDeRecetasNest],
+      useFactory: (deps: DependenciasDeRecetasNest): GuardarRecetasEnLote => new GuardarRecetasEnLote(deps),
+    },
   ],
-  exports: [LeerCarta, LeerReceta, ListarVersionesDeReceta],
+  exports: [
+    CrearProductosEnLote,
+    GuardarRecetasEnLote,
+    LeerCarta,
+    LeerReceta,
+    ListarProductos,
+    ListarVersionesDeReceta,
+  ],
 })
 export class RecipesModule {}

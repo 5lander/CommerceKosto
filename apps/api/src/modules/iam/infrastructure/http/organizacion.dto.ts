@@ -49,3 +49,31 @@ export type CuerpoDeUbicacion = z.infer<typeof CUERPO_DE_UBICACION>;
 export type CuerpoDeInvitacion = z.infer<typeof CUERPO_DE_INVITACION>;
 export type CuerpoDeActivacion = z.infer<typeof CUERPO_DE_ACTIVACION>;
 export type CuerpoDeRol = z.infer<typeof CUERPO_DE_ROL>;
+
+/** `GET /usuarios` (P16-C, D-16.126). */
+export interface UsuarioDto {
+  readonly id: string;
+  readonly email: string;
+  /** `INVITED` · `ACTIVE` · `SUSPENDED`. */
+  readonly estado: string;
+  readonly roles: readonly { readonly rol: string; readonly locationId: string | null }[];
+  /** Solo mientras está invitado; `null` en cuanto activa. */
+  readonly invitacionCaducaEn: string | null;
+  /** El último correo de invitación. `null` si ya activó o si nunca se encoló uno. */
+  readonly correoInvitacion: CorreoDeInvitacionDto | null;
+}
+
+/**
+ * `estado`: `PENDIENTE` · `ENVIADO` · `FALLIDO`. `error`, **solo si lo hay**: el
+ * último fallo del proveedor, acotado a 500 caracteres por el despachador.
+ */
+export type CorreoDeInvitacionDto =
+  | { readonly estado: string }
+  | { readonly estado: string; readonly error: string };
+
+/** `GET /roles` (P16-C, D-16.128). */
+export interface RolDto {
+  readonly codigo: string;
+  readonly requiereUbicacion: boolean;
+  readonly permisos: readonly string[];
+}

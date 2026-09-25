@@ -12,30 +12,43 @@
  * NO SE ACEPTA `factorDeConversion`: lo calcula el dominio. Lo que sí se acepta
  * es `factorExplicito`, que es otra cosa —cuántas unidades de uso salen de UNA
  * de compra— y solo hace falta cuando las dimensiones no coinciden.
+ *
+ * **`ivaTarifa` SE VALIDA EN EL CAMPO, NO EN UN REFINAMIENTO DE OBJETO**
+ * (INC-008): `fraccion` solo admite `0`, `0.xx` o `1`. Un `15` donde va
+ * `0.15` dividiría cada compra entre dieciséis, y el número sería plausible
+ * en pantalla. El dominio lo vuelve a comprobar con `exigirTarifaValida`.
  */
 
 import { z } from 'zod';
 
+import { decimalConSigno, decimalPositivo, fraccion } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 const LARGO_MAXIMO_DE_NOMBRE = 200;
 const LARGO_MAXIMO_DE_DECIMAL = 40;
 
-/** Decimal exacto en cadena: `"0.85"`, `"2"`, `"-1.5"`. Sin exponentes. */
-const decimal = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^-?\d+(\.\d+)?$/u, 'debe ser un decimal en notación normal, por ejemplo "0.85"');
 
 const nombre = z.string().trim().min(1).max(LARGO_MAXIMO_DE_NOMBRE);
 const texto = z.string().trim().max(LARGO_MAXIMO_DE_NOMBRE);
 
-export const CUERPO_DE_GRUPO = z.object({ nombre }).strict();
+/**
+ * `ivaTarifa` es la tarifa que heredan las compras SIN ARTÍCULO de los ítems
+ * del grupo (D-16.9). Omitida o `null`: el grupo no define ninguna.
+ */
+export const CUERPO_DE_GRUPO = z
+  .object({ nombre, ivaTarifa: fraccion.nullable().default(null) })
+  .strict();
+
+/** `PUT`: estado completo, así que aquí `ivaTarifa` no tiene valor por defecto. */
+export const CUERPO_DE_CAMBIO_DE_GRUPO = z
+  .object({ nombre, ivaTarifa: fraccion.nullable() })
+  .strict();
 
 export const CUERPO_DE_ITEM = z
   .object({
     nombre,
     tipo: z.enum(['COMPRADO', 'PRODUCIDO']),
     unidadDeUso: z.string().min(1).max(LARGO_MAXIMO_DE_DECIMAL),
-    rendimiento: decimal,
+    rendimiento: decimalConSigno,
     grupoId: z.uuid().nullable(),
     confianzaDePrecio: z.enum(['FACTURA', 'ESTIMADO']),
     /** `null` para un ítem comprado; obligatorio decidirlo en una preparación. */
@@ -45,8 +58,10 @@ export const CUERPO_DE_ITEM = z
 
 export const CUERPO_DE_CAMBIO_DE_ITEM = z
   .object({
+    /** La versión que se leyó (D-16.100). Si otra escritura llegó antes, 409. */
+    version: z.int().min(1),
     nombre,
-    rendimiento: decimal,
+    rendimiento: decimalConSigno,
     grupoId: z.uuid().nullable(),
     confianzaDePrecio: z.enum(['FACTURA', 'ESTIMADO']),
     estado: z.enum(['ACTIVE', 'INACTIVE']),
@@ -71,13 +86,46 @@ export const CUERPO_DE_ARTICULO = z
     nombre,
     marca: texto.nullable(),
     proveedor: texto.nullable(),
-    presentacion: decimal,
+    presentacion: decimalPositivo,
     unidadDePresentacion: z.string().min(1).max(LARGO_MAXIMO_DE_DECIMAL),
-    factorExplicito: decimal.nullable(),
+    factorExplicito: decimalConSigno.nullable(),
+    /** Obligatoria: la tarifa de IVA de ESTE artículo (D-16.9). */
+    ivaTarifa: fraccion,
+  })
+  .strict();
+
+/**
+ * Lo editable de un artículo. Ni la presentación ni su unidad ni el factor: son
+ * lo que convierte cada compra histórica a unidades de uso, y cambiarlos
+ * reescribiría meses cerrados. Para eso se crea otro artículo.
+ */
+export const CUERPO_DE_CAMBIO_DE_ARTICULO = z
+  .object({
+    nombre,
+    marca: texto.nullable(),
+    proveedor: texto.nullable(),
+    ivaTarifa: fraccion,
+    estado: z.enum(['ACTIVE', 'INACTIVE']),
   })
   .strict();
 
 export type CuerpoDeGrupo = z.infer<typeof CUERPO_DE_GRUPO>;
+export type CuerpoDeCambioDeGrupo = z.infer<typeof CUERPO_DE_CAMBIO_DE_GRUPO>;
+export type CuerpoDeCambioDeArticulo = z.infer<typeof CUERPO_DE_CAMBIO_DE_ARTICULO>;
 export type CuerpoDeItem = z.infer<typeof CUERPO_DE_ITEM>;
+/**
+ * `GET /catalogo/items?incluirInactivos=true`. Hasta P16-B era un `@Query` suelto
+ * que trataba cualquier cosa distinta de `"true"` como `false` —`"si"`, `"1"`,
+ * `"TRUE"`— sin avisar (D-16.111). Ahora son las dos palabras o 400.
+ */
+export const CONSULTA_DE_ITEMS = z
+  .object({ incluirInactivos: z.enum(['true', 'false']).default('false') })
+  .strict();
+
+/** `GET /catalogo/articulos?itemId=`. Sin `itemId`, todos los de la company. */
+export const CONSULTA_DE_ARTICULOS = z.object({ itemId: z.uuid().optional() }).strict();
+
+export type ConsultaDeItems = z.infer<typeof CONSULTA_DE_ITEMS>;
+export type ConsultaDeArticulos = z.infer<typeof CONSULTA_DE_ARTICULOS>;
 export type CuerpoDeCambioDeItem = z.infer<typeof CUERPO_DE_CAMBIO_DE_ITEM>;
 export type CuerpoDeArticulo = z.infer<typeof CUERPO_DE_ARTICULO>;

@@ -21,7 +21,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { ALMACENAMIENTO } from '../../../shared/domain/decimal/escalas';
-import { Quantity } from '../../../shared/domain/money/tipos-monetarios';
+import { Money, Quantity } from '../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../shared/domain/unidad/unidad-de-uso';
 
 import {
@@ -29,8 +29,10 @@ import {
   locationId as aLocationId,
   movementId as aMovementId,
   productionId as aProductionId,
+  purchaseArticleId as aPurchaseArticleId,
   transferId as aTransferId,
   type CompanyId,
+  type ImportJobId,
   type ItemId,
   type LocationId,
   type MovementId,
@@ -40,6 +42,7 @@ import {
 } from '../../../shared/domain/identity/identificadores';
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
+import { exigirDesgloseEnCompra, type DesgloseDeCompra } from '../domain/compra';
 import { DIRECCION_DE, type TipoDeMovimiento } from '../domain/movimiento';
 import type {
   AgregadoDeItem,
@@ -77,6 +80,30 @@ function aEscalaDeAlmacenamiento(valor: Decimal): string {
 /** Un agregado sin filas no vale `null` hacia fuera: vale cero, a su escala. */
 const CERO_ALMACENADO = (0).toFixed(ALMACENAMIENTO);
 
+/**
+ * El importe de unas compras CON LAS CORRECCIONES RESTADAS — INC-029.
+ *
+ * **POR QUE HAY QUE RESTARLAS A MANO, SI LA CANTIDAD SE CANCELA SOLA.** Porque
+ * `total_cost` es una MAGNITUD SIN SIGNO (ADR-009 §2): el sentido lo lleva la
+ * cantidad. La correccion de una compra es otra `COMPRA`, con cantidad negativa
+ * y el mismo importe en positivo, asi que `SUM(quantity)` vuelve a cero y
+ * `SUM(total_cost)` se DUPLICA. `compras_del_mes` (SPEC §16) contaba el dinero
+ * de compras que nadie hizo, y eso entra directo en el food cost real (R7).
+ *
+ * **SE RESTAN DOS VECES, Y NO ES UN ERROR**: el total ya las trae sumadas. Una
+ * resta las saca del total y la otra devuelve su dinero.
+ */
+function sinLasCorrecciones(total: Decimal | null, correcciones: Decimal | null): string {
+  if (total === null) return CERO_ALMACENADO;
+  if (correcciones === null) return aEscalaDeAlmacenamiento(total);
+
+  const devuelto = Money.fromDatabase(aEscalaDeAlmacenamiento(correcciones));
+  return Money.fromDatabase(aEscalaDeAlmacenamiento(total))
+    .minus(devuelto)
+    .minus(devuelto)
+    .toStorageString();
+}
+
 /** Lo que hace falta de un movimiento para responderlo. */
 const CAMPOS = {
   id: true,
@@ -85,6 +112,10 @@ const CAMPOS = {
   type: true,
   quantity: true,
   totalCost: true,
+  totalBruto: true,
+  ivaTarifaAplicada: true,
+  ivaRecuperableAplicado: true,
+  purchaseArticleId: true,
   occurredAt: true,
   recordedAt: true,
   transferId: true,
@@ -101,6 +132,10 @@ interface FilaDeMovimiento {
   readonly type: string;
   readonly quantity: Decimal;
   readonly totalCost: Decimal | null;
+  readonly totalBruto: Decimal | null;
+  readonly ivaTarifaAplicada: Decimal | null;
+  readonly ivaRecuperableAplicado: boolean | null;
+  readonly purchaseArticleId: string | null;
   readonly occurredAt: Date;
   readonly recordedAt: Date;
   readonly transferId: string | null;
@@ -118,6 +153,9 @@ function comoMovimiento(fila: FilaDeMovimiento): MovimientoLeido {
     tipo: fila.type as TipoDeMovimiento,
     cantidad: aEscalaDeAlmacenamiento(fila.quantity),
     costoTotal: fila.totalCost === null ? null : aEscalaDeAlmacenamiento(fila.totalCost),
+    desglose: desgloseDe(fila),
+    purchaseArticleId:
+      fila.purchaseArticleId === null ? null : aPurchaseArticleId(fila.purchaseArticleId),
     occurredAt: fila.occurredAt,
     recordedAt: fila.recordedAt,
     transferId: fila.transferId === null ? null : aTransferId(fila.transferId),
@@ -125,6 +163,25 @@ function comoMovimiento(fila: FilaDeMovimiento): MovimientoLeido {
     corrigeA: fila.reversesMovementId === null ? null : aMovementId(fila.reversesMovementId),
     corregidoPor: fila.correccion === null ? null : aMovementId(fila.correccion.id),
     note: fila.note,
+  };
+}
+
+/**
+ * El desglose sale entero o no sale: el CHECK `inventory_movement_desglose_coherente`
+ * garantiza que los tres campos van juntos, así que basta con mirar uno.
+ */
+function desgloseDe(fila: FilaDeMovimiento): DesgloseDeCompra | null {
+  if (
+    fila.totalBruto === null ||
+    fila.ivaTarifaAplicada === null ||
+    fila.ivaRecuperableAplicado === null
+  ) {
+    return null;
+  }
+  return {
+    totalBruto: aEscalaDeAlmacenamiento(fila.totalBruto),
+    ivaTarifaAplicada: aEscalaDeAlmacenamiento(fila.ivaTarifaAplicada),
+    ivaRecuperableAplicado: fila.ivaRecuperableAplicado,
   };
 }
 
@@ -143,25 +200,39 @@ interface FilaParaInsertar {
   readonly direction: string;
   readonly quantity: string;
   readonly totalCost: string | null;
+  readonly totalBruto: string | null;
+  readonly ivaTarifaAplicada: string | null;
+  readonly ivaRecuperableAplicado: boolean | null;
+  readonly desgloseConocido: boolean;
   readonly purchaseArticleId: string | null;
   readonly transferId: string | null;
   readonly productionId: string | null;
+  readonly importJobId: string | null;
   readonly reversesMovementId: string | null;
   readonly occurredAt: Date;
   readonly createdBy: string;
   readonly note: string | null;
 }
 
-/** `direction` se DERIVA del tipo aquí: no hay forma de recibirla mal. */
-function comoFila(
-  movimiento: MovimientoParaGuardar,
-  contexto: {
-    readonly companyId: CompanyId;
-    readonly userId: UserId;
-    readonly transferId: TransferId | null;
-    readonly productionId: ProductionId | null;
-  },
-): FilaParaInsertar {
+/** Lo que comparten todas las filas de una misma escritura. */
+interface ContextoDeInsercion {
+  readonly companyId: CompanyId;
+  readonly userId: UserId;
+  readonly transferId: TransferId | null;
+  readonly productionId: ProductionId | null;
+  /** La importación que trajo estas filas, o `null` si no vinieron de un archivo. */
+  readonly importJobId: ImportJobId | null;
+}
+
+/**
+ * `direction` se DERIVA del tipo aquí: no hay forma de recibirla mal. Y una
+ * COMPRA nueva sin desglose se para aquí (D-16.25): la base no la distingue de
+ * una anterior a P16-A1, así que la guarda es de aplicación y vive en la
+ * única función por la que entra toda fila del libro.
+ */
+function comoFila(movimiento: MovimientoParaGuardar, contexto: ContextoDeInsercion): FilaParaInsertar {
+  exigirDesgloseEnCompra(movimiento);
+
   return {
     companyId: contexto.companyId,
     locationId: movimiento.locationId,
@@ -170,9 +241,14 @@ function comoFila(
     direction: DIRECCION_DE[movimiento.tipo],
     quantity: movimiento.cantidad,
     totalCost: movimiento.costoTotal,
+    totalBruto: movimiento.desglose?.totalBruto ?? null,
+    ivaTarifaAplicada: movimiento.desglose?.ivaTarifaAplicada ?? null,
+    ivaRecuperableAplicado: movimiento.desglose?.ivaRecuperableAplicado ?? null,
+    desgloseConocido: movimiento.desglose !== null,
     purchaseArticleId: movimiento.purchaseArticleId,
     transferId: contexto.transferId,
     productionId: contexto.productionId,
+    importJobId: contexto.importJobId,
     reversesMovementId: movimiento.reversesMovementId,
     occurredAt: movimiento.occurredAt,
     createdBy: contexto.userId,
@@ -216,7 +292,10 @@ function vacio(): Acumulado {
  * mano, que es exactamente el `SELECT` crudo que la capa de tenant no deja
  * pasar. Aqui la consulta devuelve como mucho `items x 6` filas.
  */
-function plegarAgregados(filas: readonly FilaAgregada[]): readonly AgregadoDeItem[] {
+function plegarAgregados(
+  filas: readonly FilaAgregada[],
+  devuelto: ReadonlyMap<string, Decimal | null>,
+): readonly AgregadoDeItem[] {
   const porItem = new Map<string, Acumulado>();
 
   for (const fila of filas) {
@@ -226,7 +305,7 @@ function plegarAgregados(filas: readonly FilaAgregada[]): readonly AgregadoDeIte
 
     if (fila.type === COMPRA) {
       acumulado.compras = aEscalaDeAlmacenamiento(cantidad ?? CERO_DECIMAL);
-      acumulado.importeDeCompras = aEscalaDeAlmacenamiento(importe ?? CERO_DECIMAL);
+      acumulado.importeDeCompras = sinLasCorrecciones(importe, devuelto.get(fila.itemId) ?? null);
     } else if (MERMA_O_AJUSTE.includes(fila.type)) {
       acumulado.mermasYAjustes = sumarCadenas(acumulado.mermasYAjustes, cantidad);
     } else {
@@ -271,7 +350,7 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
   }): Promise<MovementId> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       const fila = await tx.inventoryMovement.create({
-        data: comoFila(entrada.movimiento, { ...entrada, ...SIN_AGRUPAR }),
+        data: comoFila(entrada.movimiento, { ...entrada, ...SIN_AGRUPAR, importJobId: null }),
         select: { id: true },
       });
       return aMovementId(fila.id);
@@ -282,10 +361,32 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
     readonly companyId: CompanyId;
     readonly userId: UserId;
     readonly movimientos: readonly MovimientoParaGuardar[];
+    readonly importJobId: ImportJobId | null;
   }): Promise<readonly MovementId[]> {
     return this.transaccion.run(entrada.companyId, async (tx) =>
       insertarTodos(tx, entrada.movimientos, { ...entrada, ...SIN_AGRUPAR }),
     );
+  }
+
+  /**
+   * Las filas que trajo una importación (D-16.200).
+   *
+   * `company_id` va en el `WHERE` además de en RLS: la misma defensa repetida
+   * que en el resto del repositorio, porque una que solo está en un sitio se
+   * cae entera si ese sitio falla.
+   */
+  public async movimientosDeImportacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly importJobId: ImportJobId;
+  }): Promise<readonly MovimientoLeido[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.inventoryMovement.findMany({
+        where: { companyId: entrada.companyId, importJobId: entrada.importJobId },
+        select: CAMPOS,
+        orderBy: { id: 'asc' },
+      });
+      return filas.map(comoMovimiento);
+    });
   }
 
   public async registrarTransferencia(datos: DatosDeTransferenciaRegistrada): Promise<TransferId> {
@@ -308,6 +409,7 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
         userId: datos.userId,
         transferId,
         productionId: null,
+        importJobId: null,
       });
 
       return transferId;
@@ -338,6 +440,7 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
         userId: datos.userId,
         transferId: null,
         productionId,
+        importJobId: null,
       });
 
       return productionId;
@@ -418,21 +521,24 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
     readonly hasta: Date;
   }): Promise<string> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filtro = {
+        companyId: entrada.companyId,
+        locationId: entrada.locationId,
+        type: COMPRA,
+        occurredAt: { gte: entrada.desde, lt: entrada.hasta },
+      };
+
       const agregado = await tx.inventoryMovement.aggregate({
-        where: {
-          companyId: entrada.companyId,
-          locationId: entrada.locationId,
-          type: 'COMPRA',
-          occurredAt: { gte: entrada.desde, lt: entrada.hasta },
-        },
+        where: filtro,
         _sum: { totalCost: true },
       });
 
-      // El importe es una magnitud sin signo; el sentido lo lleva la cantidad.
-      // La correccion de una compra la registra `RegistrarCompra` con el mismo
-      // importe, y su cantidad negativa es la que la anula en el saldo.
-      const suma = agregado._sum.totalCost;
-      return suma === null ? CERO_ALMACENADO : aEscalaDeAlmacenamiento(suma);
+      const correcciones = await tx.inventoryMovement.aggregate({
+        where: { ...filtro, reversesMovementId: { not: null } },
+        _sum: { totalCost: true },
+      });
+
+      return sinLasCorrecciones(agregado._sum.totalCost, correcciones._sum.totalCost);
     });
   }
 
@@ -450,18 +556,27 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
     readonly hasta: Date;
   }): Promise<readonly AgregadoDeItem[]> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filtro = {
+        companyId: entrada.companyId,
+        locationId: entrada.locationId,
+        occurredAt: { gte: entrada.desde, lt: entrada.hasta },
+      };
+
       const filas = await tx.inventoryMovement.groupBy({
         by: ['itemId', 'type'],
-        where: {
-          companyId: entrada.companyId,
-          locationId: entrada.locationId,
-          occurredAt: { gte: entrada.desde, lt: entrada.hasta },
-          type: { not: CONSUMO_POR_VENTA },
-        },
+        where: { ...filtro, type: { not: CONSUMO_POR_VENTA } },
         _sum: { quantity: true, totalCost: true },
       });
 
-      return plegarAgregados(filas);
+      // El dinero devuelto por las correcciones, por item — INC-029. Las
+      // cantidades NO lo necesitan: llevan signo y ya vienen netas de arriba.
+      const correcciones = await tx.inventoryMovement.groupBy({
+        by: ['itemId'],
+        where: { ...filtro, type: COMPRA, reversesMovementId: { not: null } },
+        _sum: { totalCost: true },
+      });
+
+      return plegarAgregados(filas, new Map(correcciones.map((c) => [c.itemId, c._sum.totalCost])));
     });
   }
 
@@ -484,21 +599,35 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
     readonly hasta: Date;
   }): Promise<readonly CompraPorArticulo[]> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filtro = {
+        companyId: entrada.companyId,
+        occurredAt: { gte: entrada.desde, lt: entrada.hasta },
+        type: COMPRA,
+      };
+
       const filas = await tx.inventoryMovement.groupBy({
         by: ['locationId', 'itemId', 'purchaseArticleId'],
-        where: {
-          companyId: entrada.companyId,
-          occurredAt: { gte: entrada.desde, lt: entrada.hasta },
-          type: COMPRA,
-        },
+        where: filtro,
         _sum: { quantity: true, totalCost: true },
       });
+
+      // INC-029, por presentacion. La correccion de una compra conserva su
+      // articulo justamente para caer en este mismo grupo: sin el, la
+      // devolucion no se podria restar de lo que se devolvio.
+      const correcciones = await tx.inventoryMovement.groupBy({
+        by: ['locationId', 'itemId', 'purchaseArticleId'],
+        where: { ...filtro, reversesMovementId: { not: null } },
+        _sum: { totalCost: true },
+      });
+      const devuelto = new Map(
+        correcciones.map((c) => [claveDeCompra(c), c._sum.totalCost]),
+      );
 
       return filas.map((fila) => ({
         locationId: fila.locationId as LocationId,
         itemId: fila.itemId as ItemId,
         purchaseArticleId: fila.purchaseArticleId,
-        importe: (fila._sum.totalCost ?? CERO_DECIMAL).toFixed(),
+        importe: sinLasCorrecciones(fila._sum.totalCost, devuelto.get(claveDeCompra(fila)) ?? null),
         cantidad: (fila._sum.quantity ?? CERO_DECIMAL).toFixed(),
       }));
     });
@@ -521,12 +650,7 @@ export class PrismaInventarioRepositorio implements RepositorioDeInventario {
 async function insertarTodos(
   tx: ClienteDeTransaccion,
   movimientos: readonly MovimientoParaGuardar[],
-  contexto: {
-    readonly companyId: CompanyId;
-    readonly userId: UserId;
-    readonly transferId: TransferId | null;
-    readonly productionId: ProductionId | null;
-  },
+  contexto: ContextoDeInsercion,
 ): Promise<readonly MovementId[]> {
   const ids: MovementId[] = [];
 
@@ -541,6 +665,15 @@ async function insertarTodos(
   }
 
   return ids;
+}
+
+/** La clave del grupo de `comprasPorArticulo`: sin articulo tambien es un grupo. */
+function claveDeCompra(fila: {
+  readonly locationId: string;
+  readonly itemId: string;
+  readonly purchaseArticleId: string | null;
+}): string {
+  return `${fila.locationId}|${fila.itemId}|${fila.purchaseArticleId ?? ''}`;
 }
 
 function saldoDe(
@@ -562,6 +695,7 @@ function filtroDelLibro(consulta: ConsultaDelLibro): Record<string, unknown> {
     companyId: consulta.companyId,
     locationId: consulta.locationId,
     ...(consulta.itemId === null ? {} : { itemId: consulta.itemId }),
+    ...(consulta.tipo === null ? {} : { type: consulta.tipo }),
     ...(rango === null ? {} : { occurredAt: rango }),
   };
 }

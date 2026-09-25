@@ -1,0 +1,233 @@
+# Superposicion de PRODUCCION — se aplica ENCIMA de docker-compose.yml.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# ES UNA SUPERPOSICION Y NO UN ARCHIVO APARTE, a proposito. Dos compose completos
+# divergen: alguien cambia una variable de entorno en uno y no en el otro, y
+# produccion deja de ser lo que se probo. Aqui solo esta LA DIFERENCIA, y se lee
+# entera de un vistazo:
+#
+#   1. Caddy delante, con TLS automatico
+#   2. La interfaz (`web`), que solo existe detras del proxy
+#   3. Limites de memoria: la base, la API y la interfaz comparten maquina (ADR-016)
+#   4. Archivado de WAL, para tener PITR y no perder hasta 24 h entre volcados
+#
+# LO QUE NO ESTA AQUI Y CONVIENE SABER: los puertos publicados ya estan atados a
+# 127.0.0.1 en el archivo base. Compose CONCATENA la lista de `ports` al
+# superponer, asi que no se pueden quitar desde aqui — y por eso la restriccion
+# vive en el archivo base, donde ademas protege tambien a la maquina de
+# desarrollo.
+
+name: costeo-saas
+
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - log_min_duration_statement=200
+      - -c
+      - pg_stat_statements.track=all
+      # --- Archivado de WAL: lo que convierte el respaldo diario en PITR ------
+      #
+      # Sin esto, la ventana de perdida es de hasta 24 horas: lo que haya
+      # entrado desde el ultimo `pg_dump`. Con esto, se puede recuperar hasta un
+      # instante concreto.
+      #
+      # `archive_command` copia a un directorio montado; quien lo suba fuera de
+      # la maquina es la tarea programada del host. **Un archivado que escribe
+      # en el mismo disco que puede morir no es un archivado**, es un rodeo.
+      #
+      # El `test ! -f` NO es una precaucion decorativa: PostgreSQL reintenta el
+      # mismo segmento si el comando falla, y sin esa comprobacion una copia a
+      # medias se sobrescribiria con otra a medias.
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal/%f && cp %p /wal/%f
+      - -c
+      - wal_level=replica
+    volumes:
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql
+      - walarchive:/wal
+    deploy:
+      resources:
+        limits:
+          # La base y la API comparten maquina. Sin techo, un plan de consulta
+          # malo en una se lleva por delante a la otra.
+          memory: 2G
+
+  pgbouncer:
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      LOG_LEVEL: info
+      # El limitador de peticiones vive en memoria del proceso. Con UNA replica
+      # el limite es exacto; el dia que haya dos, esto pasa a Redis o el limite
+      # real se multiplica por el numero de replicas sin que nadie lo note.
+      RATE_LIMIT_WINDOW_MS: '60000'
+      RATE_LIMIT_MAX: '300'
+      # En produccion NO hay valor por defecto: un enlace a localhost en la
+      # invitacion de un cliente es un fallo que descubre el cliente.
+      APP_URL: ${APP_URL:?falta APP_URL}
+      # Detras de Caddy TODA peticion llega con la IP de Caddy en el socket; la
+      # del cliente viaja en X-Forwarded-For. Sin esta lista la API no puede
+      # creerla y el bloqueo por IP del login seria un bloqueo de todos
+      # (INC-022, D-16.49). Vale la IP FIJA de Caddy de abajo: `172.28.0.10`,
+      # y solo esa. No la subred entera: en ella estan la pasarela (lo que ve
+      # el contenedor cuando algo del propio VPS entra por el puerto publicado)
+      # y el resto de contenedores, y cualquiera de ellos podria entonces
+      # poner la cabecera que quisiera.
+      PROXY_DE_CONFIANZA: ${PROXY_DE_CONFIANZA:?falta PROXY_DE_CONFIANZA}
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  # El despachador de correo: un bucle con un pool de dos conexiones y una
+  # llamada HTTP cada pocos segundos. 128M sobran.
+  correo:
+    environment:
+      MAIL_ADAPTER: ${MAIL_ADAPTER:?falta MAIL_ADAPTER}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # --- La interfaz ------------------------------------------------------------
+  #
+  # VIVE SOLO AQUI, no en el archivo base, y por la misma razon que Caddy: solo
+  # tiene sentido detras del proxy. Su `NEXT_PUBLIC_API_URL` es `/api`, una ruta
+  # relativa, asi que da por hecho que algo sirve la API en el mismo origen. En
+  # desarrollo el frontend no se contenedoriza: se corre con `next dev` y su
+  # `.env.local`, que apunta a `http://localhost:3000`.
+  #
+  # NO depende de la API para arrancar. Las cinco pantallas son cliente y piden
+  # sus datos desde el navegador; el servidor de Next no llama a la API ni al
+  # construir ni al servir. Encadenarlas solo haria que una API caida dejara al
+  # usuario sin la pantalla que le explica que la API esta caida.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # SE HORNEA EN EL PAQUETE DEL NAVEGADOR, en tiempo de build. Ponerlo en
+        # `environment:` no haria nada. Se deja explicito aqui —aunque el
+        # Dockerfile ya lo trae por defecto— para que quien lea el compose vea
+        # de donde sale la URL que usa el navegador.
+        NEXT_PUBLIC_API_URL: /api
+    container_name: costeo-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    ports:
+      # En local, para poder mirar la interfaz sin pasar por el proxy cuando
+      # algo va mal. Atado a 127.0.0.1 como todo lo demas.
+      - '127.0.0.1:3001:3001'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/entrar').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          # Next sirviendo paginas ya construidas gasta poco: no hay render de
+          # servidor con datos, solo archivos y el enrutador.
+          memory: 256M
+
+  # --- El unico servicio que mira a internet ---------------------------------
+  #
+  # Caddy y no nginx+certbot por una razon y es la de siempre en este proyecto:
+  # es la opcion aburrida. Obtiene y renueva el certificado de Let's Encrypt
+  # solo, sin cron, sin hook de recarga y sin un certificado caducado un domingo.
+  # Su configuracion son cuatro lineas frente a un archivo de nginx que hay que
+  # entender para tocar.
+  #
+  # IMAGEN FIJADA POR DIGEST, como todas (CLAUDE.md §1, regla
+  # `sin-imagen-sin-fijar` de audit:forbidden).
+  caddy:
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    container_name: costeo-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    environment:
+      DOMINIO: ${DOMINIO:?falta DOMINIO}
+      # Let's Encrypt avisa a esta direccion si el certificado va a caducar y la
+      # renovacion automatica no esta funcionando. Es el aviso que llega ANTES
+      # de que el sitio deje de cargar.
+      CORREO_TLS: ${CORREO_TLS:?falta CORREO_TLS}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    # IP FIJA, y es la unica que va en `PROXY_DE_CONFIANZA` (INC-022). Con la
+    # subred entera en la lista, la pasarela `172.28.0.1` —que es lo que la API
+    # ve cuando algo del propio VPS entra por `127.0.0.1:3000`— y los demas
+    # contenedores podrian poner la `X-Forwarded-For` que quisieran: esquivar
+    # el limite por IP o envenenar la de un tercero. Si esta direccion cambia,
+    # cambia `PROXY_DE_CONFIANZA` con ella, y `down` + `up`.
+    networks:
+      default:
+        ipv4_address: 172.28.0.10
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+# --- La red, con subred FIJA ---------------------------------------------------
+#
+# `PROXY_DE_CONFIANZA` es la IP de Caddy escrita en el `.env` del VPS, y una IP
+# fija solo existe dentro de una subred declarada. Sin ella, Docker asigna una
+# al crear la red (172.18.0.0/16, 172.19.0.0/16, la siguiente libre...) y puede
+# cambiar tras un `docker compose down`/`up` o al crear otra red en la maquina.
+# El fallo seria SILENCIOSO: el socket de Caddy dejaria de casar con la lista,
+# la API volveria a la IP del socket —la de Caddy— y el bloqueo por IP volveria
+# a ser global sin un solo error en el log. Con la subred fijada aqui,
+# `172.28.0.10` significa lo mismo hoy y en un ano.
+#
+# CAMBIAR LA SUBRED EXIGE `docker compose down` Y `up`: la configuracion IPAM
+# de una red existente no se modifica en caliente y un `restart` no la toca
+# (docs/runbooks/despliegue.md).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  pgdata:
+    name: costeo-pgdata
+  # Los segmentos de WAL a la espera de que la tarea programada los suba fuera.
+  walarchive:
+    name: costeo-wal
+  # Aqui viven los certificados. **Perder este volumen significa volver a
+  # pedirlos**, y Let's Encrypt limita cuantas veces por semana se puede.
+  caddydata:
+    name: costeo-caddy-data
+  caddyconfig:
+    name: costeo-caddy-config

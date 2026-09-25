@@ -105,6 +105,8 @@ export class RegistrarConsumoPorVenta {
       companyId: sesion.companyId,
       userId: sesion.userId,
       movimientos,
+      // El consumo por venta no viene de ningún archivo: lo calcula la receta.
+      importJobId: null,
     });
 
     await registrarEvento({
@@ -247,6 +249,7 @@ function salida(entrada: {
     tipo: 'CONSUMO_POR_VENTA',
     cantidad: conSignoDelTipo('CONSUMO_POR_VENTA', magnitud).toStorageString(),
     costoTotal: null,
+    desglose: null,
     purchaseArticleId: null,
     reversesMovementId: null,
     occurredAt: entrada.datos.occurredAt,

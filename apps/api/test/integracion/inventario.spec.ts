@@ -30,26 +30,36 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
+import { plegarAgregadosDelPeriodo } from '../../src/modules/inventory/domain/agregados';
 import { proyectarSaldos } from '../../src/modules/inventory/domain/saldo';
+import {
+  REPOSITORIO_DE_INVENTARIO,
+  type RepositorioDeInventario,
+} from '../../src/modules/inventory/application/ports/repositorio-de-inventario.port';
 import type { TipoDeMovimiento } from '../../src/modules/inventory/domain/movimiento';
 import {
+  companyId as aCompanyId,
   itemId as aItemId,
   locationId as aLocationId,
 } from '../../src/shared/domain/identity/identificadores';
-import { Quantity } from '../../src/shared/domain/money/tipos-monetarios';
+import { Money, Quantity } from '../../src/shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../src/shared/domain/unidad/unidad-de-uso';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
 const SIN_CONTENIDO = 204;
 const ENTRADA_INVALIDA = 400;
 const PROHIBIDO = 403;
+const NO_ENCONTRADO = 404;
 const CONFLICTO = 409;
 
 const CONTRASENA = 'tres cebollas moradas';
 const ENERO = '2026-01-15T00:00:00.000Z';
 const MARZO = '2026-03-15T00:00:00.000Z';
+/** Posterior a MARZO: un precio que empieza aquí NO cubre un lote de marzo (INC-032). */
+const MAYO = '2026-05-15T00:00:00.000Z';
 
 const URL_MIGRATOR = process.env['MIGRATION_DATABASE_URL'];
 if (URL_MIGRATOR === undefined) {
@@ -91,6 +101,8 @@ describe('inventario', () => {
   let cookieBodega: string;
   let bodegaCentral: string;
   let local: string;
+  /** La company del tenant de esta suite. La necesita quien llama al repositorio. */
+  let company: string;
 
   function servidor(): Server {
     return app.getHttpServer() as Server;
@@ -101,7 +113,7 @@ describe('inventario', () => {
       .post('/auth/login')
       .send({ email, contrasena: CONTRASENA });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function crearItem(datos: {
@@ -111,7 +123,7 @@ describe('inventario', () => {
   }): Promise<string> {
     const respuesta = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `Insumo ${randomUUID().slice(0, 8)}`,
         tipo: datos.tipo,
@@ -125,13 +137,23 @@ describe('inventario', () => {
     return (respuesta.body as { id: string }).id;
   }
 
-  /** Un ítem comprado con artículo y precio confirmado, listo para costear. */
-  async function itemConPrecio(precio: string, unidad = 'unid'): Promise<string> {
+  /**
+   * Un ítem comprado con artículo y precio confirmado, listo para costear.
+   *
+   * `vigenteDesde` existe por INC-032: un precio que empieza DESPUÉS de la
+   * fecha del lote deja al insumo sin costo a esa fecha, que es el caso real
+   * que destapó el fallo. Por defecto es ENERO, anterior a todo lo demás.
+   */
+  async function itemConPrecio(
+    precio: string,
+    unidad = 'unid',
+    vigenteDesde: string = ENERO,
+  ): Promise<string> {
     const itemId = await crearItem({ tipo: 'COMPRADO', unidad, llevaStock: null });
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         itemId,
         nombre: `Presentacion ${randomUUID().slice(0, 8)}`,
@@ -140,6 +162,7 @@ describe('inventario', () => {
         presentacion: '1',
         unidadDePresentacion: unidad,
         factorExplicito: null,
+        ivaTarifa: '0',
       });
     expect(articulo.status).toBe(CREADO);
 
@@ -148,7 +171,7 @@ describe('inventario', () => {
       purchaseArticleId: (articulo.body as { id: string }).id,
       precio,
       ivaCompra: '0',
-      validFrom: ENERO,
+      validFrom: vigenteDesde,
     });
     return itemId;
   }
@@ -177,22 +200,35 @@ describe('inventario', () => {
   async function confirmarPrecio(cuerpo: Cuerpo): Promise<void> {
     const sugerido = await request(servidor())
       .post('/precios')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ origen: 'MANUAL', nota: null, ...cuerpo });
     expect(sugerido.status).toBe(CREADO);
 
     const decision = await request(servidor())
       .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
   }
 
+  /**
+   * Una COMPRA de esta suite lleva tarifa CERO en el cuerpo: los ítems no
+   * tienen grupo y la compra no trae artículo, así que sin ella sería 400
+   * (D-16.9). Con cero, el neto ES el bruto y los saldos e importes que estas
+   * pruebas esperan no cambian. La tarifa real se prueba en `iva-de-compra`.
+   */
   function registrar(cuerpo: Cuerpo, quien = cookie) {
     return request(servidor())
       .post('/inventario/movimientos')
-      .set('Cookie', quien)
-      .send({ costoTotal: null, purchaseArticleId: null, note: null, occurredAt: MARZO, ...cuerpo });
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
+      .send({
+        costoTotal: null,
+        purchaseArticleId: null,
+        ivaTarifa: cuerpo['tipo'] === 'COMPRA' ? '0' : null,
+        note: null,
+        occurredAt: MARZO,
+        ...cuerpo,
+      });
   }
 
   async function comprar(datos: {
@@ -216,7 +252,7 @@ describe('inventario', () => {
     const respuesta = await request(servidor())
       .get('/inventario/saldos')
       .query({ locationId })
-      .set('Cookie', quien);
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
     expect(respuesta.status).toBe(OK);
     return respuesta.body as readonly SaldoDto[];
   }
@@ -245,7 +281,7 @@ describe('inventario', () => {
       `INSERT INTO company (name, status) VALUES ($1, 'ACTIVE') RETURNING id`,
       [`inventario ${sufijo}`],
     );
-    const company = rows[0]?.id ?? '';
+    company = rows[0]?.id ?? '';
 
     // `company_settings` NO se inserta aquí: la crea la semilla de P3 al dar de
     // alta la company, con los valores de D3. Insertarla a mano choca contra su
@@ -366,6 +402,28 @@ describe('inventario', () => {
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
     });
 
+    it('🔴 un importe negativo es 400, no el 500 de inventory_movement_importe_no_negativo (INC-012, D-16.110)', async () => {
+      const item = await itemConPrecio('2.00');
+      const compra = await registrar({
+        locationId: bodegaCentral,
+        itemId: item,
+        tipo: 'COMPRA',
+        cantidad: '5',
+        costoTotal: '-5',
+      });
+      const merma = await registrar({
+        locationId: bodegaCentral,
+        itemId: item,
+        tipo: 'MERMA',
+        cantidad: '1',
+        costoTotal: '-5',
+      });
+
+      expect([compra.status, merma.status]).toEqual([ENTRADA_INVALIDA, ENTRADA_INVALIDA]);
+      expect(compra.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+      expect(merma.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
     it('una compra sin importe se rechaza: de ahí sale `compras_del_mes`', async () => {
       const item = await itemConPrecio('2.00');
       const respuesta = await registrar({
@@ -386,7 +444,7 @@ describe('inventario', () => {
 
       const correccion = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: 'me equivoqué de bodega' });
       expect(correccion.status).toBe(CREADO);
 
@@ -395,7 +453,7 @@ describe('inventario', () => {
       const libro = await request(servidor())
         .get('/inventario/movimientos')
         .query({ locationId: bodegaCentral, itemId: item })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       const movimientos = (libro.body as { movimientos: MovimientoDto[] }).movimientos;
 
       // LAS DOS FILAS SIGUEN AHÍ. Es la diferencia entre corregir y borrar.
@@ -413,15 +471,48 @@ describe('inventario', () => {
 
       await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
 
       const { rows } = await duena.query<{ suma: string }>(
         `SELECT COALESCE(SUM(quantity), 0)::text AS suma FROM inventory_movement
-         WHERE item_id = $1 AND type = 'COMPRA'`,
-        [item],
+         WHERE company_id = $2 AND item_id = $1 AND type = 'COMPRA'`,
+        [item, company],
       );
       expect(Number.parseFloat(rows[0]?.suma ?? '1')).toBe(0);
+    });
+
+    /**
+     * **Y EL DINERO TAMBIÉN VUELVE — INC-029.**
+     *
+     * La prueba de arriba miraba la cantidad, que siempre estuvo bien porque
+     * lleva signo. El importe NO lo lleva (ADR-009 §2), así que `SUM(total_cost)`
+     * sumaba la compra y su corrección: `compras_del_mes` (SPEC §16) contaba el
+     * dinero de una compra que se anuló, y de ahí sale el food cost real. Esto
+     * pregunta por el número que el cierre usa —con el signo aplicado— y exige
+     * que sea cero.
+     */
+    it('y su DINERO también se cancela: la compra corregida no cuenta en el mes', async () => {
+      const item = await itemConPrecio('2.00');
+      const compra = await comprar({
+        itemId: item,
+        locationId: bodegaCentral,
+        cantidad: '4',
+        costoTotal: '46.00',
+      });
+
+      await request(servidor())
+        .post(`/inventario/movimientos/${compra}/correccion`)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ note: null });
+
+      const { rows } = await duena.query<{ neto: string }>(
+        `SELECT COALESCE(SUM(sign(quantity) * total_cost), 0)::text AS neto
+           FROM inventory_movement
+          WHERE company_id = $2 AND item_id = $1 AND type = 'COMPRA'`,
+        [item, company],
+      );
+      expect(Number.parseFloat(rows[0]?.neto ?? '1')).toBe(0);
     });
 
     it('corregir dos veces el mismo movimiento devuelve 409, no un 500 del índice único', async () => {
@@ -430,13 +521,13 @@ describe('inventario', () => {
 
       const primera = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
       expect(primera.status).toBe(CREADO);
 
       const segunda = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
       expect(segunda.status).toBe(CONFLICTO);
     });
@@ -447,12 +538,12 @@ describe('inventario', () => {
 
       const primera = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
 
       const segunda = await request(servidor())
         .post(`/inventario/movimientos/${(primera.body as { id: string }).id}/correccion`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ note: null });
       expect(segunda.status).toBe(CONFLICTO);
     });
@@ -463,11 +554,11 @@ describe('inventario', () => {
 
       const editar = await request(servidor())
         .put(`/inventario/movimientos/${compra}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ cantidad: '999' });
       const borrar = await request(servidor())
         .delete(`/inventario/movimientos/${compra}`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(editar.status).toBe(404);
       expect(borrar.status).toBe(404);
@@ -481,7 +572,7 @@ describe('inventario', () => {
 
       const transferencia = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           origen: bodegaCentral,
           destino: local,
@@ -496,8 +587,9 @@ describe('inventario', () => {
       expect(await saldoDe(local, item)).toBe('4.000000000000');
 
       const { rows } = await duena.query<{ suma: string }>(
-        `SELECT COALESCE(SUM(quantity), 0)::text AS suma FROM inventory_movement WHERE item_id = $1`,
-        [item],
+        `SELECT COALESCE(SUM(quantity), 0)::text AS suma FROM inventory_movement
+          WHERE company_id = $2 AND item_id = $1`,
+        [item, company],
       );
       expect(Number.parseFloat(rows[0]?.suma ?? '-1')).toBe(10);
     });
@@ -506,7 +598,7 @@ describe('inventario', () => {
       const item = await itemConPrecio('2.00');
       const respuesta = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           origen: bodegaCentral,
           destino: bodegaCentral,
@@ -553,8 +645,9 @@ describe('inventario', () => {
         quantity: string;
       }>(
         `SELECT location_id, item_id, type, quantity::text
-           FROM inventory_movement WHERE location_id = $1 AND item_id = $2`,
-        [local, item],
+           FROM inventory_movement
+          WHERE company_id = $3 AND location_id = $1 AND item_id = $2`,
+        [local, item, company],
       );
 
       const kg = unidadDeUso('kg');
@@ -574,6 +667,126 @@ describe('inventario', () => {
       // 12,345 − 0,075 − 1,27
       expect(proyectado).toBe('11.000000000000');
     });
+
+  /**
+   * **CC-010 — el `SUM` del dinero y el pliegue del dominio coinciden** (D-16.201).
+   *
+   * Es el mismo criterio que la prueba de arriba fija para el saldo, aplicado a
+   * lo que hasta ahora no lo tenía: **el dinero**. Hasta D-16.201 el único
+   * sitio donde estaba escrito qué vale `compras_del_mes` era una consulta SQL,
+   * y por esa grieta entró INC-029 —una compra corregida que seguía contando su
+   * importe— sin que ninguna prueba se enterara.
+   *
+   * El `CONSUMO_POR_VENTA` no entra aquí: su exclusión ya la fija la prueba de
+   * P8 que registra el consumo y exige que el stock teórico dé lo mismo con él
+   * y sin él. Lo que falta cubrir, y se cubre, son los seis tipos restantes.
+   */
+  it('CC-010 — el dinero que suma PostgreSQL es el que pliega el dominio', async () => {
+    const { rows: locales } = await duena.query<{ id: string }>(
+      `INSERT INTO location (company_id, name, type, status)
+       SELECT company_id, $2, 'LOCAL', 'ACTIVE' FROM location WHERE id = $1
+       RETURNING id, company_id`,
+      [local, `CC-010 ${randomUUID().slice(0, 8)}`],
+    );
+    const sucursal = locales[0]?.id ?? '';
+
+    const arroz = await itemConPrecio('1.00', 'kg');
+    const salsa = await preparacionConPrecio({ precio: '1.00', unidad: 'lt', llevaStock: true });
+
+    // 1 y 2 — dos compras, con la tarifa a cero para que el neto sea el tecleado
+    await registrar({ locationId: sucursal, itemId: arroz, tipo: 'COMPRA', cantidad: '100', costoTotal: '100.00' });
+    const segunda = await registrar({
+      locationId: sucursal,
+      itemId: arroz,
+      tipo: 'COMPRA',
+      cantidad: '50',
+      costoTotal: '50.00',
+    });
+
+    // 3 — LA CORRECCIÓN de la segunda compra: la fila que INC-029 contaba al derecho
+    const correccion = await request(servidor())
+      .post(`/inventario/movimientos/${(segunda.body as { id: string }).id}/correccion`)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ note: 'llegó a la sucursal equivocada' });
+    expect(correccion.status).toBe(CREADO);
+
+    // 4 — transferencia, que mueve stock y no dinero
+    const transferencia = await request(servidor())
+      .post('/inventario/transferencias')
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ origen: sucursal, destino: bodegaCentral, itemId: arroz, cantidad: '20', occurredAt: MARZO, note: null });
+    expect(transferencia.status).toBe(CREADO);
+
+    // 5 — producción, que SÍ lleva importe y no es una compra
+    const produccion = await request(servidor())
+      .post('/inventario/producciones')
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({
+        locationId: sucursal,
+        itemId: salsa,
+        cantidad: '8',
+        insumos: [{ itemId: arroz, cantidad: '8' }],
+        occurredAt: MARZO,
+        note: null,
+      });
+    expect(produccion.status).toBe(CREADO);
+
+    // 6 y 7 — merma y ajuste
+    await registrar({ locationId: sucursal, itemId: arroz, tipo: 'MERMA', cantidad: '2.5' });
+    await registrar({ locationId: sucursal, itemId: arroz, tipo: 'AJUSTE', cantidad: '0.5' });
+
+    // Los movimientos CRUDOS, sin pasar por el repositorio que se está verificando.
+    const { rows } = await duena.query<{
+      location_id: string;
+      item_id: string;
+      type: string;
+      quantity: string;
+      total_cost: string | null;
+    }>(
+      `SELECT location_id, item_id, type, quantity::text, total_cost::text
+         FROM inventory_movement
+        WHERE company_id = $3 AND location_id = $1 AND item_id = $2`,
+      [sucursal, arroz, company],
+    );
+
+    const kg = unidadDeUso('kg');
+    const plegado = plegarAgregadosDelPeriodo(
+      rows.map((fila) => ({
+        locationId: aLocationId(fila.location_id),
+        itemId: aItemId(fila.item_id),
+        tipo: fila.type as TipoDeMovimiento,
+        cantidad: Quantity.fromDatabase(fila.quantity, kg),
+        costoTotal: fila.total_cost === null ? null : Money.fromDatabase(fila.total_cost),
+        ocurridoEn: new Date(),
+      })),
+    );
+
+    const repositorio = app.get<RepositorioDeInventario>(REPOSITORIO_DE_INVENTARIO);
+    const tenant = aCompanyId(company);
+    const desde = new Date('2026-03-01T00:00:00.000Z');
+    const hasta = new Date('2026-04-01T00:00:00.000Z');
+
+    const [porSql] = (
+      await repositorio.agregadosDelPeriodo({ companyId: tenant, locationId: aLocationId(sucursal), desde, hasta })
+    ).filter((agregado) => agregado.itemId === arroz);
+    const comprasPorSql = await repositorio.comprasEntre({
+      companyId: tenant,
+      locationId: aLocationId(sucursal),
+      desde,
+      hasta,
+    });
+
+    // 100 + 50 − 50: la corrección resta su importe, y la producción no suma el suyo.
+    expect(plegado[0]?.importeDeCompras.toExactString()).toBe('100');
+    expect(porSql?.importeDeCompras).toBe(plegado[0]?.importeDeCompras.toStorageString());
+    expect(comprasPorSql).toBe(plegado[0]?.importeDeCompras.toStorageString());
+
+    // Y las cantidades, que ya cuadraban, siguen cuadrando por los dos caminos.
+    expect(porSql?.compras).toBe(plegado[0]?.compras.toStorageString());
+    expect(porSql?.mermasYAjustes).toBe(plegado[0]?.mermasYAjustes.toStorageString());
+    expect(porSql?.otros).toBe(plegado[0]?.otros.toStorageString());
+  }, 120_000);
+
   });
 
   describe('R10 — la producción se valora al estándar y deja su varianza', () => {
@@ -588,7 +801,7 @@ describe('inventario', () => {
 
       const produccion = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -626,7 +839,7 @@ describe('inventario', () => {
 
       const produccion = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -657,7 +870,7 @@ describe('inventario', () => {
 
       await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -669,8 +882,8 @@ describe('inventario', () => {
 
       const { rows } = await duena.query<{ total_cost: string }>(
         `SELECT total_cost::text FROM inventory_movement
-          WHERE item_id = $1 AND type = 'PRODUCCION' AND quantity > 0`,
-        [salsa],
+          WHERE company_id = $2 AND item_id = $1 AND type = 'PRODUCCION' AND quantity > 0`,
+        [salsa, company],
       );
       expect(Number.parseFloat(rows[0]?.total_cost ?? '')).toBe(1);
     });
@@ -679,7 +892,7 @@ describe('inventario', () => {
       const comprado = await itemConPrecio('0.50', 'kg');
       const respuesta = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: comprado,
@@ -701,7 +914,7 @@ describe('inventario', () => {
 
       const respuesta = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: bodegaCentral,
           itemId: salsa,
@@ -712,6 +925,75 @@ describe('inventario', () => {
         });
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
       expect((respuesta.body as { message: string }).message).toContain('interruptor');
+    });
+
+    // INC-032. Antes de esto el insumo sin precio entraba valorado en 0,00 y el
+    // lote se registraba: la varianza de R10 informaba de un ahorro inventado, y
+    // R3 impide corregir la fila despues. La misma regla que ya paraba al item
+    // producido sin estandar, aplicada al otro lado.
+    it('un INSUMO sin precio a la fecha del lote DETIENE la producción', async () => {
+      // El precio del camarón empieza en mayo; el lote es de marzo.
+      const camaron = await itemConPrecio('8.00', 'kg', MAYO);
+      const salsa = await preparacionConPrecio({
+        precio: '8.00',
+        unidad: 'kg',
+        llevaStock: true,
+      });
+
+      const respuesta = await request(servidor())
+        .post('/inventario/producciones')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({
+          locationId: bodegaCentral,
+          itemId: salsa,
+          cantidad: '2',
+          insumos: [{ itemId: camaron, cantidad: '1.3' }],
+          occurredAt: MARZO,
+          note: null,
+        });
+
+      expect(respuesta.status).toBe(ENTRADA_INVALIDA);
+      // Nombra el insumo y la fecha: quien produce tiene que saber QUÉ confirmar.
+      const mensaje = (respuesta.body as { message: string }).message;
+      expect(mensaje).toContain('precio de referencia confirmado');
+      expect(mensaje).toContain('2026-03-15');
+    });
+
+    it('y ese lote rechazado NO deja ni una fila en el libro', async () => {
+      const camaron = await itemConPrecio('8.00', 'kg', MAYO);
+      const salsa = await preparacionConPrecio({
+        precio: '8.00',
+        unidad: 'kg',
+        llevaStock: true,
+      });
+
+      await request(servidor())
+        .post('/inventario/producciones')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({
+          locationId: bodegaCentral,
+          itemId: salsa,
+          cantidad: '2',
+          insumos: [{ itemId: camaron, cantidad: '1.3' }],
+          occurredAt: MARZO,
+          note: null,
+        });
+
+      // El libro es append-only (R3): lo que entra mal valorado se queda. Por eso
+      // la comprobación no es solo el 400, es que no se escribió NADA.
+      const { rows } = await duena.query<{ total: string }>(
+        `SELECT count(*)::text AS total FROM inventory_movement
+          WHERE company_id = $1 AND item_id IN ($2, $3)`,
+        [company, salsa, camaron],
+      );
+      expect(rows[0]?.total).toBe('0');
+
+      const { rows: lotes } = await duena.query<{ total: string }>(
+        `SELECT count(*)::text AS total FROM inventory_production
+          WHERE company_id = $1 AND item_id = $2`,
+        [company, salsa],
+      );
+      expect(lotes[0]?.total).toBe('0');
     });
   });
 
@@ -756,22 +1038,24 @@ describe('inventario', () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: bodegaCentral })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('NO puede leer el libro de movimientos', async () => {
       const respuesta = await request(servidor())
         .get('/inventario/movimientos')
         .query({ locationId: bodegaCentral })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('NO puede registrar producción: fija el costo estándar de una preparación', async () => {
       const respuesta = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', cookieBodega)
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega))
         .send({
           locationId: bodegaCentral,
           itemId: randomUUID(),
@@ -781,6 +1065,7 @@ describe('inventario', () => {
           note: null,
         });
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -789,21 +1074,24 @@ describe('inventario', () => {
     async function productoConReceta(lineas: readonly Cuerpo[]): Promise<string> {
       const producto = await request(servidor())
         .post('/productos')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ nombre: `Plato ${randomUUID().slice(0, 8)}`, tipo: 'SIMPLE', categoria: null });
       expect(producto.status).toBe(CREADO);
       const id = (producto.body as { id: string }).id;
 
       const activacion = await request(servidor())
         .put(`/productos/${id}/ubicaciones`)
-        .set('Cookie', cookie)
-        .send({ locationId: local, activo: true, pvp: '3.00', rendimientoPorciones: '1' });
-      expect(activacion.status).toBe(SIN_CONTENIDO);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        // Recién creado: versión 1 (D-16.100).
+        .send({ locationId: local, activo: true, pvp: '3.00', rendimientoPorciones: '1', version: 1 });
+      expect(activacion.status).toBe(OK);
 
       const receta = await request(servidor())
         .put('/recetas')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
+          // Sin receta previa: la primera versión se basa en ninguna (D-16.101).
+          basadaEn: null,
           destino: { clase: 'producto', productId: id },
           locationId: local,
           validFrom: ENERO,
@@ -817,8 +1105,9 @@ describe('inventario', () => {
     async function recetaDeItem(itemId: string, lineas: readonly Cuerpo[]): Promise<void> {
       const receta = await request(servidor())
         .put('/recetas')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
+          basadaEn: null,
           destino: { clase: 'item', itemId },
           locationId: local,
           validFrom: ENERO,
@@ -831,7 +1120,7 @@ describe('inventario', () => {
     async function vender(productId: string, unidades: string): Promise<void> {
       const respuesta = await request(servidor())
         .post('/inventario/consumos')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: local,
           ventas: [{ productId, unidades }],
@@ -891,7 +1180,7 @@ describe('inventario', () => {
 
       const cambio = await request(servidor())
         .put(`/catalogo/items/${salsa}`)
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           nombre: `Salsa ${randomUUID().slice(0, 8)}`,
           rendimiento: '1',
@@ -899,8 +1188,10 @@ describe('inventario', () => {
           confianzaDePrecio: 'FACTURA',
           estado: 'ACTIVE',
           llevaStock: true,
+          // La receta no toca la versión del ítem: sigue en 1 (D-16.101).
+          version: 1,
         });
-      expect(cambio.status).toBe(SIN_CONTENIDO);
+      expect(cambio.status).toBe(OK);
 
       await vender(plato, '10');
 
@@ -957,8 +1248,9 @@ describe('inventario', () => {
       await comprar({ itemId: item, locationId: local, cantidad: '5' });
 
       const { rows } = await duena.query<{ total: string }>(
-        `SELECT count(*)::text AS total FROM inventory_movement WHERE item_id = $1`,
-        [item],
+        `SELECT count(*)::text AS total FROM inventory_movement
+          WHERE company_id = $2 AND item_id = $1`,
+        [item, company],
       );
       expect(Number(rows[0]?.total ?? '0')).toBeGreaterThan(0);
 
@@ -977,20 +1269,96 @@ describe('inventario', () => {
     });
   });
 
+  describe('un movimiento por su id y el libro por tipo (P16-C, D-16.125)', () => {
+    function leerMovimiento(id: string, quien = cookie) {
+      return request(servidor()).get(`/inventario/movimientos/${id}`).set('Cookie', quien);
+    }
+
+    it('trae exactamente la fila que el libro ya enseñaba, con su desglose', async () => {
+      const item = await itemConPrecio('2.00');
+      const id = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '4' });
+
+      const suelto = await leerMovimiento(id);
+      const pagina = await request(servidor()).get('/inventario/movimientos').query({ locationId: bodegaCentral, itemId: item }).set('Cookie', cookie);
+
+      expect(suelto.status).toBe(OK);
+      const fila = (pagina.body as { movimientos: { id: string }[] }).movimientos.find((m) => m.id === id);
+      expect(suelto.body).toEqual(fila);
+      expect(suelto.body).toMatchObject({ tipo: 'COMPRA', desglose: 'CONOCIDO' });
+    });
+
+    it('uno que no existe es 404, y un id que no es UUID es 400 antes de llegar al caso de uso', async () => {
+      const inventado = await leerMovimiento(randomUUID());
+      const malFormado = await leerMovimiento('no-es-un-uuid');
+
+      expect(inventado.status).toBe(NO_ENCONTRADO);
+      expect(inventado.body).toMatchObject({ code: 'RECURSO_NO_ENCONTRADO' });
+      expect(malFormado.status).toBe(ENTRADA_INVALIDA);
+      expect(malFormado.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    it('🔴 un GERENTE_LOCAL no lee un movimiento de otra ubicación, aunque tenga su id', async () => {
+      const item = await itemConPrecio('2.00');
+      const id = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '2' });
+
+      const respuesta = await leerMovimiento(id, cookieGerente);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+      expect(JSON.stringify(respuesta.body)).not.toContain(item);
+    });
+
+    it('🔴 §4.3 — BODEGA no lo lee: es una fila del libro, con su cantidad y su importe', async () => {
+      const item = await itemConPrecio('2.00');
+      const id = await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '2' });
+
+      const respuesta = await leerMovimiento(id, cookieBodega);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
+      const crudo = JSON.stringify(respuesta.body).toLowerCase();
+      for (const prohibido of PROHIBIDOS_PARA_BODEGA) {
+        expect(crudo).not.toContain(prohibido.toLowerCase());
+      }
+    });
+
+    it('?tipo=MERMA trae solo las mermas del ítem, y un tipo que no existe es 400', async () => {
+      const item = await itemConPrecio('2.00');
+      await comprar({ itemId: item, locationId: bodegaCentral, cantidad: '10' });
+      const merma = await registrar({ locationId: bodegaCentral, itemId: item, tipo: 'MERMA', cantidad: '1' });
+      expect(merma.status).toBe(CREADO);
+
+      const filtrado = await request(servidor())
+        .get('/inventario/movimientos')
+        .query({ locationId: bodegaCentral, itemId: item, tipo: 'MERMA' })
+        .set('Cookie', cookie);
+      const inventado = await request(servidor())
+        .get('/inventario/movimientos')
+        .query({ locationId: bodegaCentral, tipo: 'ROBO' })
+        .set('Cookie', cookie);
+
+      expect(filtrado.status).toBe(OK);
+      const tipos = (filtrado.body as { movimientos: { id: string; tipo: string }[] }).movimientos.map((m) => m.tipo);
+      expect(tipos).toEqual(['MERMA']);
+      expect(inventado.status).toBe(ENTRADA_INVALIDA);
+    });
+  });
+
   describe('el alcance por ubicación, que RLS no sabe decidir', () => {
     it('un GERENTE_LOCAL no lee el saldo de una ubicación que no es la suya', async () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: bodegaCentral })
-        .set('Cookie', cookieGerente);
+        .set('Cookie', cookieGerente).set('X-CSRF-Token', csrfDe(cookieGerente));
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('sí lee el de la suya', async () => {
       const respuesta = await request(servidor())
         .get('/inventario/saldos')
         .query({ locationId: local })
-        .set('Cookie', cookieGerente);
+        .set('Cookie', cookieGerente).set('X-CSRF-Token', csrfDe(cookieGerente));
       expect(respuesta.status).toBe(OK);
     });
 
@@ -1000,7 +1368,7 @@ describe('inventario', () => {
 
       const respuesta = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', cookieGerente)
+        .set('Cookie', cookieGerente).set('X-CSRF-Token', csrfDe(cookieGerente))
         .send({
           origen: local,
           destino: bodegaCentral,
@@ -1010,6 +1378,7 @@ describe('inventario', () => {
           note: null,
         });
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 });

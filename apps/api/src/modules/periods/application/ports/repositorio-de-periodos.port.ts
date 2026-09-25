@@ -37,6 +37,11 @@ export interface PeriodoLeido {
   readonly cerradoPor: UserId | null;
   readonly reabiertoEn: Date | null;
   readonly reabiertoPor: UserId | null;
+  /**
+   * La versión de la CARGA DEL MES (D-16.121, ADR-023). La suben solo las dos
+   * cargas por reemplazo —ventas y costos fijos—; no la toca este módulo.
+   */
+  readonly version: number;
 }
 
 export interface RepositorioDePeriodos {

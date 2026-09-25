@@ -13,12 +13,22 @@
  * la aplicación no tiene `DELETE` sobre estas tablas.
  */
 
+import { registrarEventoDeUsuario } from '../../../../shared/application/eventos-de-usuario';
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
+import { ConflictoDeVersionError } from '../../../../shared/domain/errors/conflicto-de-version';
 import type { ItemGroupId, ItemId } from '../../../../shared/domain/identity/identificadores';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
+import { exigirUnidad } from '../../domain/catalogo-de-unidades';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import { ConflictoDeCatalogoError, EntradaDeCatalogoInvalidaError, ItemNoEncontradoError } from '../../domain/errores';
+import { LimiteDelPlanError } from '../../../iam/domain/errores';
+import {
+  ConflictoDeCatalogoError,
+  EntradaDeCatalogoInvalidaError,
+  GrupoNoEncontradoError,
+  ItemNoEncontradoError,
+} from '../../domain/errores';
 import {
   mensajeDelProblemaDeItem,
   problemaDeItem,
@@ -50,22 +60,37 @@ export interface DatosDeAltaDeItem {
 export class CrearItem {
   public constructor(private readonly deps: DependenciasDeCatalogo) {}
 
+  /**
+   * LA UNIDAD TIENE QUE EXISTIR, no solo estar bien escrita (P16-A2, INC-012).
+   * `unidadDeUso()` valida la FORMA y deja pasar `"l"`, que llegaba al `INSERT`
+   * y moría en `item_unit_of_use_fkey` con un **500**. El lote lo comprobaba
+   * desde P14b; el alta suelta, no. Cuesta una lectura de diez filas sin
+   * tenant, y solo en el alta.
+   */
   public async ejecutar(sesion: SesionActiva, datos: DatosDeAltaDeItem): Promise<ItemId> {
     exigirItemValido(datos);
+
+    const unidad = exigirUnidad(
+      await this.deps.repositorio.unidades(),
+      unidadDeUso(datos.unidadDeUso),
+    );
 
     const resultado = await this.deps.repositorio.crearItem({
       companyId: sesion.companyId,
       nombre: datos.nombre.trim(),
       tipo: datos.tipo,
-      unidadDeUso: unidadDeUso(datos.unidadDeUso),
+      unidadDeUso: unidad.codigo,
       rendimiento: datos.rendimiento,
       grupoId: datos.grupoId,
       confianzaDePrecio: datos.confianzaDePrecio,
       llevaStock: datos.llevaStock,
     });
 
-    if (resultado.clase === 'nombre_en_uso') {
-      throw new ConflictoDeCatalogoError('Ya existe un ítem con ese nombre.');
+    if (resultado.clase === 'nombre_en_uso') throw new ItemRepetidoError();
+    // El plan, no el permiso: por eso es `LimiteDelPlanError` (409) y no un 403.
+    // Quien lo recibe tiene que ampliar el plan, no revisar roles.
+    if (resultado.clase === 'limite') {
+      throw new LimiteDelPlanError('ítems', resultado.maximo);
     }
 
     await this.deps.auditoria.record({
@@ -91,6 +116,8 @@ export interface DatosDeCambioDeItem {
   readonly confianzaDePrecio: ConfianzaDePrecio;
   readonly estado: EstadoDeCatalogo;
   readonly llevaStock: boolean | null;
+  /** La que el formulario leyó (D-16.100). */
+  readonly version: number;
 }
 
 export class ActualizarItem {
@@ -103,7 +130,11 @@ export class ActualizarItem {
    * pasarían a ser 200 «kg» y el costo se multiplicaría por mil en silencio.
    * Si hace falta, se crea un ítem nuevo y se archiva el viejo.
    */
-  public async ejecutar(sesion: SesionActiva, datos: DatosDeCambioDeItem): Promise<void> {
+  /**
+   * @returns la versión NUEVA del ítem.
+   * @throws {ItemNoEncontradoError} · {@link ItemRepetidoError} · {@link ConflictoDeVersionError}
+   */
+  public async ejecutar(sesion: SesionActiva, datos: DatosDeCambioDeItem): Promise<number> {
     const actual = await this.deps.repositorio.buscarItem({
       companyId: sesion.companyId,
       itemId: datos.itemId,
@@ -123,7 +154,7 @@ export class ActualizarItem {
       llevaStock: datos.llevaStock,
     });
 
-    await this.deps.repositorio.actualizarItem({
+    const resultado = await this.deps.repositorio.actualizarItem({
       companyId: sesion.companyId,
       itemId: datos.itemId,
       nombre: datos.nombre.trim(),
@@ -132,7 +163,15 @@ export class ActualizarItem {
       confianzaDePrecio: datos.confianzaDePrecio,
       estado: datos.estado,
       llevaStock: datos.llevaStock,
+      versionEsperada: datos.version,
     });
+
+    // El `buscarItem` de arriba ya descartó el caso normal; esto es la carrera
+    // —alguien lo archivó o lo cambió entre medias— y el choque de nombres,
+    // que hasta P16-A2 subía sin traducir y salía como 500 (INC-012).
+    if (resultado.clase === 'no_encontrado') throw new ItemNoEncontradoError();
+    if (resultado.clase === 'nombre_en_uso') throw new ItemRepetidoError();
+    if (resultado.clase === 'conflicto_de_version') throw new ConflictoDeVersionError('ítem');
 
     await this.deps.auditoria.record({
       eventType: datos.estado === 'INACTIVE' ? 'catalog.item.archived' : 'catalog.item.updated',
@@ -142,8 +181,10 @@ export class ActualizarItem {
       companyId: sesion.companyId,
       ip: null,
       userAgent: null,
-      detail: { itemId: datos.itemId, estado: datos.estado },
+      detail: { itemId: datos.itemId, estado: datos.estado, version: resultado.version },
     });
+
+    return resultado.version;
   }
 }
 
@@ -174,32 +215,87 @@ export class ListarItems {
   }
 }
 
+export interface DatosDeGrupo {
+  readonly nombre: string;
+  /**
+   * La tarifa de IVA que heredan las compras SIN ARTÍCULO de los ítems del
+   * grupo (D-16.9). `null` = el grupo no define ninguna, y esas compras se
+   * rechazan hasta que alguien la ponga. Nunca se asume una.
+   */
+  readonly ivaTarifa: string | null;
+}
+
 export class CrearGrupo {
   public constructor(private readonly deps: DependenciasDeCatalogo) {}
 
-  public async ejecutar(sesion: SesionActiva, nombre: string): Promise<ItemGroupId> {
+  public async ejecutar(sesion: SesionActiva, datos: DatosDeGrupo): Promise<ItemGroupId> {
     const resultado = await this.deps.repositorio.crearGrupo({
       companyId: sesion.companyId,
-      nombre: nombre.trim(),
+      nombre: datos.nombre.trim(),
+      ivaTarifa: tarifaDeGrupo(datos.ivaTarifa),
     });
 
-    if (resultado.clase === 'nombre_en_uso') {
-      throw new ConflictoDeCatalogoError('Ya existe un grupo con ese nombre.');
-    }
+    if (resultado.clase === 'nombre_en_uso') throw new GrupoRepetidoError();
 
-    await this.deps.auditoria.record({
-      eventType: 'catalog.group.created',
-      outcome: 'success',
-      actorType: 'USER',
+    await registrarEventoDeUsuario({
+      auditoria: this.deps.auditoria,
       actorId: sesion.userId,
       companyId: sesion.companyId,
-      ip: null,
-      userAgent: null,
+      eventType: 'catalog.group.created',
       detail: { grupoId: resultado.id },
     });
 
     return resultado.id;
   }
+}
+
+/** `PUT /catalogo/grupos/:id` — D-16.45: el nombre y la tarifa, estado completo. */
+export class ActualizarGrupo {
+  public constructor(private readonly deps: DependenciasDeCatalogo) {}
+
+  /** @throws {GrupoNoEncontradoError} @throws {ConflictoDeCatalogoError} */
+  public async ejecutar(
+    sesion: SesionActiva,
+    datos: DatosDeGrupo & { readonly grupoId: ItemGroupId },
+  ): Promise<void> {
+    const ivaTarifa = tarifaDeGrupo(datos.ivaTarifa);
+
+    const resultado = await this.deps.repositorio.actualizarGrupo({
+      companyId: sesion.companyId,
+      grupoId: datos.grupoId,
+      nombre: datos.nombre.trim(),
+      ivaTarifa,
+    });
+
+    if (resultado === 'no_encontrado') throw new GrupoNoEncontradoError();
+    if (resultado === 'nombre_en_uso') throw new GrupoRepetidoError();
+
+    await registrarEventoDeUsuario({
+      auditoria: this.deps.auditoria,
+      actorId: sesion.userId,
+      companyId: sesion.companyId,
+      eventType: 'catalog.group.updated',
+      detail: { grupoId: datos.grupoId, ivaTarifa: ivaTarifa ?? 'null' },
+    });
+  }
+}
+
+/** El mismo 409 para crear y para renombrar, como en artículos y grupos. */
+class ItemRepetidoError extends ConflictoDeCatalogoError {
+  public constructor() {
+    super('Ya existe un ítem con ese nombre.');
+  }
+}
+
+class GrupoRepetidoError extends ConflictoDeCatalogoError {
+  public constructor() {
+    super('Ya existe un grupo con ese nombre.');
+  }
+}
+
+/** `null` pasa tal cual; una cadena tiene que ser una fracción. */
+function tarifaDeGrupo(tarifa: string | null): string | null {
+  return tarifa === null ? null : exigirTarifaValida(tarifa).toStorageString();
 }
 
 export class ListarGrupos {

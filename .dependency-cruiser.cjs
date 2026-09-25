@@ -36,7 +36,7 @@ const DECIMAL_EN_DOMINIO = '(^|/)shared/domain/decimal/';
  * Las pruebas viven junto al codigo que prueban, pero no SON esa capa: importan
  * el runner y los generadores de casos. Las reglas de pureza no les aplican.
  */
-const PRUEBAS = '\\.(spec|test|type-contract)\\.ts$';
+const PRUEBAS = '[.](spec|test|type-contract)[.]ts$';
 
 const CAPA_DOMINIO = '(^|/)(modules/[^/]+|shared)/domain/';
 const CAPA_APLICACION = '(^|/)(modules/[^/]+|shared)/application/';
@@ -110,6 +110,52 @@ module.exports = {
       to: { path: '(^|/)modules/catalog/infrastructure/' },
     },
     {
+      name: 'backoffice-inalcanzable-desde-la-app',
+      severity: 'error',
+      comment:
+        'SPEC §1: la conexion privilegiada vive SOLO en el proceso del back office, «inalcanzable ' +
+        'desde la aplicacion cliente por cualquier ruta». `costeo_backoffice` es el unico rol con ' +
+        'BYPASSRLS: ve todos los tenants a la vez. Ninguna arista puede entrar en este modulo desde ' +
+        'fuera de el — ni desde otro modulo, ni desde `shared`, ni desde `app.module.ts`. Lo unico ' +
+        'que lo monta es `backoffice.ts`, que es otro proceso.',
+      from: {
+        path: '(^|/)(app[.]module[.]ts|main[.]ts|bootstrap[.]ts|cli[.]ts|bench[.]ts|despachador[.]ts)$',
+      },
+      to: { path: '(^|/)modules/backoffice/' },
+    },
+    {
+      name: 'backoffice-no-entra-desde-otros-modulos',
+      severity: 'error',
+      comment:
+        'La otra mitad de la regla anterior: ningun modulo de negocio puede depender del back office. ' +
+        'El back office SI puede leer de ellos —reutiliza el hasher de `iam` y el reloj de `shared`, ' +
+        'que es lo correcto: los parametros de Argon2 viven en un solo sitio— pero la flecha nunca ' +
+        'apunta al reves.',
+      from: { path: '(^|/)modules/(?!backoffice/)[^/]+/', pathNot: PRUEBAS },
+      to: { path: '(^|/)modules/backoffice/' },
+    },
+    {
+      name: 'correo-inalcanzable-desde-la-app',
+      severity: 'error',
+      comment:
+        'D-16.23: el despachador de correo es un proceso aparte con su propio rol, que marca la cola y ' +
+        'purga el limite de tasa. Ninguna arista puede entrar en `modules/correo/` desde la aplicacion ' +
+        'cliente ni desde los otros binarios: lo unico que lo monta es `despachador.ts`.',
+      from: {
+        path: '(^|/)(app[.]module[.]ts|main[.]ts|bootstrap[.]ts|cli[.]ts|bench[.]ts|backoffice[.]ts)$',
+      },
+      to: { path: '(^|/)modules/correo/' },
+    },
+    {
+      name: 'correo-no-entra-desde-otros-modulos',
+      severity: 'error',
+      comment:
+        'La otra mitad: ningun modulo de negocio depende del despachador. El despachador SI lee de `shared` ' +
+        '(las plantillas, el puerto de correo, el reloj), pero la flecha nunca apunta al reves.',
+      from: { path: '(^|/)modules/(?!correo/)[^/]+/', pathNot: PRUEBAS },
+      to: { path: '(^|/)modules/correo/' },
+    },
+    {
       name: 'sin-dependencias-circulares',
       severity: 'error',
       comment: 'Un ciclo entre modulos hace imposible razonar sobre el orden de inicializacion.',
@@ -125,11 +171,15 @@ module.exports = {
       from: {
         orphan: true,
         pathNot: [
-          '\\.d\\.ts$',
-          '(^|/)(main|index)\\.ts$',
-          '\\.(spec|test)\\.ts$',
-          '\\.type-contract\\.ts$',
-          '(^|/)vitest\\.config\\.ts$',
+          '[.]d[.]ts$',
+          '(^|/)(main|index)[.]ts$',
+          '[.](spec|test)[.]ts$',
+          '[.]type-contract[.]ts$',
+          '(^|/)vitest[.]config[.]ts$',
+          // El guion del back office: lo carga el NAVEGADOR con una etiqueta
+          // `<script>`, asi que ningun modulo lo importa y nunca lo hara. Se
+          // compila con `tsconfig.ui.json`, el unico proyecto con `lib: DOM`.
+          '(^|/)navegador/[^/]+[.]ts$',
         ],
       },
       to: {},
@@ -146,7 +196,7 @@ module.exports = {
   options: {
     doNotFollow: { path: 'node_modules' },
     exclude: {
-      path: ['^apps/[^/]+/dist/', '^apps/[^/]+/generated/', '(^|/)\\.tmp/'],
+      path: ['^apps/[^/]+/dist/', '^apps/[^/]+/generated/', '(^|/)[.]tmp/'],
     },
     tsPreCompilationDeps: true,
 

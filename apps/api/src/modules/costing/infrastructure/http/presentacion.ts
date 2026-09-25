@@ -11,12 +11,14 @@ import type { Money, Ratio } from '../../../../shared/domain/money/tipos-monetar
 import type {
   CosteoDeLaCarta,
   CosteoDelProducto,
+  LineaDelDesglose,
 } from '../../application/casos-de-uso/costear';
 import type { CostosDelProducto, ResultadoDeVenta } from '../../domain/costeo-de-producto';
 import type {
   CosteoDeCartaDto,
   CostosDto,
   ImporteDto,
+  LineaDto,
   ProductoCosteadoDto,
   SinVentaDto,
   VentaDto,
@@ -39,28 +41,47 @@ function proporcion(valor: Ratio): string {
   return valor.toExactString();
 }
 
-export function comoCarta(carta: CosteoDeLaCarta): CosteoDeCartaDto {
+/**
+ * `conLineas` lo decide el controlador con el permiso de la sesión (D-16.106).
+ * Va como parámetro y no se lee aquí de la sesión para que la regla se pueda
+ * probar con la base apagada: es la única salida del desglose hacia JSON.
+ */
+export function comoCarta(carta: CosteoDeLaCarta, conLineas: boolean): CosteoDeCartaDto {
   return {
     locationId: carta.locationId,
     fecha: carta.fecha.toISOString(),
-    productos: carta.productos.map(comoProducto),
+    productos: carta.productos.map((producto) => comoProducto(producto, conLineas)),
   };
 }
 
-export function comoProducto(producto: CosteoDelProducto): ProductoCosteadoDto {
+export function comoProducto(producto: CosteoDelProducto, conLineas: boolean): ProductoCosteadoDto {
   return {
     productId: producto.productId,
     nombre: producto.nombre,
     tipo: producto.tipo,
     categoria: producto.categoria,
     activo: producto.activo,
-    costos: comoCostos(producto.costeo.costos),
+    costos: comoCostos(producto.costeo.costos, conLineas ? producto.lineas.map(comoLinea) : null),
     venta: comoVenta(producto.costeo.venta),
     itemsSinCosto: [...producto.itemsSinCosto],
+    sinReceta: producto.sinReceta,
+    semaforoFoodCost: producto.semaforoFoodCost,
   };
 }
 
-function comoCostos(costos: CostosDelProducto): CostosDto {
+function comoLinea(linea: LineaDelDesglose): LineaDto {
+  return {
+    itemId: linea.itemId,
+    nombre: linea.nombre,
+    cantidad: linea.cantidad,
+    base: linea.base,
+    estado: linea.estado,
+    costo: importe(linea.costo),
+    participacion: proporcion(linea.participacion),
+  };
+}
+
+function comoCostos(costos: CostosDelProducto, lineas: readonly LineaDto[] | null): CostosDto {
   return {
     costoBrutoLote: importe(costos.costoBrutoLote),
     costoNetoLote: importe(costos.costoNetoLote),
@@ -69,6 +90,7 @@ function comoCostos(costos: CostosDelProducto): CostosDto {
     empaqueNeto: importe(costos.empaqueNeto),
     costoTotalUnidad: importe(costos.costoTotalUnidad),
     impactoMerma: costos.impactoMerma === null ? null : proporcion(costos.impactoMerma),
+    lineas,
   };
 }
 

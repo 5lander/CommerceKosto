@@ -114,6 +114,7 @@ function comoFila(
     tipo: movimiento.tipo,
     cantidad: movimiento.cantidad.toStorageString(),
     costoTotal: null,
+    desglose: null,
     purchaseArticleId: null,
     reversesMovementId: null,
     occurredAt: movimiento.ocurridoEn,

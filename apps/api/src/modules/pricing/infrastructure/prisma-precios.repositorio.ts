@@ -25,6 +25,7 @@ import {
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
   AjustesDeCompany,
+  DatosDePrecioEnLote,
   DatosParaSugerir,
   DecisionSobrePrecio,
   PrecioLeido,
@@ -77,7 +78,6 @@ export class PrismaPreciosRepositorio implements RepositorioDePrecios {
         where: { companyId },
         data: {
           ivaVenta: ajustes.ivaVenta,
-          ivaCompra: ajustes.ivaCompra,
           ivaCompraRecuperable: ajustes.ivaCompraRecuperable,
           provisionMerma: ajustes.provisionMerma,
           foodCostObjetivo: ajustes.foodCostObjetivo,
@@ -111,6 +111,44 @@ export class PrismaPreciosRepositorio implements RepositorioDePrecios {
       });
 
       return aPriceId(fila.id);
+    });
+  }
+
+  /**
+   * TODO EL LOTE O NADA — un solo `run()`, una sola transaccion, y los precios
+   * escritos con `createMany` en UNA sentencia.
+   *
+   * `confirmedBy` y `confirmedAt` se rellenan aqui cuando `confirmar` es cierto,
+   * en la misma escritura: no hay un segundo paso que pudiera quedarse a medias
+   * y dejar la mitad del catalogo con precio vigente y la otra mitad sin el.
+   */
+  public async sugerirEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly precios: readonly DatosDePrecioEnLote[];
+    readonly validFrom: Date;
+    readonly createdBy: UserId;
+    readonly confirmar: boolean;
+    readonly ahora: Date;
+  }): Promise<number> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      await tx.referencePrice.createMany({
+        data: datos.precios.map((precio) => ({
+          companyId: datos.companyId,
+          itemId: precio.itemId,
+          purchaseArticleId: precio.purchaseArticleId,
+          price: precio.precio,
+          ivaCompra: precio.ivaCompra,
+          origin: precio.origen,
+          status: datos.confirmar ? CONFIRMADO : SUGERIDO,
+          validFrom: datos.validFrom,
+          createdBy: datos.createdBy,
+          confirmedBy: datos.confirmar ? datos.createdBy : null,
+          confirmedAt: datos.confirmar ? datos.ahora : null,
+          note: precio.nota,
+        })),
+      });
+
+      return datos.precios.length;
     });
   }
 
@@ -159,6 +197,29 @@ export class PrismaPreciosRepositorio implements RepositorioDePrecios {
         where: { companyId: entrada.companyId, itemId: entrada.itemId },
         select: CAMPOS_DE_PRECIO,
         orderBy: [{ validFrom: 'desc' }, { createdAt: 'desc' }],
+      });
+
+      return filas.map(comoPrecio);
+    });
+  }
+
+  public async sugeridos(entrada: {
+    readonly companyId: CompanyId;
+    readonly despuesDe: ReferencePriceId | null;
+    readonly limite: number;
+  }): Promise<readonly PrecioLeido[]> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const filas = await tx.referencePrice.findMany({
+        // Cursor por `id`, nunca OFFSET (CLAUDE.md §5). `(company_id, status)`
+        // es el índice de P3 que deja fuera los confirmados y los rechazados.
+        where: {
+          companyId: entrada.companyId,
+          status: SUGERIDO,
+          ...(entrada.despuesDe === null ? {} : { id: { gt: entrada.despuesDe } }),
+        },
+        select: CAMPOS_DE_PRECIO,
+        orderBy: { id: 'asc' },
+        take: entrada.limite,
       });
 
       return filas.map(comoPrecio);
@@ -217,7 +278,6 @@ function comoPrecio(fila: {
 
 function comoAjustes(fila: {
   ivaVenta: Decimal;
-  ivaCompra: Decimal;
   ivaCompraRecuperable: boolean;
   provisionMerma: Decimal;
   foodCostObjetivo: Decimal;
@@ -230,7 +290,6 @@ function comoAjustes(fila: {
 }): AjustesDeCompany {
   return {
     ivaVenta: fila.ivaVenta.toFixed(),
-    ivaCompra: fila.ivaCompra.toFixed(),
     ivaCompraRecuperable: fila.ivaCompraRecuperable,
     provisionMerma: fila.provisionMerma.toFixed(),
     foodCostObjetivo: fila.foodCostObjetivo.toFixed(),

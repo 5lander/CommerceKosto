@@ -1,0 +1,239 @@
+/*
+ * Tokens — la ÚNICA fuente de color, tipografía, espacio y radio.
+ *
+ * ============================================================================
+ * P14. TODO VALOR DE ESTE ARCHIVO SALE DEL MANUAL DE MARCA
+ * ============================================================================
+ *
+ * Fuente única: `docs/Manual de Marca/platise-brand-book.pdf`, v3.0, agosto
+ * 2026. Cada bloque dice de qué página sale. **Ningún color, tamaño ni familia
+ * se ha aproximado ni deducido del resto de la paleta** (CLAUDE.md §10): lo que
+ * el manual no da, o no está aquí, o se deriva con una regla que el propio
+ * manual publica — y entonces la derivación se escribe al lado.
+ *
+ * Los valores se leyeron del PDF, no de una captura: el manual está exportado
+ * desde Chromium y sus colores viven como operadores `rg` exactos. Los seis
+ * ratios de contraste que publica se recalcularon uno a uno y **dan sus mismas
+ * cifras**, lo que confirma que estos hex son los suyos.
+ *
+ * ============================================================================
+ * LA APP VA EN CLARO, Y ES DECISIÓN DEL MANUAL
+ * ============================================================================
+ *
+ * El manual publica una columna oscura de tokens, y aun así su página de
+ * interfaz (p. 30) es explícita:
+ *
+ *   «El panel operativo del producto va en modo claro: el usuario trabaja de
+ *    pie, con reflejo y las manos ocupadas. Cuerpo de 16 px, área táctil de
+ *    44 px y contraste de 14,58:1. Un panel oscuro con vidrio gana en
+ *    portafolio y pierde al chef en la cocina. Esa es una decisión de
+ *    producto, no de estética.»
+ *
+ * Por eso aquí no hay `prefers-color-scheme`: la columna oscura es para la web
+ * y las piezas de marca, no para esta aplicación. Enviarla como CSS que nadie
+ * activa sería código muerto. Queda registrada en `docs/pasos/P14/`.
+ *
+ * Por el mismo motivo NO hay tokens de vidrio ni de sombra: el manual acota el
+ * vidrio a «malla de gradientes» y prohíbe ponerlo detrás de una tabla densa
+ * porque baja el contraste del texto pequeño (p. 20). Esta aplicación es tabla
+ * densa de principio a fin.
+ */
+
+:root {
+  /* ==========================================================================
+   * PALETA · manual p. 19
+   * Los ocho colores con su nombre. Proporción 60 · 30 · 10, y Persimmon por
+   * debajo del 3 % de la superficie total.
+   * ========================================================================== */
+  --cloud-dancer: #f2f0ea;
+  --pizarra: #14211c;
+  --jade-ahumado: #1e5a4e;
+  --persimmon: #c4552f;
+  --persimmon-profundo: #a8391a;
+  --salvia: #4a5b54;
+  --oxblood: #8c2f39;
+  --jade-claro: #3e7568;
+
+  /* ==========================================================================
+   * TOKENS SEMÁNTICOS · manual p. 21, columna CLARO
+   * La tabla del manual, literal. La columna OSCURO no se aplica: ver cabecera.
+   * ========================================================================== */
+  --color-fondo: var(--cloud-dancer);
+  --color-superficie: #ffffff;
+  --color-texto: var(--pizarra);
+  --color-texto-suave: var(--salvia);
+  --color-marca: var(--jade-ahumado);
+  --color-accion: var(--persimmon-profundo);
+  --color-perdida: var(--oxblood);
+
+  /*
+   * Tercer nivel de texto. El manual publica dos (primario y secundario); este
+   * es Salvia al 70 % sobre la superficie, para la categoría bajo el nombre de
+   * un producto y la unidad de un ítem.
+   *
+   * NO ES UN COLOR NUEVO: es el mismo Salvia con la opacidad que el manual usa
+   * como recurso en toda la parte gráfica (tramas del 10 al 16 %, vidrio del
+   * 13 al 4 %). Se declara con `color-mix` para que siga siendo Salvia y no un
+   * hex inventado que mañana nadie sepa de dónde salió.
+   */
+  --color-texto-tenue: color-mix(in srgb, var(--salvia) 70%, var(--color-superficie));
+
+  /* ==========================================================================
+   * EL SEMÁFORO DEL FOOD COST · SPEC §13
+   * ==========================================================================
+   *
+   * El manual NO tiene verde-ámbar-rojo, y eso no es una carencia: tiene tres
+   * significados con su color, que es lo que este semáforo necesita.
+   *
+   *   bien      → Jade Ahumado, el color de marca. 7,01:1 sobre el fondo
+   *   atención  → Persimmon PROFUNDO. El manual dice que Persimmon significa
+   *               «margen, alerta o extremo» (p. 25) y que **no es color de
+   *               texto**: con 3,93:1 reprueba, y el manual lo declara «la
+   *               regla, no el error». Su variante profunda existe justo para
+   *               esto y da 5,64:1 sobre el fondo, verificado
+   *   mal       → Oxblood, que el manual llama literalmente «pérdida». 7,14:1
+   *
+   * Se respeta la advertencia de la p. 21 —«el color de la pérdida nunca es el
+   * color del botón»—: la pérdida es Oxblood y el botón es Persimmon Profundo.
+   * Son colores distintos y lo siguen siendo.
+   */
+  --color-bien: var(--jade-ahumado);
+  --color-atencion: var(--persimmon-profundo);
+  --color-mal: var(--oxblood);
+
+  /*
+   * Persimmon vivo, SOLO como señal y nunca como texto. Es la marca de 3 px al
+   * costado de una fila que pide atención — el recurso «regla rota» del manual
+   * (p. 27) aplicado a una tabla.
+   */
+  --color-senal: var(--persimmon);
+
+  /* ==========================================================================
+   * BORDES Y FOCO
+   * ==========================================================================
+   *
+   * El manual no publica un color de borde para el panel claro. Lo que sí
+   * publica es la opacidad con la que un color se posa sobre un fondo: del 10
+   * al 16 % en tramas (p. 27) y 16 % en el borde del vidrio (p. 20).
+   *
+   * El borde fino es Salvia al 16 %: **el color es del manual y la opacidad
+   * también.** El borde fuerte —lo que rodea un campo o un botón— es Salvia
+   * entero, sin diluir, porque esta interfaz se usa de pie y con reflejo, que
+   * es el mismo motivo por el que el manual pide 14,58:1 y objetivos de 44 px.
+   */
+  --color-borde: color-mix(in srgb, var(--salvia) 16%, transparent);
+  --color-borde-fuerte: var(--salvia);
+
+  /*
+   * El foco va en el color de marca, no en el de acción: un anillo naranja
+   * alrededor de un campo se lee como un error, y moverse con el teclado por la
+   * rejilla de ventas no es un error.
+   */
+  --color-foco: var(--jade-ahumado);
+
+  /* ==========================================================================
+   * TIPOGRAFÍA · manual p. 22
+   * ==========================================================================
+   *
+   *   Cuerpo    Inter 400        16–20 px   interlínea 1,5–1,62   interfaz
+   *   Cifra     Plex Mono 500    28–72 px   interlínea 1,0        la fuga, los ratios
+   *   Etiqueta  Plex Mono 400    11–13 px   interlínea 1,4        cotas y folios
+   *
+   * FRAUNCES NO ESTÁ, y es a propósito. El manual la asigna al nivel Display,
+   * cuyo uso declarado es «Aperturas», de 66 a 172 px. La página de interfaz no
+   * la usa en el panel operativo, y esta aplicación no tiene aperturas: tiene
+   * pantallas de trabajo. Traerla para usarla a 24 px sería inventar un tamaño
+   * que el manual no contempla. Razonado en `public/fuentes/LICENCIAS.md`.
+   *
+   * Las familias se autoalojan en `public/fuentes/` — ver `tipografia.css`.
+   */
+  --fuente: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /*
+   * Los NÚMEROS van en Plex Mono. No es decoración: con cifras tabulares las
+   * columnas de una tabla de costos alinean por la coma, y «1.111» y «8.888»
+   * ocupan lo mismo. El manual lo dice con estas palabras: «los decimales
+   * alinean solos».
+   */
+  --fuente-numeros: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, monospace;
+
+  /* El cuerpo son 16 px exactos: es lo que fija la p. 30, no un mínimo. */
+  --texto-base: 1rem;
+  --texto-cuerpo-alto: 1.55; /* dentro del 1,5–1,62 del manual */
+
+  --texto-xs: 0.6875rem; /* 11 px · etiqueta, extremo bajo del rango */
+  --texto-sm: 0.8125rem; /* 13 px · etiqueta, extremo alto */
+  --texto-lg: 1.25rem; /*  20 px · cuerpo, extremo alto */
+  --texto-xl: 1.75rem; /*  28 px · cifra, extremo bajo */
+  --texto-2xl: 2.5rem; /*  40 px · cifra, para el número que manda */
+
+  --texto-cifra-alto: 1; /* la interlínea de la cifra, manual p. 22 */
+  --texto-etiqueta-alto: 1.4; /* la de la etiqueta */
+
+  /* Las etiquetas del manual van en versalitas espaciadas: «TU FUGA ESTIMADA»,
+     «FOOD COST», «ESCANDALLO · CEVICHE MIXTO». */
+  --etiqueta-espaciado: 0.08em;
+
+  /* ==========================================================================
+   * RETÍCULA Y ESPACIADO · manual p. 23
+   * ==========================================================================
+   *
+   * Fibonacci, con los nombres y los usos del manual. No hay una escala de
+   * espacio paralela: si un hueco no es uno de estos seis, está mal medido.
+   */
+  --f1: 13px; /* aire interno */
+  --f2: 21px; /* filas de tabla, viñetas */
+  --f3: 34px; /* separación de bloques · paso de retícula */
+  --f4: 55px; /* aire de tarjeta */
+  --f5: 89px; /* margen vertical · gap de columnas */
+  --f6: 144px; /* margen lateral */
+
+  /* Los dos términos anteriores de la misma serie. El manual publica de 13 en
+     adelante porque son los que usa una lámina; una interfaz necesita además
+     los huecos pequeños, y salen de continuar la serie hacia abajo, no de
+     inventar una escala nueva. */
+  --f-menos1: 8px;
+  --f-menos2: 5px;
+
+  /* La división áurea de lámina, tal cual la publica el manual. */
+  --aurea: 61.8fr 38.2fr;
+
+  /*
+   * Los radios salen de la misma serie de Fibonacci: 8 y 13. El manual no
+   * publica un radio de esquina —no lo necesita, sus piezas son láminas— y
+   * derivarlo de su propia serie es lo que hace el resto del sistema, en vez de
+   * elegir un número redondo porque queda bien.
+   */
+  --radio: var(--f-menos1);
+  --radio-lg: var(--f1);
+
+  /* ==========================================================================
+   * OBJETIVOS TÁCTILES E ICONOGRAFÍA · manual p. 30 y p. 25
+   * ==========================================================================
+   *
+   * 44 px es lo que fija la página de interfaz del manual, y coincide con el
+   * mínimo de WCAG 2.2 y de la guía de Apple. No es un capricho: la hoja de
+   * conteo y la rejilla de ventas se usan DE PIE, en una cocina o una bodega,
+   * con las manos ocupadas (CLAUDE.md §10).
+   */
+  --tactil: 44px;
+
+  /* Retícula de icono 24×24 con 2 px de margen óptico y trazo de 2,4 px. */
+  --icono: 24px;
+  --icono-trazo: 2.4px;
+
+  /*
+   * Cotas del logotipo · manual p. 16.
+   *
+   * Los dos mínimos son los del manual, en píxeles, y `global.css` los hace
+   * cumplir de verdad: la marca no se puede encoger por debajo de ellos.
+   *
+   * El ÁREA DE RESGUARDO es t × φ² = 30,9 unidades de un isotipo de 100 de
+   * alto, o sea el 30,9 % de su altura. No se declara como token porque no se
+   * puede aplicar bien con uno: depende del alto con el que se pinte la marca
+   * en cada sitio. Donde se usa, el resguardo lo da el hueco de la pila, y la
+   * cuenta está hecha al lado de cada uso.
+   */
+  --logotipo-min: 140px;
+  --isotipo-min: 16px;
+}

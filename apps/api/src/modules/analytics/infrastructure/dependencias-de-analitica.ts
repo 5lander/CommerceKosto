@@ -16,6 +16,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
 import { ListarArticulos } from '../../catalog/application/casos-de-uso/articulos';
 import { ListarItems } from '../../catalog/application/casos-de-uso/items';
+import { LeerCarta } from '../../recipes/application/casos-de-uso/carta';
+import { ListarProductos } from '../../recipes/application/casos-de-uso/recetas';
 import { CostearCarta } from '../../costing/application/casos-de-uso/costear';
 import { LeerConciliacion } from '../../inventory/application/casos-de-uso/conteos';
 import { ListarUbicaciones } from '../../iam/application/casos-de-uso/ubicaciones';
@@ -52,6 +54,10 @@ export class DependenciasDeAnaliticaNest {
   @Inject(CostearCarta)
   public readonly costearCarta!: CostearCarta;
 
+  /** Para el ambito compartido, no para leerla aqui. Ver `DependenciasDeVistas`. */
+  @Inject(LeerCarta)
+  public readonly leerCarta!: LeerCarta;
+
   @Inject(CalcularConsumoTeorico)
   public readonly consumoTeorico!: CalcularConsumoTeorico;
 
@@ -69,6 +75,10 @@ export class DependenciasDeAnaliticaNest {
 
   @Inject(LeerAjustes)
   public readonly leerAjustes!: LeerAjustes;
+
+  /** Solo para el nombre del producto en `GET /analitica/ventas`. Ver `DependenciasDeCarga`. */
+  @Inject(ListarProductos)
+  public readonly listarProductos!: ListarProductos;
 
   @Inject(AUDIT_LOG_PORT)
   public readonly auditoria!: AuditLogPort;

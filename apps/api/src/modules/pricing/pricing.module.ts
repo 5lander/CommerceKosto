@@ -15,16 +15,19 @@ import { RELOJ } from '../../shared/application/ports/reloj.port';
 import { RelojDelSistema } from '../../shared/infrastructure/time/reloj-del-sistema';
 import { ActualizarAjustes, LeerAjustes } from './application/casos-de-uso/ajustes';
 import { CostosDeItems } from './application/casos-de-uso/costos-de-items';
+import { PreciosPendientes } from './application/casos-de-uso/pendientes';
 import {
   CostoDeItem,
   HistorialDePrecios,
   ResolverPrecio,
   SugerirPrecio,
 } from './application/casos-de-uso/precios';
+import { SugerirPreciosEnLote } from './application/casos-de-uso/lotes';
 import { REPOSITORIO_DE_PRECIOS } from './application/ports/repositorio-de-precios.port';
 import { DependenciasDePreciosNest } from './infrastructure/dependencias-de-precios';
 import { AjustesController } from './infrastructure/http/ajustes.controller';
 import { PreciosController } from './infrastructure/http/precios.controller';
+import { LecturasDePrecios } from './infrastructure/http/lecturas-de-precios';
 import { ResolucionYCosto } from './infrastructure/http/resolucion-y-costo';
 import { PrismaPreciosRepositorio } from './infrastructure/prisma-precios.repositorio';
 
@@ -46,10 +49,10 @@ import { PrismaPreciosRepositorio } from './infrastructure/prisma-precios.reposi
       useFactory: (deps: DependenciasDePreciosNest): SugerirPrecio => new SugerirPrecio(deps),
     },
     {
-      provide: HistorialDePrecios,
+      provide: LecturasDePrecios,
       inject: [DependenciasDePreciosNest],
-      useFactory: (deps: DependenciasDePreciosNest): HistorialDePrecios =>
-        new HistorialDePrecios(deps),
+      useFactory: (deps: DependenciasDePreciosNest): LecturasDePrecios =>
+        new LecturasDePrecios(new HistorialDePrecios(deps), new PreciosPendientes(deps), new CostosDeItems(deps)),
     },
     {
       provide: CostoDeItem,
@@ -78,7 +81,12 @@ import { PrismaPreciosRepositorio } from './infrastructure/prisma-precios.reposi
       useFactory: (deps: DependenciasDePreciosNest): ActualizarAjustes =>
         new ActualizarAjustes(deps),
     },
+    {
+      provide: SugerirPreciosEnLote,
+      inject: [DependenciasDePreciosNest],
+      useFactory: (deps: DependenciasDePreciosNest): SugerirPreciosEnLote => new SugerirPreciosEnLote(deps),
+    },
   ],
-  exports: [CostoDeItem, CostosDeItems, LeerAjustes],
+  exports: [SugerirPreciosEnLote, CostoDeItem, CostosDeItems, LeerAjustes],
 })
 export class PricingModule {}

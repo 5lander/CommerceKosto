@@ -35,12 +35,14 @@ import {
 } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import { RegistrarConsumoPorVenta } from '../../application/casos-de-uso/consumo';
 import {
   ConsultarSaldos,
   CorregirMovimiento,
+  ConsultarMovimiento,
   ListarMovimientos,
   RegistrarMovimiento,
 } from '../../application/casos-de-uso/movimientos';
@@ -61,6 +63,7 @@ import {
   type CuerpoDeMovimiento,
   type CuerpoDeProduccion,
   type CuerpoDeTransferencia,
+  type MovimientoDto,
   type PaginaDelLibroDto,
   type RegistroDeConsumoDto,
   type RegistroDto,
@@ -81,6 +84,7 @@ export class LecturasDelLibro {
   public constructor(
     public readonly saldos: ConsultarSaldos,
     public readonly movimientos: ListarMovimientos,
+    public readonly movimiento: ConsultarMovimiento,
   ) {}
 }
 
@@ -114,6 +118,7 @@ export class InventarioController {
     const pagina = await this.lecturas.movimientos.ejecutar(sesion, {
       locationId: aLocationId(consulta.locationId),
       itemId: consulta.itemId === undefined ? null : aItemId(consulta.itemId),
+      tipo: consulta.tipo ?? null,
       desde: consulta.desde === undefined ? null : new Date(consulta.desde),
       hasta: consulta.hasta === undefined ? null : new Date(consulta.hasta),
       limite: consulta.limite,
@@ -124,6 +129,19 @@ export class InventarioController {
       movimientos: pagina.movimientos.map(comoMovimientoDto),
       siguiente: pagina.siguiente,
     };
+  }
+
+  /**
+   * Un movimiento, para la pantalla que lo corrige (P16-C). Lo mismo que una fila
+   * del libro, y con el mismo permiso: `BODEGA` no lee el libro y tampoco esto.
+   */
+  @Get('movimientos/:movementId')
+  @Requiere('inventory.read')
+  public async movimiento(
+    @SesionActual() sesion: SesionActiva,
+    @Param('movementId', IdentificadorDeRuta) movementId: string,
+  ): Promise<MovimientoDto> {
+    return comoMovimientoDto(await this.lecturas.movimiento.ejecutar(sesion, aMovementId(movementId)));
   }
 
   /** Compra, merma o ajuste. Devuelve el id, y nada más. */
@@ -141,6 +159,7 @@ export class InventarioController {
       costoTotal: cuerpo.costoTotal,
       purchaseArticleId:
         cuerpo.purchaseArticleId === null ? null : aPurchaseArticleId(cuerpo.purchaseArticleId),
+      ivaTarifa: cuerpo.ivaTarifa,
       occurredAt: new Date(cuerpo.occurredAt),
       note: cuerpo.note,
     });
@@ -153,7 +172,7 @@ export class InventarioController {
   @Requiere('inventory.write')
   public async corregir(
     @SesionActual() sesion: SesionActiva,
-    @Param('movementId') movementId: string,
+    @Param('movementId', IdentificadorDeRuta) movementId: string,
     @Body(new EsquemaPipe(CUERPO_DE_CORRECCION)) cuerpo: CuerpoDeCorreccion,
   ): Promise<RegistroDto> {
     const id = await this.escrituras.correccion.ejecutar(sesion, {

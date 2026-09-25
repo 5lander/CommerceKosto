@@ -1,8 +1,10 @@
 /**
  * Lo que `analytics` necesita de la persistencia.
  *
- * **SOLO SUS DOS TABLAS.** Las ventas y los costos fijos son lo único que este
- * módulo escribe; todo lo demás —la carta costeada, el libro, el conteo, el
+ * **SUS DOS TABLAS, Y UNA COLUMNA DE UNA TERCERA.** Las ventas y los costos fijos
+ * son lo único que este módulo escribe, más `period.version` (D-16.121): la
+ * versión de la carga del mes tiene que subir en la MISMA transacción que la
+ * reemplaza, o entre las dos sentencias cabe otra carga. `periods` no la toca; todo lo demás —la carta costeada, el libro, el conteo, el
  * período— lo pide por los puertos de `costing`, `inventory` y `periods`. Un
  * `SELECT` sobre `inventory_movement` desde aquí sería un segundo sitio que
  * mantener en sincronía el día que cambie el signo de algo.
@@ -13,6 +15,7 @@
  * la forma de dejar media grilla del mes pasado mezclada con la de este.
  */
 
+import type { DesenlaceVersionado } from '../../../../shared/application/concurrencia';
 import type {
   CompanyId,
   PeriodId,
@@ -34,28 +37,32 @@ export interface CostoLeido {
   readonly importe: string;
 }
 
+/** Lo común a las dos cargas del mes. */
+export interface CargaVersionada {
+  readonly companyId: CompanyId;
+  readonly periodId: PeriodId;
+  readonly userId: UserId;
+  /** La que se leyó con la carga (D-16.122: `1` si el mes no tenía fila). */
+  readonly versionEsperada: number;
+}
+
 export interface RepositorioDeAnalitica {
   ventasDe(entrada: {
     readonly companyId: CompanyId;
     readonly periodId: PeriodId;
   }): Promise<readonly VentaLeida[]>;
 
-  reemplazarVentas(entrada: {
-    readonly companyId: CompanyId;
-    readonly periodId: PeriodId;
-    readonly userId: UserId;
-    readonly ventas: readonly VentaLeida[];
-  }): Promise<void>;
+  /**
+   * Reemplaza las ventas del mes **solo si la versión del período sigue siendo la
+   * esperada**, y la sube en la misma transacción (D-16.121, ADR-023).
+   */
+  reemplazarVentas(entrada: CargaVersionada & { readonly ventas: readonly VentaLeida[] }): Promise<DesenlaceVersionado>;
 
   costosDe(entrada: {
     readonly companyId: CompanyId;
     readonly periodId: PeriodId;
   }): Promise<readonly CostoLeido[]>;
 
-  reemplazarCostos(entrada: {
-    readonly companyId: CompanyId;
-    readonly periodId: PeriodId;
-    readonly userId: UserId;
-    readonly costos: readonly CostoLeido[];
-  }): Promise<void>;
+  /** Lo mismo para los costos fijos, con el MISMO testigo: la carga del mes. */
+  reemplazarCostos(entrada: CargaVersionada & { readonly costos: readonly CostoLeido[] }): Promise<DesenlaceVersionado>;
 }

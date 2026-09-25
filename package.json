@@ -16,7 +16,7 @@
     "prepare": "node tools/setup-hooks.mjs && npm run db:generate",
     "doctor": "node tools/doctor.mjs",
     "audit": "npm run audit:types && npm run audit:lint && npm run audit:forbidden && npm run audit:arch && npm run audit:deadcode && npm run audit:complexity && npm run audit:duplication && npm run audit:migrations && npm run audit:secrets && npm run audit:deps && npm run audit:sec-headers && npm run audit:tests",
-    "audit:types": "tsc -p apps/api/tsconfig.json && tsc -p tools/tsconfig.json",
+    "audit:types": "tsc -p apps/api/tsconfig.json && tsc -p apps/api/tsconfig.ui.json --noEmit && tsc -p tools/tsconfig.json && npm run typecheck --workspace @costeo/web",
     "audit:lint": "eslint . --max-warnings=0 --no-inline-config",
     "audit:forbidden": "node tools/audit/forbidden.mjs",
     "audit:arch": "node tools/audit/arch.mjs",
@@ -31,17 +31,29 @@
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "npm run test:unit --workspace @costeo/api",
     "test:integration": "npm run test:integration --workspace @costeo/api",
-    "dev": "npm run dev --workspace @costeo/api",
+    "dev": "node scripts/dev.mjs",
+    "importar": "node scripts/importar.mjs",
     "build": "npm run build --workspace @costeo/api",
     "db:up": "docker compose up -d db pgbouncer",
     "db:down": "docker compose down",
     "db:reset": "node scripts/db-reset.mjs",
+    "respaldo": "node scripts/respaldo.mjs",
+    "restaurar": "node scripts/restaurar.mjs",
+    "restaurar:tenant": "node scripts/restaurar-tenant.mjs",
+    "seed:tenant": "node scripts/seed-tenant.mjs",
     "db:generate": "npm run db:generate --workspace @costeo/api",
     "migrate:new": "node scripts/migrate-new.mjs",
     "migrate:deploy": "npm run migrate:deploy --workspace @costeo/api",
     "migrate:down": "node scripts/migrate-down.mjs",
     "migrate:verify": "node scripts/migrate-verify.mjs",
-    "audit:complexity:preferencias": "eslint . --config eslint.preferencias.config.mjs --no-inline-config"
+    "audit:complexity:preferencias": "eslint . --config eslint.preferencias.config.mjs --no-inline-config",
+    "bench": "node scripts/bench.mjs",
+    "medir-bundle": "node scripts/medir-bundle.mjs",
+    "rol:backoffice": "node scripts/rol-backoffice.mjs",
+    "rol:despachador": "node scripts/rol-despachador.mjs",
+    "operador:backoffice": "node scripts/operador-backoffice.mjs",
+    "backoffice": "node scripts/backoffice.mjs",
+    "correo:despachar": "node scripts/despachador.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -54,6 +66,9 @@
     "secretlint": "^11.2.4",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4"
+  },
+  "overrides": {
+    "multer": "2.3.0"
   },
   "allowScripts": {
     "@prisma/engines@7.10.0": true,

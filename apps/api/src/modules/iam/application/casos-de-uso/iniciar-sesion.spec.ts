@@ -14,8 +14,9 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CorreoAEncolar } from '../../../../shared/application/correo/correo-a-encolar';
+import { renderizar } from '../../../../shared/application/correo/plantillas';
 import type { AuditEvent, AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
-import type { MailerPort, OutgoingMail } from '../../../../shared/application/ports/mailer.port';
 import type { Reloj } from '../../../../shared/application/ports/reloj.port';
 import {
   companyId,
@@ -23,7 +24,7 @@ import {
   userId,
   type SessionId,
 } from '../../../../shared/domain/identity/identificadores';
-import { AccesoBloqueadoError, CredencialesInvalidasError } from '../../domain/errores';
+import { AccesoBloqueadoError, CredencialesInvalidasError, RociadoDeContrasenasError } from '../../domain/errores';
 import type { GeneradorDeTokens, TokenDeSesion } from '../ports/generador-de-tokens.port';
 import type { HasherDeContrasenas } from '../ports/hasher-de-contrasenas.port';
 import type {
@@ -61,6 +62,7 @@ class RepositorioDoble implements RepositorioDeAutenticacion {
   public fallos: FallosRecientes = { porCuenta: [], porIp: [] };
   public readonly intentos: string[] = [];
   public readonly sesiones: NuevaSesion[] = [];
+  public readonly encolados: Parameters<RepositorioDeAutenticacion['encolarCorreo']>[0][] = [];
   public olvidos = 0;
   public hashesGuardados = 0;
 
@@ -103,15 +105,26 @@ class RepositorioDoble implements RepositorioDeAutenticacion {
     this.hashesGuardados += 1;
     return Promise.resolve();
   }
+  public solicitarRestablecimiento(): Promise<void> {
+    return Promise.resolve();
+  }
+  public consumirRestablecimiento(): Promise<null> {
+    return Promise.resolve(null);
+  }
+  public correoDelUsuario(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+  public encolarCorreo(entrada: Parameters<RepositorioDeAutenticacion['encolarCorreo']>[0]): Promise<void> {
+    this.encolados.push(entrada);
+    return Promise.resolve();
+  }
 }
 
 describe('IniciarSesion', () => {
   let repositorio: RepositorioDoble;
   let hasher: HasherDeContrasenas;
   let auditoria: AuditLogPort;
-  let correo: MailerPort;
   let eventos: AuditEvent[];
-  let correos: OutgoingMail[];
   let verificados: (string | null)[];
   let caso: IniciarSesion;
   let coincide: boolean;
@@ -120,7 +133,6 @@ describe('IniciarSesion', () => {
   beforeEach(() => {
     repositorio = new RepositorioDoble();
     eventos = [];
-    correos = [];
     verificados = [];
     coincide = true;
     pideRehash = false;
@@ -134,8 +146,18 @@ describe('IniciarSesion', () => {
       necesitaRehash: () => pideRehash,
     };
 
+    // EL DOBLE DEVUELVE UN TOKEN DISTINTO EN CADA LLAMADA, y eso importa desde
+    // P16-A2: `abrir` pide DOS —el de sesion y el anti-CSRF— y un doble que
+    // devolviera siempre lo mismo dejaria pasar el error de derivar uno del
+    // otro, que es justo el que rompe el CSRF (ADR-021).
+    let generados = 0;
     const tokens: GeneradorDeTokens = {
-      generar: (): TokenDeSesion => ({ token: 'token-en-claro', hash: 'hash-del-token' }),
+      generar: (): TokenDeSesion => {
+        generados += 1;
+        return generados === 1
+          ? { token: 'token-en-claro', hash: 'hash-del-token' }
+          : { token: `csrf-en-claro-${String(generados)}`, hash: `hash-csrf-${String(generados)}` };
+      },
       hashDe: () => 'hash-del-token',
     };
 
@@ -146,16 +168,9 @@ describe('IniciarSesion', () => {
       },
     };
 
-    correo = {
-      send: async (mail) => {
-        correos.push(mail);
-        return Promise.resolve();
-      },
-    };
-
     const reloj: Reloj = { ahora: () => AHORA };
 
-    const deps: DependenciasDeIniciarSesion = { repositorio, hasher, tokens, auditoria, correo, reloj };
+    const deps: DependenciasDeIniciarSesion = { repositorio, hasher, tokens, auditoria, reloj };
     caso = new IniciarSesion(deps);
   });
 
@@ -173,6 +188,16 @@ describe('IniciarSesion', () => {
     return Array.from({ length: cuantos }, () => new Date(AHORA.getTime() - 10 * SEGUNDO_MS));
   }
 
+  /** Fallos desde una IP contra `cuentas` correos distintos, `porCuenta` veces cada uno. */
+  function fallosDeIp(cuentas: number, porCuenta = 1): { at: Date; email: string }[] {
+    return Array.from({ length: cuentas }, (_, n) =>
+      Array.from({ length: porCuenta }, () => ({
+        at: new Date(AHORA.getTime() - 10 * SEGUNDO_MS),
+        email: `empleado${String(n)}@snacklab.ec`,
+      })),
+    ).flat();
+  }
+
   describe('camino correcto', () => {
     it('abre sesion y devuelve el token en claro una sola vez', async () => {
       const abierta = await entrar();
@@ -188,6 +213,16 @@ describe('IniciarSesion', () => {
       expect(repositorio.sesiones).toHaveLength(1);
       expect(repositorio.sesiones[0]?.tokenHash).toBe('hash-del-token');
       expect(JSON.stringify(repositorio.sesiones)).not.toContain('token-en-claro');
+    });
+
+    it('el token anti-CSRF SI se guarda en claro, y no es el de sesion (ADR-021)', async () => {
+      const abierta = await entrar();
+
+      // Es la asimetria deliberada: del token de sesion —la credencial— se
+      // guarda el hash; el anti-CSRF no es credencial, y guardarlo en claro es
+      // lo que permite devolverlo en `GET /auth/sesion` tras recargar.
+      expect(abierta.csrf).not.toBe(abierta.token);
+      expect(repositorio.sesiones[0]?.csrfToken).toBe(abierta.csrf);
     });
 
     it('normaliza el correo antes de todo lo demas', async () => {
@@ -313,21 +348,67 @@ describe('IniciarSesion', () => {
       await expect(entrar()).rejects.toBeInstanceOf(AccesoBloqueadoError);
     });
 
-    it('el eje de IP aguanta mas: cinco fallos de la cocina NO bloquean el local', async () => {
+    it('el eje de IP aguanta mas: cinco empleados equivocados NO paran el local', async () => {
       // Detras de una IP hay un restaurante entero saliendo por el mismo NAT.
       // Con el umbral de cuenta, cinco errores de cinco empleados distintos
       // dejarian al local completo fuera durante una hora.
-      repositorio.fallos = { porCuenta: [], porIp: fallosRecientes(5) };
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(5) };
 
       await expect(entrar()).resolves.toBeDefined();
     });
 
-    it('veinticinco fallos por IP si bloquean: eso ya es rociado de contrasenas', async () => {
-      // Una IP probando la misma contrasena contra cien correos distintos:
-      // ninguna cuenta llega a cinco fallos, y sin el eje de IP pasaria entera.
-      repositorio.fallos = { porCuenta: [], porIp: fallosRecientes(25) };
+    /**
+     * 🔴 D-16.196, INC-027. El eje de IP contaba FALLOS: veinticinco de la misma
+     * cuenta —un cocinero con la contrasena vieja, o un atacante apuntandole a
+     * el— dejaban fuera a todos los demas, con credenciales buenas, hasta una
+     * hora. Su cuenta ya estaba bloqueada al quinto fallo; la IP solo anadia
+     * victimas. Y con CGNAT esas victimas pueden no ser ni del mismo negocio.
+     */
+    it('🔴 mil fallos de UNA sola cuenta no tocan a las demas de esa IP', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(1, 1000) };
 
-      await expect(entrar()).rejects.toBeInstanceOf(AccesoBloqueadoError);
+      await expect(entrar()).resolves.toBeDefined();
+    });
+
+    it('🔴 doce cuentas distintas NO limitan: eso lo junta un CGNAT un lunes (D-16.199)', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(12) };
+
+      await expect(entrar()).resolves.toBeDefined();
+    });
+
+    it('🔴 cincuenta cuentas distintas desde la misma IP si limitan: eso ya es rociado', async () => {
+      // Ninguna cuenta llega a cinco fallos; sin este eje el barrido pasaria entero.
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(50) };
+
+      await expect(entrar()).rejects.toBeInstanceOf(RociadoDeContrasenasError);
+    });
+
+    it('🔴 el limite de IP NO escala: el doble de cuentas espera lo mismo', async () => {
+      const espera = async (cuentas: number): Promise<number> => {
+        repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(cuentas) };
+        try {
+          await entrar();
+          return 0;
+        } catch (error) {
+          return error instanceof RociadoDeContrasenasError ? error.reintentarEnSegundos : -1;
+        }
+      };
+
+      expect(await espera(50)).toBe(await espera(100));
+    });
+
+    it('y limitar por IP no es bloquear una cuenta: 429 con espera, no ACCESO_BLOQUEADO', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(50) };
+
+      await expect(entrar()).rejects.not.toBeInstanceOf(AccesoBloqueadoError);
+    });
+
+    it('limitado por IP tampoco gasta un hash', async () => {
+      repositorio.fallos = { porCuenta: [], porIp: fallosDeIp(50) };
+
+      await expect(entrar()).rejects.toThrow();
+
+      expect(verificados).toEqual([]);
     });
 
     it('bloqueado NO gasta un hash: seria una denegacion de servicio barata', async () => {
@@ -356,14 +437,24 @@ describe('IniciarSesion', () => {
   });
 
   describe('aviso al titular', () => {
-    it('el quinto fallo lo dispara', async () => {
+    /** El unico aviso encolado, o falla: aqui nunca hay dos. */
+    function unicoAviso(): CorreoAEncolar {
+      const [aviso, ...resto] = repositorio.encolados;
+      if (aviso === undefined || resto.length > 0) {
+        throw new Error(`se esperaba exactamente un aviso, hay ${String(repositorio.encolados.length)}`);
+      }
+      return aviso.correo;
+    }
+
+    it('el quinto fallo lo ENCOLA, bajo la company y el usuario de la cuenta', async () => {
       coincide = false;
       repositorio.fallos = { porCuenta: fallosRecientes(4), porIp: [] };
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos).toHaveLength(1);
-      expect(correos[0]?.to).toBe(CORREO);
+      expect(repositorio.encolados).toHaveLength(1);
+      expect(repositorio.encolados[0]).toMatchObject({ companyId: COMPANY, userId: USUARIO });
+      expect(unicoAviso()).toEqual({ destinatario: CORREO, plantilla: 'BLOQUEO', datos: {} });
     });
 
     it('el segundo fallo no', async () => {
@@ -372,25 +463,27 @@ describe('IniciarSesion', () => {
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos).toEqual([]);
+      expect(repositorio.encolados).toEqual([]);
     });
 
-    it('NUNCA se envia si la cuenta no existe: seria un relay de correo', async () => {
+    it('NUNCA se encola si la cuenta no existe: seria un relay de correo', async () => {
       repositorio.credencial = null;
       repositorio.fallos = { porCuenta: fallosRecientes(4), porIp: [] };
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos).toEqual([]);
+      expect(repositorio.encolados).toEqual([]);
     });
 
-    it('el aviso no lleva enlaces: seria indistinguible de una suplantacion', async () => {
+    it('el aviso no lleva enlaces ni datos: seria indistinguible de una suplantacion', async () => {
       coincide = false;
       repositorio.fallos = { porCuenta: fallosRecientes(4), porIp: [] };
 
       await expect(entrar()).rejects.toThrow();
 
-      expect(correos[0]?.body).not.toMatch(/https?:\/\//u);
+      const aviso = unicoAviso();
+      expect(aviso.datos).toEqual({});
+      expect(renderizar(aviso, 'costeo-saas').body).not.toMatch(/https?:\/\//u);
     });
   });
 

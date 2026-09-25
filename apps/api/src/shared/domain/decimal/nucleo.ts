@@ -29,6 +29,8 @@
 
 import DecimalJs from 'decimal.js';
 
+import { ErrorDeDominio, type CodigoDeDominio } from '../errors/error-de-dominio';
+import { valorParaMensaje } from '../errors/valor-en-mensaje';
 import { MAXIMA, type Escala } from './escalas';
 
 /** Colchon interno de digitos significativos. Ninguna operacion depende de el. */
@@ -71,11 +73,28 @@ export type Nucleo = InstanceType<typeof D>;
  */
 const CADENA_DECIMAL = /^-?\d+(?:\.\d+)?$/;
 
-export class ValorDecimalInvalidoError extends Error {
-  public override readonly name = 'ValorDecimalInvalidoError';
+/**
+ * ES UN ERROR DE DOMINIO, Y ESO LO CONVIERTE EN UN 400 (P16-A2, INC-012).
+ *
+ * Antes extendia `Error` a secas y salia como **500 `INTERNAL_ERROR`**: un
+ * precio escrito con coma, con espacio de miles o con mas decimales de los que
+ * el sistema conserva tumbaba la peticion sin decir que corregir. Y el mensaje
+ * llevaba dentro el nombre del metodo interno que lo lanzo
+ * (`Money.fromDecimalString`), que ahora que el texto VIAJA AL CLIENTE no tiene
+ * por que salir: se mueve a `detalle`, que el filtro escribe en el log en nivel
+ * `debug` y nunca en la respuesta. (Hasta la revision de P16-A2 nadie leia ese
+ * campo, asi que el dato no se reubicaba: se perdia.)
+ *
+ * Es SIEMPRE un error de entrada. Un decimal mal formado no se fabrica dentro:
+ * lo que viene de la base sale de columnas `numeric(24,12)` y lo que se calcula
+ * no pasa por aqui —esta funcion es la puerta de `cadena -> numero`, y esa
+ * puerta solo la cruzan los valores que alguien escribio—.
+ */
+export class ValorDecimalInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
 
-  public constructor(valor: string, motivo: string) {
-    super(`Valor decimal invalido "${valor}": ${motivo}`);
+  public constructor(valor: string, motivo: string, contexto: string) {
+    super(`El valor "${valorParaMensaje(valor)}" no es un numero valido: ${motivo}.`, { contexto });
   }
 }
 
@@ -91,6 +110,21 @@ export class DivisionPorCeroError extends Error {
   }
 }
 
+/**
+ * SIGUE SIENDO UN 500, Y ESO ES LO CORRECTO (P16-A2).
+ *
+ * Se penso convertirlo en 400 junto con los otros dos y se descarto: este no es
+ * un error del borde, es el techo de escala saltando **a mitad de un calculo**.
+ * Multiplicar suma escalas, asi que llegar aqui significa que una cadena de
+ * operaciones tiene un paso de mas — un bug del motor, no una peticion mal
+ * escrita. Convertirlo en 400 le diria al usuario que arregle algo que no es
+ * suyo, y —peor— el filtro dejaria de escribir la traza en el log, que es
+ * justo lo unico con lo que se diagnostica.
+ *
+ * Lo que si se cerro es el camino por el que un dato de entrada llegaba hasta
+ * aqui: `desdeCadena` rechaza antes, con `ValorDecimalInvalidoError` y un 400
+ * que explica el limite. Despues de eso, si esto salta, es de casa.
+ */
 export class EscalaExcedidaError extends Error {
   public override readonly name = 'EscalaExcedidaError';
 
@@ -110,10 +144,32 @@ export function desdeCadena(valor: string, contexto: string): Nucleo {
   if (!CADENA_DECIMAL.test(valor)) {
     throw new ValorDecimalInvalidoError(
       valor,
-      `${contexto} exige una cadena decimal literal (sin exponente, sin signo +, sin espacios ni separadores de miles)`,
+      'se espera un decimal en notacion normal, con punto y sin signo +, sin espacios, ' +
+        'sin separadores de miles y sin exponente (por ejemplo "1234.56")',
+      contexto,
+    );
+  }
+  if (decimalesDeLaCadena(valor) > MAXIMA) {
+    throw new ValorDecimalInvalidoError(
+      valor,
+      `tiene mas de ${String(MAXIMA)} decimales, que es todo lo que este sistema conserva; ` +
+        'redondealo antes de enviarlo',
+      contexto,
     );
   }
   return new D(valor);
+}
+
+/**
+ * Decimales que trae la CADENA, contados sobre el texto y no sobre el numero.
+ *
+ * Es la guarda de entrada del techo de escala, y tiene que correr ANTES de
+ * construir el valor: `new D(...)` con 40 decimales ya no se puede examinar sin
+ * haberlo aceptado. Ver `EscalaExcedidaError`, que es lo que pasaba antes.
+ */
+function decimalesDeLaCadena(valor: string): number {
+  const punto = valor.indexOf('.');
+  return punto === -1 ? 0 : valor.length - punto - 1;
 }
 
 /**

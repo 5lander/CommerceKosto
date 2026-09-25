@@ -6,7 +6,7 @@
 | **Paquete** | P8 |
 | **Área** | base de datos · build |
 | **Tiempo perdido** | ~20 min |
-| **Recurrencias** | 0 |
+| **Recurrencias** | **1** |
 
 > **El síntoma no apunta a la causa, y por eso cuesta.** Las pruebas que fallan no son las del código que se acaba de tocar, y no son las mismas dos veces seguidas. Es fácil perder media hora buscando el error en el diff.
 
@@ -121,3 +121,33 @@ Por encima de unas 200 companies o 1 GB, resetea.
 **`npm run db:psql` apuntaba a `scripts/psql-shell.mjs`, que no existe.** Llevaba así desde P0 y ningún check lo veía: `knip` analiza imports de TypeScript, no las rutas que los scripts de `package.json` invocan. La entrada se sustituyó por `db:reset`.
 
 Es una laguna pequeña pero real —**un script del `package.json` puede apuntar a un archivo inexistente y nada avisa**— y merece una regla de `audit:forbidden` el día que haya un segundo caso. Con uno solo, escribirla es la abstracción especulativa que `OPTIMIZACION.md` §1 prohíbe.
+
+---
+
+## Recurrencia 1 (P16-I, 2026-09-20) — y lo que la hace peor de lo que dice esta ficha
+
+La base de desarrollo llegó a **12 GB y 34,4 millones de movimientos**, y el síntoma ya no fue el
+timeout de Prisma: fue **una prueba de integración que expira a los 60 s unas veces sí y otras no**.
+`la corrección CONSERVA el tipo, para que Σ(COMPRA) del mes se cancele sola` tumbó `npm run audit`
+en una corrida y pasó en la siguiente, sin tocar nada.
+
+**La causa no es solo el tamaño: es que esas consultas de prueba no pueden usar ningún índice.**
+Estaban escritas como `WHERE item_id = $1 AND type = COMPRA`, sin `company_id`, y **todos** los
+índices del libro empiezan por el tenant (CLAUDE.md §5). Resultado:
+
+```
+Parallel Seq Scan on inventory_movement
+  Filter: ((item_id = …) AND (type = COMPRA))
+```
+
+Un barrido de 34 millones de filas por cada aserción, cuyo tiempo depende de qué haya en caché y de
+qué más esté corriendo. De ahí la inestabilidad: no es aleatoria, es un barrido compitiendo con el
+resto de la máquina.
+
+**Arreglo:** las siete consultas crudas de `inventario.spec.ts` llevan `company_id` por delante. El
+plan pasa a `Index Scan` y la suite bajó de expirar a **43 s de pruebas**.
+
+**La lección, que esta ficha no tenía:** una prueba que lee la base a pelo **también** está sujeta a
+la regla de índices del proyecto. Saltársela no da un resultado incorrecto —el número sale bien—,
+da una prueba que se degrada con el tamaño de la base hasta volverse inestable, y la inestabilidad
+se lee como «cosas del entorno» en vez de como lo que es.

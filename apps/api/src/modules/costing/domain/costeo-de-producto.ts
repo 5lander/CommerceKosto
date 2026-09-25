@@ -125,6 +125,21 @@ export interface EntradaDeCosteo {
   readonly ivaVenta: Ratio;
 }
 
+/**
+ * Si el plato no tiene NINGUNA línea `ACTIVA`: no hay receta, está vacía o todas
+ * sus líneas están excluidas.
+ *
+ * **SU LOTE CUESTA CERO, Y ESO NO ES UN COSTO: ES QUE FALTA LA RECETA** (duda #12,
+ * cerrada por el usuario con la opción (a); D-16.146). La aritmética de SPEC §14
+ * no cambia —la suma de ninguna línea es cero—; lo que cambia es que se dice. Sin
+ * esta marca, la carta de una bodega sin recetas enseñaba «0.00» y un food cost
+ * del 0 % en verde: un número plausible sobre el que se decide un precio. Es la
+ * misma regla que «sin contar» no es cero (D7).
+ */
+export function sinRecetaActiva(lineas: readonly LineaParaCostear[]): boolean {
+  return !lineas.some((linea) => linea.estado === 'ACTIVA');
+}
+
 export function costearProducto(entrada: EntradaDeCosteo): CosteoDeProducto {
   const costos = costosDelProducto(entrada);
   return {

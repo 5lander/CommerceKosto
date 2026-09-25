@@ -8,13 +8,24 @@
  * esa fue la unica prueba que habia tenido nunca de que funcionara: un efecto
  * colateral.
  *
- * DOS MECANISMOS DISTINTOS DEVUELVEN 429, Y HAY QUE SABER CUAL RESPONDIO:
+ * TRES MECANISMOS DISTINTOS DEVUELVEN 429, Y HAY QUE SABER CUAL RESPONDIO:
  *
- *   TOO_MANY_REQUESTS   el limitador. Cuenta peticiones por IP, da igual la
- *                       ruta y da igual quien seas.
+ *   TOO_MANY_REQUESTS      el limitador. Cuenta peticiones por IP, da igual la
+ *                          ruta y da igual quien seas.
  *
- *   ACCESO_BLOQUEADO    la politica anti fuerza bruta. Cuenta INTENTOS DE LOGIN
- *                       fallidos por cuenta y por IP, y escala.
+ *   ACCESO_BLOQUEADO       la politica anti fuerza bruta. Cuenta INTENTOS DE
+ *                          LOGIN fallidos por cuenta y por IP, y escala.
+ *
+ *   LIMITE_DE_SOLICITUDES  el limite de tasa de los endpoints sin sesion o con
+ *                          correo (D-16.50): olvido, restablecimiento, invitar
+ *                          y reenviar, por IP y por destinatario. Su prueba es
+ *                          `limite-de-tasa.spec.ts`.
+ *
+ * Y LA IP QUE CUENTA ES LA DEL CLIENTE, NO LA DEL PROXY (D-16.49). La app se
+ * levanta con `proxiesDeConfianza: ['127.0.0.1']` —el par de supertest— para
+ * comprobar que el limitador global distingue por `X-Forwarded-For` cuando el
+ * par es de confianza; sin eso, detras de Caddy los 300 por minuto serian
+ * para todos los usuarios juntos (INC-022).
  *
  * El primer intento de escribir esta prueba usaba `POST /auth/login` con un
  * correo fijo, y acabo midiendo el segundo mecanismo sin darse cuenta: los
@@ -64,6 +75,7 @@ describe('el limitador de peticiones', () => {
     app = await createApplication({
       ...loadConfiguration(process.env),
       rateLimit: { windowMs: VENTANA_MS, max: PETICIONES_PERMITIDAS },
+      proxiesDeConfianza: ['127.0.0.1'],
     });
     await app.init();
   });
@@ -92,6 +104,23 @@ describe('el limitador de peticiones', () => {
     // cliente tiene que poder distinguirlas.
     expect(respuesta.body).toMatchObject({ code: 'TOO_MANY_REQUESTS' });
     expect(respuesta.body).toHaveProperty('message');
+  });
+
+  it('con el par de confianza, otra X-Forwarded-For es otra clave: el limite es por cliente, no por proxy', async () => {
+    // El socket (127.0.0.1) ya agoto sus tres peticiones. Una cabecera con
+    // otro ultimo salto vuelve a tener las suyas; y ese otro cliente tambien
+    // se agota a las tres, sin arrastrar al primero ni ser arrastrado.
+    const otroCliente = '203.0.113.9';
+    const estados: number[] = [];
+    for (let intento = 0; intento < PETICIONES_PERMITIDAS + 1; intento += 1) {
+      estados.push((await pedir().set('X-Forwarded-For', otroCliente)).status);
+    }
+
+    expect(estados).toEqual([
+      ...Array.from({ length: PETICIONES_PERMITIDAS }, () => NO_AUTORIZADO),
+      DEMASIADAS,
+    ]);
+    expect((await pedir()).status).toBe(DEMASIADAS);
   });
 
   it('las sondas de salud lo esquivan: las llama el orquestador, no un cliente', async () => {

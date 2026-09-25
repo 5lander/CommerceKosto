@@ -11,13 +11,24 @@
  * aplica el caso de uso a partir de `sesion.alcance`. Es la escalada
  * horizontal, y se prueba: un `GERENTE_LOCAL` de la ubicacion A no ve la B
  * aunque las dos sean de su company.
+ *
+ * EDITAR (P16-C, D-16.127) PIDE `location.update`, que solo tienen `OWNER` y
+ * `ADMIN`. Nombre y tipo, con el mismo cuerpo que crear; responde la ubicación
+ * como queda. Sin versión (D-16.13): la señal para añadirla es el primer
+ * cambio perdido.
  */
 
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put } from '@nestjs/common';
 
+import { locationId } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
-import { CrearUbicacion, ListarUbicaciones } from '../../application/casos-de-uso/ubicaciones';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
+import {
+  ActualizarUbicacion,
+  CrearUbicacion,
+  ListarUbicaciones,
+} from '../../application/casos-de-uso/ubicaciones';
 import type { SesionActiva } from '../../application/casos-de-uso/validar-sesion';
 import type { Ubicacion } from '../../application/ports/repositorio-de-organizacion.port';
 import { SesionActual } from './decoradores';
@@ -28,6 +39,7 @@ export class UbicacionesController {
   public constructor(
     private readonly crearUbicacion: CrearUbicacion,
     private readonly listarUbicaciones: ListarUbicaciones,
+    private readonly actualizarUbicacion: ActualizarUbicacion,
   ) {}
 
   @Get()
@@ -44,5 +56,15 @@ export class UbicacionesController {
     @Body(new EsquemaPipe(CUERPO_DE_UBICACION)) cuerpo: CuerpoDeUbicacion,
   ): Promise<Ubicacion> {
     return this.crearUbicacion.ejecutar(sesion, cuerpo);
+  }
+
+  @Put(':id')
+  @Requiere('location.update')
+  public actualizar(
+    @SesionActual() sesion: SesionActiva,
+    @Param('id', IdentificadorDeRuta) id: string,
+    @Body(new EsquemaPipe(CUERPO_DE_UBICACION)) cuerpo: CuerpoDeUbicacion,
+  ): Promise<Ubicacion> {
+    return this.actualizarUbicacion.ejecutar(sesion, locationId(id), cuerpo);
   }
 }

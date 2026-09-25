@@ -1,7 +1,7 @@
 # Modelo de datos
 
 > Se completa en cada paquete que cree tablas, **en el mismo commit**, con el diagrama de entidades actualizado.
-> Estado: **P2**. Auditoría (P0), identidad y organización (P1) y catálogo (P2).
+> Estado: **P16-C**. El documento cubre de P0 a P16-C; la cabecera decía «P2» desde entonces y era falsa — corregido al cerrar P16-A2 (AUDITORIA.md H13).
 
 ## Reglas transversales
 
@@ -157,6 +157,8 @@ erDiagram
 
 Están inventariadas y justificadas en **ADR-006**. Son `auth_lookup(email)`, `session_lookup(token_hash)` e `invitation_lookup(token_hash)`: `SECURITY DEFINER`, con `SET search_path`, con `REVOKE EXECUTE FROM PUBLIC`, y sin ningún filtro más que su clave de entrada. **Que sean exactamente tres es parte de la decisión.**
 
+> **Desde P16-A1 son cinco, y dos escriben** (ADR-025, decisión 3): `password_reset_request(p_email, p_token_hash, p_expires_at, p_datos)` y `password_reset_consume(p_token_hash, p_ahora)`, las dos `VOLATILE`, con la misma forma exacta del hueco (entra un correo y sale nada; entra un hash y sale una fila o ninguna) y las mismas tres cerraduras. La discusión que ADR-006 pedía para «cualquier cuarta» está en ADR-025. Ver «Lo que añade P16-A1 — la cola de correo…».
+
 ### El `RETURNING` bajo RLS — INC-010
 
 Una tabla cuya política de `SELECT` sea más estrecha que la de `INSERT` **no se puede escribir con `create()`**: Prisma emite `INSERT ... RETURNING` y el `RETURNING` pasa por la política de `SELECT`. Se usa `createMany`. Aplica hoy a `audit_log`, y aplicará en P6 a `inventory_movement` y en P11 a `cross_tenant_access_log`.
@@ -241,7 +243,7 @@ erDiagram
         uuid    company_id PK "1 a 1 con company"
         numeric iva_venta "CHECK fraccion"
         boolean iva_compra_recuperable "R13"
-        numeric iva_compra "solo el DEFECTO al capturar"
+        numeric iva_compra "RETIRADA en P16-B (D-16.109)"
         numeric provision_merma "R12: solo lo que ningun rendimiento explica"
         numeric food_cost_objetivo "CHECK objetivo <= verde <= maximo"
         numeric food_cost_umbral_verde
@@ -272,6 +274,11 @@ erDiagram
 El SPEC nombra `iva_compra` en la fórmula de §12 y **no dice dónde vive**; §11 solo trae «IVA de compra recuperable SI/NO». Se eligió el superconjunto: en Ecuador el alimento sin procesar es 0 % y el detergente 15 %, así que una tasa única por company estaría equivocada para uno de los dos, y el error entra directo en el costo de cada plato. `company_settings.iva_compra` es solo el valor que se **propone** al capturar.
 
 **Es una decisión que merece confirmación del usuario** y está anotada como tal en `ESTADO.md`.
+
+> **P16-A1 la cierra en dos niveles** (D-16.9, ADR-024): la tarifa que se copia al precio sale del
+> **artículo de compra** o, sin artículo, del **grupo del ítem**; `company_settings.iva_compra` dejó de
+> leerse y **P16-B la retira** (columna, `CHECK` y semilla, D-16.109). Ver «Lo que cambia P16-A1» y
+> «Lo que cambia P16-B».
 
 ### Un precio no se actualiza: se añade
 
@@ -713,6 +720,258 @@ consolidado multiplique el coste por el número de ubicaciones.
 
 ---
 
+## Lo que cambia P16-A1 — el IVA de compra en dos niveles
+
+No hay tabla nueva. Tres tablas ganan columnas, y el libro cambia de significado en una (ADR-024).
+
+```mermaid
+erDiagram
+    item_group        ||--o{ item : "tarifa para las compras SIN articulo"
+    purchase_article  ||--o{ inventory_movement : "tarifa para las compras CON articulo"
+
+    purchase_article {
+        numeric iva_tarifa "NOT NULL. CHECK 0..1. SEMILLA 0.15 en las filas previas"
+    }
+    item_group {
+        numeric iva_tarifa "NULL = el grupo no define. CHECK 0..1"
+    }
+    inventory_movement {
+        numeric total_cost "en una COMPRA con desglose es el NETO"
+        numeric total_bruto "lo que dice la factura. NULL sin desglose"
+        numeric iva_tarifa_aplicada "fraccion con la que se neteo. NULL sin desglose"
+        boolean iva_recuperable_aplicado "ajuste de la company EN ESE MOMENTO. NULL sin desglose"
+        boolean desglose_conocido "NOT NULL DEFAULT false. true solo en COMPRA"
+    }
+```
+
+### La tarifa vive en dos niveles, y ninguno es la company
+
+`purchase_article.iva_tarifa` es obligatoria: la factura del saco de harina dice 0 % y la del
+detergente 15 %. `item_group.iva_tarifa` es anulable y solo la usan las compras **sin artículo**;
+`NULL` significa «el grupo no define», no cero. La precedencia cuerpo > artículo > grupo y la fórmula
+del neteo viven una sola vez en `shared/domain/iva/` (D-16.40). **No hay valor por defecto**: sin
+tarifa, la compra se rechaza (400).
+
+**La semilla 0.15 es semilla, no verdad.** La columna nace `NOT NULL` sobre una tabla con filas, así
+que la migración la llena con `DEFAULT 0.15` y **suelta el default en la misma migración**: ningún
+artículo nuevo lo hereda. Los existentes se corrigen con `PUT /catalogo/articulos/:id`.
+
+### El libro persiste los cuatro importes, y `total_cost` cambia de significado solo en las COMPRA nuevas
+
+Con `desglose_conocido = true`, `total_cost` es el **neto** (`recuperable ? bruto / (1 + tarifa) :
+bruto`) y los tres campos nuevos son la **foto del momento** (D-16.42): cambiar el ajuste después no
+reescribe el libro. Las `COMPRA` anteriores a P16-A1 **no se rellenan** (D-16.18): quedan con
+`desglose_conocido = false`, los tres campos en `NULL` y `total_cost` tal como se tecleó. La
+discontinuidad que eso deja en `compras_del_mes` está dicha en ADR-024.
+
+| Restricción | Qué impide |
+|---|---|
+| `purchase_article_iva_tarifa_es_fraccion` | Un 15 donde va 0.15: `iva_tarifa BETWEEN 0 AND 1` |
+| `item_group_iva_tarifa_es_fraccion` | Lo mismo, admitiendo `NULL` |
+| `inventory_movement_desglose_coherente` | Un desglose a medias, o en un tipo que no es `COMPRA`: o los cuatro importes están y `type = 'COMPRA'`, o los tres nuevos son `NULL` |
+| `inventory_movement_desglose_en_rango` | Un bruto negativo o una tarifa aplicada fuera de 0..1 |
+
+**Lo que la base NO garantiza, y se dice:** que una `COMPRA` nueva lleve desglose. «Sin desglose» es
+el estado legítimo de las filas anteriores, y un `CHECK` no distingue una fila vieja de una nueva que
+llegue mal. La guarda es de aplicación —`exigirDesgloseEnCompra`, en la única función del repositorio
+por la que entra toda fila— y el SQL a mano queda fuera (ADR-024, decisión 4).
+
+**Sin índice nuevo.** Las dos lecturas nuevas son por clave primaria más `company_id`, y
+`GET /inventario/movimientos` añade tres columnas al `select` con el mismo plan que en P6.
+
+## Lo que añade P16-A1 — la cola de correo, el token de restablecimiento y los golpes del límite de tasa
+
+Tres tablas nuevas (migración `20260910042649_p16a1_correo_y_limite_de_tasa`, reversible), y son
+**tres tablas distintas entre sí**: una del tenant que otro rol cierra, una que la aplicación no ve,
+y una sin tenant. Conviene leer los privilegios con eso delante (ADR-025, ADR-026).
+
+```mermaid
+erDiagram
+    company  ||--o{ email_outbox : "company_id: lo pone la app o la definer"
+    app_user ||--o{ email_outbox : "user_id: el invitado, el titular"
+    app_user ||--o{ password_reset_token : "user_id"
+
+    email_outbox {
+        uuid id PK "uuidv7()"
+        uuid company_id FK "NULL admitido; la app y la definer lo ponen siempre"
+        uuid user_id FK "NULL admitido; idem"
+        text destinatario "CHECK con forma de correo, <= 254"
+        text plantilla "INVITACION | RESTABLECIMIENTO | BLOQUEO"
+        jsonb datos "EN VUELO: enlace + caducaEn, o vacio en BLOQUEO. Al cerrar: plantilla + destinatario"
+        text estado "PENDIENTE | ENVIADO | FALLIDO"
+        int intentos "NOT NULL DEFAULT 0, CHECK >= 0"
+        text error "el ultimo, acotado a 500 caracteres por el despachador"
+        timestamptz siguiente_intento_en "NULL = ya. Espera 1-2-4-8 min, y la RESERVA de 5 min de la pasada"
+        timestamptz created_at
+        timestamptz sent_at "ENVIADO si y solo si no es NULL (CHECK)"
+    }
+    password_reset_token {
+        uuid id PK "uuidv7()"
+        uuid user_id FK "NOT NULL"
+        text token_hash "UNIQUE. SHA-256 del token de 256 bits"
+        timestamptz expires_at "CHECK > created_at. created_at + HORAS_DE_RESTABLECIMIENTO"
+        timestamptz used_at "NULL hasta consumirlo: un solo uso"
+        timestamptz created_at
+    }
+    rate_limit_hit {
+        uuid id PK "uuidv7()"
+        text kind "CHECK: password.olvido | password.restablecimiento | usuario.invitar | usuario.reenvio"
+        text clave "ip:<ip> o correo:<sha256 hex>. NUNCA un correo en claro"
+        timestamptz at "el golpe. Se purga a las 24 h"
+    }
+```
+
+### Quién puede qué, tabla por tabla
+
+| Tabla | `costeo_app` | `costeo_despachador` | `costeo_backoffice` | Política RLS |
+|---|---|---|---|---|
+| `email_outbox` | `INSERT` + `SELECT` **por columnas, sin `datos`**; `UPDATE`/`DELETE` revocados explícitamente | `SELECT, UPDATE` (ni `INSERT` ni `DELETE`) | `SELECT` por columnas, sin `datos` | `_app`: `company_id = current_company()` (`FOR ALL`, INC-010) · `_despachador` y `_migrator` permisivas |
+| `password_reset_token` | **nada**: `REVOKE ALL`, y sin política (deny-by-default) | nada | nada | solo `_migrator`: la escriben y la gastan las dos definer |
+| `rate_limit_hit` | `INSERT` + `SELECT`; `UPDATE`/`DELETE` revocados | `DELETE`, y `SELECT` **solo sobre `at`** | nada | `_app`, `_despachador`, `_migrator`, las tres `USING (true)`: **sin tenant, como `login_attempt`** |
+
+Las tres tienen `ENABLE + FORCE ROW LEVEL SECURITY`; **la lista de exenciones de M6 sigue vacía**.
+`rate_limit_hit` es una **exención de ámbito** (no hay tenant contra el que filtrar), no de RLS, y
+está registrada como tal en `docs/SEGURIDAD.md` §2.1 junto a `login_attempt`. `costeo_despachador`
+**no** es `BYPASSRLS`: ve la cola por su política, y una tabla nueva sin política le es invisible.
+
+### `datos` es la única columna que solo un rol puede leer
+
+Mientras el correo es `PENDIENTE`, `datos` lleva el enlace con el token **en claro** —vale lo mismo
+que la fila de `password_reset_token`, que a la app se le niega entera—. Por eso el `SELECT` de
+`costeo_app` y `costeo_backoffice` se concede **por columnas**, todas menos esa; el `INSERT` de la
+app no la necesita porque `createMany` no emite `RETURNING`. Al pasar a `ENVIADO` o `FALLIDO` el
+despachador reemplaza `datos` por `{plantilla, destinatario}` en la misma sentencia (D-16.34). Un
+`down` no necesita nada especial: soltar la tabla se lleva los privilegios de columna.
+
+### `siguiente_intento_en` hace dos cosas, y la segunda no está en su nombre
+
+Es la **espera** tras un fallo (1 → 2 → 4 → 8 min; al quinto, `FALLIDO`) y es la **reserva** de la
+pasada: `tomarPendientes` lo pone a `ahora + 5 min` en la misma transacción que hace el
+`SELECT … FOR UPDATE SKIP LOCKED`, porque el bloqueo de fila muere al confirmar y el envío ocurre
+fuera. `renovarReserva` lo vuelve a poner fila a fila con `WHERE siguiente_intento_en = <la firma
+con la que se tomó>`: cero filas significa que otra instancia se la quedó y se cede. Ver ADR-025,
+decisión 6.
+
+### Las claves foráneas, y una que el plan no nombraba
+
+`email_outbox.user_id → app_user` (además de `company_id → company`): un correo que apunta a un
+usuario que no existe es exactamente lo que la clave impide, y los usuarios no se borran
+físicamente. `password_reset_token.user_id → app_user`, `NOT NULL`. Las tres con `ON DELETE
+RESTRICT`.
+
+| Restricción | Qué impide |
+|---|---|
+| `email_outbox_destinatario_con_forma` | Un destinatario que no tiene forma de correo (no valida que exista) |
+| `email_outbox_plantilla_conocida` · `email_outbox_estado_conocido` | Una plantilla o un estado que el código no conoce |
+| `email_outbox_intentos_no_negativos` | Intentos negativos |
+| `email_outbox_enviado_con_fecha` | `ENVIADO` sin fecha (no dice cuándo salió) o fecha sin `ENVIADO` (el despachador lo mandaría otra vez) |
+| `password_reset_token_caduca_despues_de_nacer` | Un token que caduca antes de existir (la prueba «caducado» mueve la fila entera al pasado por esto) |
+| `rate_limit_hit_kind_conocido` | Un `kind` que no está en `politicas.ts`: añadirlo en un sitio y no en el otro falla en el primer golpe |
+
+### Los índices, con su consulta delante
+
+| Índice | Consulta que lo justifica |
+|---|---|
+| `email_outbox(estado, siguiente_intento_en, created_at)` | `tomarPendientes`: `WHERE estado = 'PENDIENTE' AND (siguiente_intento_en IS NULL OR <= ahora) ORDER BY created_at LIMIT lote FOR UPDATE SKIP LOCKED`. El `OR` impide que el índice sirva el `ORDER BY`: es un bitmap sobre `estado` más un `sort` de las pendientes (9,9 ms con 3.000 pendientes en el `EXPLAIN` del paquete), y con una cola sana hay decenas, no miles |
+| `email_outbox(user_id, created_at DESC)` | La salud de la invitación de un usuario (`GET /usuarios` con `correoInvitacion`, P16-C) |
+| `password_reset_token(token_hash)` único | `password_reset_consume`: una lectura por clave |
+| `password_reset_token(user_id, created_at DESC)` | Los tokens de un usuario, del más reciente |
+| `rate_limit_hit(kind, clave, at DESC)` | `golpear`: `ORDER BY at DESC LIMIT golpesQueDeciden` → `Index Only Scan` de 11 entradas, 0,07 ms con 38.000 golpes. **La purga (`WHERE at < ahora − 24 h`) no lo usa**: `Seq Scan` sobre un día de golpes como mucho (4 ms con 38.000); si aparece en las consultas caras, índice sobre `(at)` |
+
+## Lo que cambia P16-A2 — el token anti-CSRF de la sesión
+
+**Ninguna tabla nueva.** Las dos tablas de sesión —una por proceso— ganan una columna, y la función
+`session_lookup` la devuelve (ADR-021).
+
+```mermaid
+erDiagram
+    session {
+        text csrf_token "NULL solo en las sesiones abiertas ANTES de P16-A2. CHECK: NULL o 32..128"
+    }
+    backoffice_session {
+        text csrf_token "lo mismo, en el otro proceso y en la otra tabla"
+    }
+```
+
+| Decisión | Por qué |
+|---|---|
+| **El token se guarda EN CLARO**, al revés que el de sesión (que va hasheado) | No es una credencial de acceso: quien tenga la columna no puede entrar, porque la credencial es la cookie. Y quien ya tenga la cookie no necesita el token: está actuando *como* la víctima, no *contra* ella. Hashearlo, además, haría imposible devolverlo en `GET /auth/sesion`, que es lo que evita rotarlo en cada recarga |
+| **Nullable, y sin relleno de las filas existentes** | Rellenarlas con un valor generado en SQL dejaría sesiones vivas cuyo token nadie ha entregado al cliente: navegarían con normalidad y fallarían al guardar. `ValidarSesion` trata la sesión sin token como inválida (**401**) y el usuario vuelve a entrar. El despliegue de este paquete cierra las sesiones abiertas |
+| **`CHECK` de longitud (`NULL` o 32–128)**, categoría ⚪ | El token lo genera siempre el servidor y ninguna ruta acepta un `csrf_token` de entrada, así que no hay petición que pueda violarlo. Está para que un `UPDATE` a mano no deje una cadena vacía, que el comparador leería como «sin token» en un sitio y como «token» en otro. Guardas en `guardas-de-dominio.md` |
+| **`session_lookup` se rehace con `DROP` + `CREATE`** | Cambia el tipo de retorno (13 → 14 columnas) y `CREATE OR REPLACE` no sirve para eso. La migración repite el `REVOKE … FROM PUBLIC` y el `GRANT … TO costeo_app`: una función nueva nace **sin** los privilegios de la anterior |
+| **Ningún `GRANT` nuevo** | `costeo_app` ya tiene `INSERT`/`UPDATE` sobre `session` desde P1, y una columna nueva la cubren los privilegios de tabla |
+
+**Ningún índice nuevo, y no es un olvido.** El token nunca se busca: se **lee** de la fila que
+`session_lookup` ya traía por `session(token_hash)`, una vez por petición autenticada. Cero consultas
+añadidas al camino crítico.
+
+---
+
+## Lo que cambia P16-B — la versión del agregado, y la retirada de `iva_compra`
+
+**Ninguna tabla nueva.** Dos columnas `version` para la concurrencia optimista (ADR-023), una columna
+que se va y un índice que sustituye a otro. Migración `20260912191330_p16b_versiones_y_ajustes`.
+
+```mermaid
+erDiagram
+    product {
+        integer version "P16-B. NOT NULL DEFAULT 1, CHECK >= 1. La del AGREGADO: maestro + product_location + combo_component"
+    }
+    item {
+        integer version "P16-B. Lo mismo, para PUT /catalogo/items/:id"
+    }
+    company_settings {
+        numeric iva_compra "RETIRADA: la tarifa vive en purchase_article e item_group desde P16-A1"
+    }
+```
+
+| Decisión | Por qué |
+|---|---|
+| **Un entero, no `updated_at`** | Ninguna tabla tenía `updated_at`, y un instante empata consigo mismo: dos escrituras del mismo milisegundo tendrían el mismo testigo (D-16.13) |
+| **La versión es del agregado, en la fila del maestro** | `product_location` y `combo_component` no llevan la suya: el formulario de la ficha los decide juntos, y la lista de componentes se reemplaza entera, así que sus filas no sobreviven para llevar versión. La consecuencia es la deuda de D-16.20 —fijar el PVP de un local deja obsoleto el formulario del otro—, con su señal en ADR-023 |
+| **La columna la escribe solo el repositorio, como `version + 1`** | En la misma sentencia que comprueba la esperada (`UPDATE … WHERE version = $n`). La `version` del cuerpo se **compara**, no se guarda: por eso los dos `CHECK` son ⚪ en `guardas-de-dominio.md` |
+| **`DEFAULT 1` rellena las filas existentes** | Al contrario que `session.csrf_token` en P16-A2, aquí no hay nada que entregar al cliente: la versión se lee con la ficha, y cualquier número de partida sirve mientras sea el mismo para todos |
+| **La receta NO tiene columna de versión** | Cada guardado es una fila nueva de `recipe`. El testigo es el id de la última creada (`basadaEn`), comprobado bajo `pg_advisory_xact_lock` — sin columna, sin trigger y sin escribir en `item` desde `recipes` (D-16.101) |
+| **`iva_compra` se suelta con `DROP COLUMN`, y el `down` la devuelve con `0.15`** | El `CHECK company_settings_ratios_son_fracciones` y la función `sembrar_ajustes_de_company()` se recrean sin ella en la misma migración. El `down` añade la columna con `DEFAULT 0.15` —la semilla de D3—, rellena y **suelta el `DEFAULT`**, para que la columna vuelva como estaba en P16-A2 y no con un valor por defecto que nunca tuvo. Probado sobre la base sembrada (INC-011) |
+
+**Un índice sustituye a otro, y los otros dos caben en lo que había.** La bandeja de precios
+sugeridos pagina por cursor —`company_id = $1 AND status = 'SUGGESTED' AND id > $cursor ORDER BY id`—
+y con `reference_price(company_id, status)` de P3 el planificador recorría la **clave primaria**
+filtrando company y estado: barato o caro según dónde cayeran los sugeridos en el orden de `id`. Pasa a
+**`(company_id, status, id)`**, con las tres condiciones en el `Index Cond`; su prefijo sigue sirviendo a
+las lecturas por estado de antes, así que sustituye y no se suma. La última versión de una receta usa
+`recipe(company_id, product_id|item_id, location_id, valid_from DESC)` y ordena por `created_at` las
+pocas versiones de un destino en una ubicación (34 en el volumen del bench), y las propagaciones de un
+producto, `recipe_propagation(company_id, product_id, propagated_at DESC)`. Los planes, en
+`docs/pasos/P16-B/CONSTRUCCION.md`.
+
+---
+
+## Lo que cambia P16-C — la versión de la carga del mes
+
+**Ninguna tabla nueva.** Una columna y una semilla. Migración `20260912205903_p16c_version_del_periodo`.
+
+```mermaid
+erDiagram
+    period {
+        integer version "P16-C. NOT NULL DEFAULT 1, CHECK >= 1. La de la CARGA DEL MES: ventas y costos fijos"
+    }
+```
+
+| Decisión | Por qué |
+|---|---|
+| **La suben solo las dos cargas por reemplazo** (D-16.121) | La versión dice cuántas veces se guardó la carga del mes. Un movimiento crea el período pero no deja obsoleta ninguna rejilla, y el cierre y la reapertura tampoco: un mes cerrado ya rechaza la carga por su cuenta (`PeriodoCerradoError`) |
+| **Ventas y costos fijos comparten el testigo** | Son las dos mitades de lo que se teclea cada mes. El precio es un 409 espurio si dos personas cargan las dos cosas del mismo mes a la vez, la misma deuda que D-16.20 con la misma señal |
+| **La escribe el repositorio de ANALÍTICA, no el de períodos** | La versión tiene que subir en la misma transacción que borra y reescribe las ventas, o entre las dos sentencias cabe otra carga. Es la única columna de `period` que toca `analytics`, y su puerto lo dice |
+| **Un mes sin fila se lee con `1`** (D-16.122) | Es la que tendrá la fila al crearse, así que el cuerpo no necesita un `null` con significado propio |
+| **`location.updated` en `audit_event_type`**, sin borrarla en el `down` | `PUT /ubicaciones/:id` (D-16.127). M10 / INC-011: un `audit_log` que la referencie haría el `down` irreversible sobre una base con datos |
+
+**Ningún índice nuevo.** La escritura condicionada va por el único `period(id, company_id)`; la lista de
+usuarios lee `app_user(company_id, status)`, sus roles por `user_role(company_id, user_id)` y el último
+correo de invitación por `email_outbox(user_id, created_at DESC)`, que P16-A1 creó para esta lectura.
+
+---
+
 ## Entidades por paquete
 
 | Paquete | Entidades | Estado |
@@ -726,7 +985,30 @@ consolidado multiplique el coste por el número de ubicaciones.
 | **P6** | `inventory_movement`, `inventory_transfer`, `inventory_production` + `inventory_movement_type`. **No hay `inventory_balance`**, y era lo previsto: el saldo es una agregación sobre el libro, no una tabla — R3 | ✅ |
 | **P7** | `period`, `physical_count`, `physical_count_line` + `period_status`, `physical_count_status`. **El conteo no ajusta el libro**: no hay clave foránea de `inventory_movement` hacia aquí, y confirmar no escribe ni un movimiento | ✅ |
 | **P8** | `product_sales`, `fixed_cost` + `fixed_cost_classification`. **Ninguna tabla derivada**: las seis vistas se calculan al vuelo sobre un contexto único por (ubicación, mes). Las materializadas de período cerrado se aplazan a P9 | ✅ |
-| P10 | `import_job`, `import_row` | ⬜ |
+| P10 | `import_job`, `import_job_status` | ✅ |
+| **P16-A1** | `email_outbox`, `password_reset_token`, `rate_limit_hit` (ADR-025, ADR-026) + las dos funciones definer que escriben. Y sin tabla nueva en la otra mitad: `purchase_article.iva_tarifa`, `item_group.iva_tarifa` y los cuatro campos del desglose en `inventory_movement`, con sus cuatro `CHECK` (ADR-024) | ✅ |
+| **P16-A2** | **Ninguna tabla nueva.** `session.csrf_token` y `backoffice_session.csrf_token` (nullable, con `CHECK` de longitud) y `session_lookup` rehecha para devolver la columna (ADR-021) | ✅ |
+| **P16-C** | **Ninguna tabla nueva.** `period.version` con su `CHECK` (D-16.121) y la semilla `location.updated` | ✅ |
+| **P16-B** | **Ninguna tabla nueva.** `product.version` e `item.version` con su `CHECK` (ADR-023); **se retira** `company_settings.iva_compra` con su `CHECK` y su semilla (D-16.109); `reference_price(company_id, status)` pasa a `(company_id, status, id)` | ✅ |
+
+**`import_row` no existe, y es una decisión.** El plan la listaba; el análisis vive en un `jsonb`
+dentro de `import_job` porque es una **cache de algo reproducible** —si se pierde, se vuelve a subir
+el archivo— y no una fuente de verdad. Una tabla de filas obligaría a mantener en SQL una estructura
+que vive en `imports/domain/analisis.ts` y cambia con los descriptores.
+
+**`import_job` es el RASTRO, no la importación.** No tiene ni una clave foránea hacia lo importado:
+si la tuviera, borrar un ítem obligaría a decidir qué hacer con su historia. Las filas importadas las
+escriben los módulos dueños.
+
+Sus dos invariantes viven en `CHECK`, y son las que hacen que el rastro valga algo:
+`import_job_confirmada_es_coherente` (confirmada **si y solo si** hay fecha y hay recuento) e
+`import_job_analizada_tiene_analisis` (no se confirma lo que nadie analizó). Categorías y guardas en
+`docs/sistema/guardas-de-dominio.md`.
+
+**Privilegios:** `import_job` lleva `GRANT UPDATE` —desviación respecto de P8, justificada en el
+bloque manual de la migración: aquí la unidad es un archivo y su fila tiene identidad, recorre
+`SUBIDA → ANALIZADA → CONFIRMADA`—. **No lleva `DELETE`**: una importación descartada sigue siendo
+algo que pasó.
 | P11 | `plan`, `subscription`, `cross_tenant_access_log` | ⬜ |
 
 ## Índices
@@ -754,7 +1036,7 @@ Los de P1, todos con su consulta delante:
 | `item_group(company_id, name)` único | Nombre de grupo único por company |
 | `item_name_similitud` (GIN, trigrama) | **Sin consulta hoy.** Deduplicación de P10 |
 | `reference_price(company_id, item_id, valid_from DESC)` | El índice de §5: precio vigente de un ítem. Igualdad antes que rango |
-| `reference_price(company_id, status)` | Los precios pendientes de confirmar, y la carga en lote del costeo |
+| `reference_price(company_id, status, id)` | Los precios pendientes de confirmar **por cursor** (P16-B: antes `(company_id, status)`, y el orden por `id` caía en la clave primaria), y la carga en lote del costeo por el prefijo |
 | `product(company_id, name)` único · `(company_id, status)` | Nombre único y listado de productos activos |
 | `product_location(company_id, location_id)` | La carta de una ubicación |
 | `recipe(company_id, product_id, location_id, valid_from DESC)` | El índice de §5: receta vigente de un producto en una ubicación |

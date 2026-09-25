@@ -27,9 +27,30 @@ import {
 } from '../../../shared/domain/identity/identificadores';
 import { Ratio } from '../../../shared/domain/money/tipos-monetarios';
 import { unidadDeUso } from '../../../shared/domain/unidad/unidad-de-uso';
+import type { ResultadoDeLoteConLimite } from '../../../shared/application/lote';
+import {
+  clavePorNombre,
+  nombresQueChocan,
+  nombresUnicos,
+} from '../../../shared/domain/lote/problemas';
+import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
+import {
+  excedeElLimite,
+  limitesBloqueados,
+} from '../../../shared/infrastructure/persistence/limites-del-plan';
+import {
+  aPruebaDeChoques,
+  esViolacionDeUnico,
+} from '../../../shared/infrastructure/persistence/rescate-de-choque';
+import { escribirConVersion } from '../../../shared/infrastructure/persistence/escritura-versionada';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
+import type { DesenlaceVersionado } from '../../../shared/application/concurrencia';
 import type {
   ArticuloLeido,
+  DatosDeArticuloEnLote,
+  DatosDeItemEnLote,
+  DatosParaActualizarArticulo,
+  DatosParaActualizarGrupo,
   DatosParaActualizarItem,
   DatosParaCrearArticulo,
   DatosParaCrearItem,
@@ -37,19 +58,49 @@ import type {
   ItemLeido,
   RepositorioDeCatalogo,
   ResultadoDeAlta,
+  ResultadoDeAltaDeItem,
+  ResultadoDeCambio,
+  ResultadoDeLoteDeArticulos,
+  UnidadLeida,
 } from '../application/ports/repositorio-de-catalogo.port';
 import type { Dimension, UnidadDelCatalogo } from '../domain/conversion';
 
 const ESTADO_ACTIVO = 'ACTIVE';
 
-/** Violación de restricción única en Prisma. */
-const CODIGO_DE_DUPLICADO = 'P2002';
-
 const DIMENSIONES: ReadonlySet<string> = new Set(['MASA', 'VOLUMEN', 'CONTEO']);
 
-function esDuplicado(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === CODIGO_DE_DUPLICADO;
+/**
+ * Un `updateMany` con `company_id` en el WHERE, traducido a lo que el puerto
+ * promete. Cero filas es «no existe en tu company»; un `P2002` es que el
+ * nombre nuevo ya lo usa otra fila. Lo comparten grupos y artículos.
+ */
+async function intentarCambio(
+  cambio: () => Promise<{ readonly count: number }>,
+): Promise<ResultadoDeCambio> {
+  try {
+    const resultado = await cambio();
+    return resultado.count > 0 ? 'actualizado' : 'no_encontrado';
+  } catch (error) {
+    if (esViolacionDeUnico(error)) return 'nombre_en_uso';
+    throw error;
+  }
 }
+
+/**
+ * Leer los nombres que una company ya tiene en una tabla. Los dos lotes del
+ * catálogo comparan contra esto, y el rescate de un `P2002` los relee con el
+ * mismo lector.
+ */
+type LectorDeNombres = (
+  tx: ClienteDeTransaccion,
+  companyId: CompanyId,
+) => Promise<readonly { readonly name: string }[]>;
+
+const nombresDeItem: LectorDeNombres = async (tx, companyId) =>
+  tx.item.findMany({ where: { companyId }, select: { name: true } });
+
+const nombresDeArticulo: LectorDeNombres = async (tx, companyId) =>
+  tx.purchaseArticle.findMany({ where: { companyId }, select: { name: true } });
 
 /**
  * El `dimension` que llega de la base es `text` por el catálogo, y aquí se
@@ -86,19 +137,55 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
     );
   }
 
+  /**
+   * Relee los nombres que la company ya tiene, EN UNA TRANSACCION NUEVA.
+   *
+   * Es lo que `aPruebaDeChoques` necesita y lo unico que el repositorio sabe
+   * hacer de ese rescate: la transaccion que se topo con el `P2002` esta
+   * abortada y dentro de ella ya no corre ninguna consulta. El porque completo
+   * —y las tres ramas del rescate, con su prueba— estan en
+   * `shared/infrastructure/persistence/rescate-de-choque.ts`.
+   */
+  private async nombresYaUsados(
+    companyId: CompanyId,
+    leer: LectorDeNombres,
+  ): Promise<readonly string[]> {
+    const filas = await this.transaccion.run(companyId, async (tx) => leer(tx, companyId));
+    return filas.map((f) => f.name);
+  }
+
+  /**
+   * ORDENADAS POR DIMENSION Y LUEGO POR TAMANO, no alfabeticamente: en un
+   * desplegable «mg, g, oz, lb, kg» se lee como una escala y «g, kg, lb, mg,
+   * oz» no se lee como nada.
+   */
+  public async listarUnidades(): Promise<readonly UnidadLeida[]> {
+    const filas = await this.transaccion.runWithoutTenant(
+      'catalogo GLOBAL de unidades: un kilogramo pesa lo mismo en todas las companies',
+      async (tx) =>
+        tx.unit.findMany({
+          select: { code: true, name: true, dimension: true },
+          orderBy: [{ dimension: 'asc' }, { factorToBase: 'asc' }],
+        }),
+    );
+
+    return filas.map((f) => ({ codigo: f.code, nombre: f.name, dimension: f.dimension }));
+  }
+
   public async crearGrupo(entrada: {
     readonly companyId: CompanyId;
     readonly nombre: string;
+    readonly ivaTarifa: string | null;
   }): Promise<ResultadoDeAlta<ItemGroupId>> {
     return this.transaccion.run(entrada.companyId, async (tx) => {
       try {
         const fila = await tx.itemGroup.create({
-          data: { companyId: entrada.companyId, name: entrada.nombre },
+          data: { companyId: entrada.companyId, name: entrada.nombre, ivaTarifa: entrada.ivaTarifa },
           select: { id: true },
         });
         return { clase: 'creado', id: aGroupId(fila.id) };
       } catch (error) {
-        if (esDuplicado(error)) {
+        if (esViolacionDeUnico(error)) {
           return { clase: 'nombre_en_uso' };
         }
         throw error;
@@ -110,16 +197,49 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
     return this.transaccion.run(companyId, async (tx) => {
       const filas = await tx.itemGroup.findMany({
         where: { companyId },
-        select: { id: true, name: true },
+        select: CAMPOS_DE_GRUPO,
         orderBy: { name: 'asc' },
       });
 
-      return filas.map((f) => ({ id: aGroupId(f.id), nombre: f.name }));
+      return filas.map(comoGrupoLeido);
     });
   }
 
-  public async crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAlta<ItemId>> {
+  public async buscarGrupo(entrada: {
+    readonly companyId: CompanyId;
+    readonly grupoId: ItemGroupId;
+  }): Promise<GrupoLeido | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.itemGroup.findFirst({
+        where: { id: entrada.grupoId, companyId: entrada.companyId },
+        select: CAMPOS_DE_GRUPO,
+      });
+      return fila === null ? null : comoGrupoLeido(fila);
+    });
+  }
+
+  public async actualizarGrupo(datos: DatosParaActualizarGrupo): Promise<ResultadoDeCambio> {
+    return this.transaccion.run(datos.companyId, async (tx) =>
+      intentarCambio(() =>
+        tx.itemGroup.updateMany({
+          where: { id: datos.grupoId, companyId: datos.companyId },
+          data: { name: datos.nombre, ivaTarifa: datos.ivaTarifa },
+        }),
+      ),
+    );
+  }
+
+  public async crearItem(datos: DatosParaCrearItem): Promise<ResultadoDeAltaDeItem> {
     return this.transaccion.run(datos.companyId, async (tx) => {
+      // EL LIMITE DEL PLAN, DENTRO DE LA MISMA TRANSACCION QUE INSERTA (D5).
+      // Contar fuera seria un TOCTOU; ver `limites-del-plan.ts`.
+      const maximo = excedeElLimite({
+        actuales: await tx.item.count({ where: { companyId: datos.companyId } }),
+        nuevos: 1,
+        maximo: (await limitesBloqueados(tx, datos.companyId)).items,
+      });
+      if (maximo !== null) return { clase: 'limite', maximo };
+
       try {
         const fila = await tx.item.create({
           data: {
@@ -137,7 +257,7 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
         });
         return { clase: 'creado', id: aItemId(fila.id) };
       } catch (error) {
-        if (esDuplicado(error)) {
+        if (esViolacionDeUnico(error)) {
           return { clase: 'nombre_en_uso' };
         }
         throw error;
@@ -145,24 +265,42 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
     });
   }
 
-  public async actualizarItem(datos: DatosParaActualizarItem): Promise<boolean> {
+  /**
+   * `intentarCambio` y no un `count > 0` pelado, desde P16-A2: renombrar un ítem
+   * a un nombre que ya tiene otro chocaba con `item_company_id_name_key` y ese
+   * `P2002` subía sin capturar hasta el filtro, que lo convertía en **500**.
+   * Era la única de las tres `actualizar*` que no pasaba por aquí.
+   */
+  public async actualizarItem(
+    datos: DatosParaActualizarItem,
+  ): Promise<DesenlaceVersionado | { readonly clase: 'nombre_en_uso' }> {
     return this.transaccion.run(datos.companyId, async (tx) => {
-      // `updateMany` y no `update`: sin `RETURNING`, y con `company_id` repetido
-      // en el WHERE. RLS ya lo filtra, pero una defensa que solo está en un
-      // sitio se cae entera si ese sitio falla.
-      const resultado = await tx.item.updateMany({
-        where: { id: datos.itemId, companyId: datos.companyId },
-        data: {
-          name: datos.nombre,
-          yield: datos.rendimiento,
-          groupId: datos.grupoId,
-          priceConfidence: datos.confianzaDePrecio,
-          status: datos.estado,
-          keepsStock: datos.llevaStock,
-        },
-      });
-
-      return resultado.count > 0;
+      const donde = { id: datos.itemId, companyId: datos.companyId };
+      try {
+        // `updateMany` y no `update`: sin `RETURNING`, y con `company_id`
+        // repetido en el WHERE. Y la VERSIÓN también en el WHERE: es lo que
+        // cierra la carrera sin leer antes (ver `escritura-versionada.ts`).
+        return await escribirConVersion({
+          esperada: datos.versionEsperada,
+          escribir: () =>
+            tx.item.updateMany({
+              where: { ...donde, version: datos.versionEsperada },
+              data: {
+                name: datos.nombre,
+                yield: datos.rendimiento,
+                groupId: datos.grupoId,
+                priceConfidence: datos.confianzaDePrecio,
+                status: datos.estado,
+                keepsStock: datos.llevaStock,
+                version: { increment: 1 },
+              },
+            }),
+          existe: async () => (await tx.item.count({ where: donde })) > 0,
+        });
+      } catch (error) {
+        if (esViolacionDeUnico(error)) return { clase: 'nombre_en_uso' };
+        throw error;
+      }
     });
   }
 
@@ -213,13 +351,14 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
             presentationAmount: datos.presentacion,
             presentationUnit: datos.unidadDePresentacion,
             conversionFactor: datos.factorDeConversion,
+            ivaTarifa: datos.ivaTarifa,
             status: ESTADO_ACTIVO,
           },
           select: { id: true },
         });
         return { clase: 'creado', id: aArticleId(fila.id) };
       } catch (error) {
-        if (esDuplicado(error)) {
+        if (esViolacionDeUnico(error)) {
           return { clase: 'nombre_en_uso' };
         }
         throw error;
@@ -237,33 +376,232 @@ export class PrismaCatalogoRepositorio implements RepositorioDeCatalogo {
           companyId: entrada.companyId,
           ...(entrada.itemId === null ? {} : { itemId: entrada.itemId }),
         },
-        select: {
-          id: true,
-          itemId: true,
-          name: true,
-          brand: true,
-          supplier: true,
-          presentationAmount: true,
-          presentationUnit: true,
-          conversionFactor: true,
-          status: true,
-        },
+        select: CAMPOS_DE_ARTICULO,
         orderBy: { name: 'asc' },
       });
 
-      return filas.map((f) => ({
-        id: aArticleId(f.id),
-        itemId: aItemId(f.itemId),
-        nombre: f.name,
-        marca: f.brand,
-        proveedor: f.supplier,
-        presentacion: f.presentationAmount.toFixed(),
-        unidadDePresentacion: f.presentationUnit,
-        factorDeConversion: f.conversionFactor.toFixed(),
-        estado: f.status,
-      }));
+      return filas.map(comoArticuloLeido);
     });
   }
+
+  public async buscarArticulo(entrada: {
+    readonly companyId: CompanyId;
+    readonly articuloId: PurchaseArticleId;
+  }): Promise<ArticuloLeido | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.purchaseArticle.findFirst({
+        where: { id: entrada.articuloId, companyId: entrada.companyId },
+        select: CAMPOS_DE_ARTICULO,
+      });
+      return fila === null ? null : comoArticuloLeido(fila);
+    });
+  }
+
+  public async actualizarArticulo(datos: DatosParaActualizarArticulo): Promise<ResultadoDeCambio> {
+    return this.transaccion.run(datos.companyId, async (tx) =>
+      intentarCambio(() =>
+        tx.purchaseArticle.updateMany({
+          where: { id: datos.articuloId, companyId: datos.companyId },
+          data: {
+            name: datos.nombre,
+            brand: datos.marca,
+            supplier: datos.proveedor,
+            ivaTarifa: datos.ivaTarifa,
+            status: datos.estado,
+          },
+        }),
+      ),
+    );
+  }
+
+  /**
+   * TODO EL LOTE O NADA — un solo `run()`, una sola transaccion.
+   *
+   * EL ORDEN IMPORTA Y NO ES ARBITRARIO:
+   *
+   *   1. leer los nombres que ya existen y devolverlos SIN escribir nada
+   *   2. asegurar los grupos que faltan
+   *   3. `createMany` de los items, en UNA sentencia
+   *
+   * El paso 1 existe para poder decir QUE nombres chocan. Dejar que el indice
+   * unico lo descubra daria un `P2002` que solo nombra la restriccion, y quien
+   * migra doscientos items necesita la lista, no el codigo de error.
+   *
+   * Sigue habiendo `catch` de duplicado como respaldo: entre la lectura y la
+   * escritura cabe otra transaccion. Con RLS y `FORCE`, todo esto ocurre dentro
+   * del tenant fijado por `run`.
+   */
+  public async crearItemsEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly items: readonly DatosDeItemEnLote[];
+  }): Promise<ResultadoDeLoteConLimite> {
+    return aPruebaDeChoques({
+      entrantes: datos.items.map((i) => i.nombre),
+      escribir: async () => this.escribirItemsEnLote(datos),
+      releer: async () => this.nombresYaUsados(datos.companyId, nombresDeItem),
+      alChocar: (nombres) => ({ clase: 'nombres_en_uso', nombres }),
+    });
+  }
+
+  private async escribirItemsEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly items: readonly DatosDeItemEnLote[];
+  }): Promise<ResultadoDeLoteConLimite> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      // El lote entero contra el limite, antes de mirar los nombres: importar
+      // trescientos items sobre un limite de quinientos con cuatrocientos ya
+      // dentro no puede escribir los cien primeros.
+      const maximo = excedeElLimite({
+        actuales: await tx.item.count({ where: { companyId: datos.companyId } }),
+        nuevos: datos.items.length,
+        maximo: (await limitesBloqueados(tx, datos.companyId)).items,
+      });
+      if (maximo !== null) return { clase: 'limite', maximo };
+
+      const existentes = await nombresDeItem(tx, datos.companyId);
+      const chocan = nombresQueChocan(
+        datos.items.map((i) => i.nombre),
+        existentes.map((f) => f.name),
+      );
+      if (chocan.length > 0) return { clase: 'nombres_en_uso', nombres: chocan };
+
+      const grupos = await asegurarGrupos(tx, datos.companyId, datos.items);
+
+      await tx.item.createMany({
+        data: datos.items.map((item) => ({
+          companyId: datos.companyId,
+          name: item.nombre.trim(),
+          type: item.tipo,
+          unitOfUse: item.unidadDeUso,
+          yield: item.rendimiento,
+          groupId: item.grupo === null ? null : (grupos.get(clavePorNombre(item.grupo)) ?? null),
+          status: ESTADO_ACTIVO,
+          priceConfidence: item.confianzaDePrecio,
+          keepsStock: item.llevaStock,
+        })),
+      });
+
+      return { clase: 'escrito', filas: datos.items.length };
+    });
+  }
+
+  /**
+   * TODO EL LOTE O NADA. Ver `crearItemsEnLote`.
+   *
+   * Los articulos apuntan a su item POR NOMBRE, que es lo que trae un archivo.
+   * Un nombre que no exista es un problema del lote y se devuelve como choque
+   * invertido: `nombres_en_uso` lleva aqui los items que FALTAN, y el caso de
+   * uso lo traduce. Es el unico sitio donde la union significa dos cosas, y por
+   * eso el caso de uso no la reenvia tal cual.
+   */
+  public async crearArticulosEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly articulos: readonly DatosDeArticuloEnLote[];
+  }): Promise<ResultadoDeLoteDeArticulos> {
+    return aPruebaDeChoques({
+      entrantes: datos.articulos.map((a) => a.nombre),
+      escribir: async () => this.escribirArticulosEnLote(datos),
+      releer: async () => this.nombresYaUsados(datos.companyId, nombresDeArticulo),
+      alChocar: (nombres) => ({ clase: 'articulos_en_uso', nombres }),
+    });
+  }
+
+  private async escribirArticulosEnLote(datos: {
+    readonly companyId: CompanyId;
+    readonly articulos: readonly DatosDeArticuloEnLote[];
+  }): Promise<ResultadoDeLoteDeArticulos> {
+    return this.transaccion.run(datos.companyId, async (tx) => {
+      const items = await tx.item.findMany({
+        where: { companyId: datos.companyId },
+        select: { id: true, name: true },
+      });
+      const porNombre = new Map(items.map((f) => [clavePorNombre(f.name), f.id]));
+
+      const faltan = datos.articulos
+        .map((a) => a.item)
+        .filter((nombre) => !porNombre.has(clavePorNombre(nombre)));
+      if (faltan.length > 0) return { clase: 'nombres_en_uso', nombres: nombresUnicos(faltan) };
+
+      // EL PRE-CHEQUEO QUE NO ESTABA (P16-A2): reimportar el mismo archivo
+      // chocaba con el indice unico de `purchase_article` y salia como 500.
+      // Aqui se dice QUE nombres sobran, que es lo que quien migra necesita.
+      const repetidos = nombresQueChocan(
+        datos.articulos.map((a) => a.nombre),
+        (await nombresDeArticulo(tx, datos.companyId)).map((f) => f.name),
+      );
+      if (repetidos.length > 0) return { clase: 'articulos_en_uso', nombres: repetidos };
+
+      await tx.purchaseArticle.createMany({
+        data: datos.articulos.map((articulo) => ({
+          companyId: datos.companyId,
+          itemId: porNombre.get(clavePorNombre(articulo.item)) ?? '',
+          name: articulo.nombre.trim(),
+          brand: articulo.marca,
+          supplier: articulo.proveedor,
+          presentationAmount: articulo.presentacion,
+          presentationUnit: articulo.unidadDePresentacion,
+          conversionFactor: articulo.factorDeConversion,
+          ivaTarifa: articulo.ivaTarifa,
+          status: ESTADO_ACTIVO,
+        })),
+      });
+
+      return { clase: 'escrito', filas: datos.articulos.length };
+    });
+  }
+}
+
+const CAMPOS_DE_GRUPO = { id: true, name: true, ivaTarifa: true } as const;
+
+function comoGrupoLeido(fila: {
+  id: string;
+  name: string;
+  ivaTarifa: { toFixed: () => string } | null;
+}): GrupoLeido {
+  return {
+    id: aGroupId(fila.id),
+    nombre: fila.name,
+    ivaTarifa: fila.ivaTarifa === null ? null : fila.ivaTarifa.toFixed(),
+  };
+}
+
+const CAMPOS_DE_ARTICULO = {
+  id: true,
+  itemId: true,
+  name: true,
+  brand: true,
+  supplier: true,
+  presentationAmount: true,
+  presentationUnit: true,
+  conversionFactor: true,
+  ivaTarifa: true,
+  status: true,
+} as const;
+
+function comoArticuloLeido(fila: {
+  id: string;
+  itemId: string;
+  name: string;
+  brand: string | null;
+  supplier: string | null;
+  presentationAmount: { toFixed: () => string };
+  presentationUnit: string;
+  conversionFactor: { toFixed: () => string };
+  ivaTarifa: { toFixed: () => string };
+  status: string;
+}): ArticuloLeido {
+  return {
+    id: aArticleId(fila.id),
+    itemId: aItemId(fila.itemId),
+    nombre: fila.name,
+    marca: fila.brand,
+    proveedor: fila.supplier,
+    presentacion: fila.presentationAmount.toFixed(),
+    unidadDePresentacion: fila.presentationUnit,
+    factorDeConversion: fila.conversionFactor.toFixed(),
+    ivaTarifa: fila.ivaTarifa.toFixed(),
+    estado: fila.status,
+  };
 }
 
 const CAMPOS_DE_ITEM = {
@@ -276,6 +614,7 @@ const CAMPOS_DE_ITEM = {
   status: true,
   priceConfidence: true,
   keepsStock: true,
+  version: true,
 } as const;
 
 function comoItemLeido(fila: {
@@ -288,6 +627,7 @@ function comoItemLeido(fila: {
   status: string;
   priceConfidence: string;
   keepsStock: boolean | null;
+  version: number;
 }): ItemLeido {
   return {
     id: aItemId(fila.id),
@@ -299,5 +639,36 @@ function comoItemLeido(fila: {
     estado: fila.status,
     confianzaDePrecio: fila.priceConfidence,
     llevaStock: fila.keepsStock,
+    version: fila.version,
   };
+}
+
+
+/**
+ * Crea los grupos que el lote menciona y no existen, y devuelve el mapa
+ * completo de nombre normalizado a id.
+ *
+ * `skipDuplicates` evita tener que restar conjuntos con cuidado: se piden
+ * todos, la base ignora los que ya estan. Despues se relee, porque
+ * `createMany` no devuelve ids.
+ */
+async function asegurarGrupos(
+  tx: ClienteDeTransaccion,
+  companyId: CompanyId,
+  items: readonly DatosDeItemEnLote[],
+): Promise<ReadonlyMap<string, string>> {
+  const nombres = nombresUnicos(items.flatMap((item) => (item.grupo === null ? [] : [item.grupo])));
+  if (nombres.length === 0) return new Map();
+
+  await tx.itemGroup.createMany({
+    data: nombres.map((name) => ({ companyId, name })),
+    skipDuplicates: true,
+  });
+
+  const filas = await tx.itemGroup.findMany({
+    where: { companyId },
+    select: { id: true, name: true },
+  });
+
+  return new Map(filas.map((f) => [clavePorNombre(f.name), f.id]));
 }

@@ -15,6 +15,7 @@
 
 import type {
   CompanyId,
+  ImportJobId,
   ItemId,
   LocationId,
   MovementId,
@@ -23,6 +24,7 @@ import type {
   TransferId,
   UserId,
 } from '../../../../shared/domain/identity/identificadores';
+import type { DesgloseDeCompra } from '../../domain/compra';
 import type { TipoDeMovimiento } from '../../domain/movimiento';
 
 export const REPOSITORIO_DE_INVENTARIO = 'REPOSITORIO_DE_INVENTARIO';
@@ -39,8 +41,16 @@ export interface MovimientoParaGuardar {
   readonly tipo: TipoDeMovimiento;
   /** CON SIGNO, ya resuelto por el dominio. */
   readonly cantidad: string;
-  /** Magnitud, sin signo. `null` donde el tipo no lo exige. */
+  /**
+   * Magnitud, sin signo. `null` donde el tipo no lo exige. En una COMPRA con
+   * desglose es el NETO (D-16.10); sin desglose, lo que se tecleó.
+   */
   readonly costoTotal: string | null;
+  /**
+   * Solo una COMPRA lo lleva, y `desglose_conocido` es exactamente
+   * `desglose !== null`. Los cuatro campos nacen juntos en el dominio.
+   */
+  readonly desglose: DesgloseDeCompra | null;
   readonly purchaseArticleId: PurchaseArticleId | null;
   readonly reversesMovementId: MovementId | null;
   readonly occurredAt: Date;
@@ -54,6 +64,10 @@ export interface MovimientoLeido {
   readonly tipo: TipoDeMovimiento;
   readonly cantidad: string;
   readonly costoTotal: string | null;
+  /** `null` = «sin desglose»: una COMPRA anterior a P16-A1, o no es COMPRA. */
+  readonly desglose: DesgloseDeCompra | null;
+  /** En qué presentación se compró. Su corrección conserva la misma (INC-029). */
+  readonly purchaseArticleId: PurchaseArticleId | null;
   readonly occurredAt: Date;
   readonly recordedAt: Date;
   readonly transferId: TransferId | null;
@@ -135,6 +149,8 @@ export interface ConsultaDelLibro {
   readonly companyId: CompanyId;
   readonly locationId: LocationId;
   readonly itemId: ItemId | null;
+  /** P16-C (D-16.125): el libro filtrado por tipo de la pantalla 17. `null` = todos. */
+  readonly tipo: TipoDeMovimiento | null;
   readonly desde: Date | null;
   readonly hasta: Date | null;
   readonly limite: number;
@@ -169,12 +185,32 @@ export interface RepositorioDeInventario {
    *
    * Lo usa el consumo por venta, que explota la receta de un lote de productos
    * vendidos y produce una salida por ítem: o entran todas o no entra ninguna.
+   *
+   * `importJobId` marca TODAS las filas del lote con la importación que las
+   * trajo (D-16.200). Va aquí y no en cada `MovimientoParaGuardar` porque es
+   * una propiedad del lote entero: media importación no existe. `null` es el
+   * caso normal —el consumo por venta, la anulación de una importación— y
+   * significa «esta fila no la trajo ningún archivo».
    */
   registrarVarios(entrada: {
     readonly companyId: CompanyId;
     readonly userId: UserId;
     readonly movimientos: readonly MovimientoParaGuardar[];
+    readonly importJobId: ImportJobId | null;
   }): Promise<readonly MovementId[]>;
+
+  /**
+   * Las filas que trajo una importación, para poder deshacerla (D-16.200).
+   *
+   * Vienen con `corregidoPor`, que es lo que hace el reintento seguro: una
+   * anulación a medias —la caída entre la escritura de las filas contrarias y
+   * el cambio de estado— se completa volviendo a lanzarla, porque lo ya
+   * corregido se salta en vez de corregirse dos veces.
+   */
+  movimientosDeImportacion(entrada: {
+    readonly companyId: CompanyId;
+    readonly importJobId: ImportJobId;
+  }): Promise<readonly MovimientoLeido[]>;
 
   /** La cabecera y sus dos patas, atómicamente. Media transferencia no existe. */
   registrarTransferencia(datos: DatosDeTransferenciaRegistrada): Promise<TransferId>;

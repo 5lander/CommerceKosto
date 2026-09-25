@@ -1,0 +1,1047 @@
+# P16 → P20 — Documento de construcción de la pasada
+
+**Pasada:** P16 → P20 — la aplicación completa · **Inicio:** 2026-09-09 · **Estado:** 🟡 en curso
+
+> Un documento por pasada, con una sección por commit. Los paquetes de API (P16-A1, A2, B, C y P20)
+> llevan además su carpeta propia con `CONSTRUCCION.md` y `AUDITORIA-RESULTADO.md` completos, como
+> cualquier paquete. El plan aprobado, versión 6, está en [`PLAN.md`](PLAN.md); las decisiones
+> cerradas, en `ESTADO.md` → «Pasada P16 → P20».
+
+---
+
+## Por qué existe la pasada
+
+El backend está completo —36 escrituras, tres barreras, 585 + 313 pruebas— y desplegado en local
+con marca. **La interfaz usaba 5 de las 41 rutas, y solo dos escribían.** Un dueño de restaurante no
+podía dar de alta un insumo, escribir una receta, subir un precio ni registrar la compra de hoy. No
+era un producto que se le entregue a un restaurante: era un motor con un visor encima.
+
+El usuario decidió construirlo todo en una pasada, como Noctis Commerce y con lo que trae la
+referencia visual de `docs/Sistema ejemplo/`, con parada de entrega al piloto tras las pantallas
+operativas y cinco evidencias.
+
+---
+
+## Commit 0 — Tooling · 2026-09-09
+
+### Objetivo
+
+Dejar registradas las 47 decisiones (U1–U8, D-16.1…D-16.39) **antes del primer commit de código**,
+y poner los tres guardianes del frontend y el medidor de bundle **antes de la primera pantalla
+nueva**. Una regla que llega después de treinta pantallas encuentra treinta infracciones y se acaba
+relajando; la que llega antes no encuentra ninguna y se queda.
+
+### Plan aprobado
+
+Fase 0 del plan: `ESTADO.md` gana la sección «Pasada P16 → P20» con las decisiones, el tablero y la
+nota de P17/P18/P19 diferidos por decisión de producto. Tooling: tres reglas de `audit:forbidden`
+para `apps/web/src/**/*.{ts,tsx}` con guardián, y `scripts/medir-bundle.mjs` con presupuesto
+200 KiB de piso / 350 KiB por pantalla. El glob `.tsx` de `audit:complexity` va en el commit
+«Armazón», que es el que crea los primeros componentes que lo necesitan.
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `ESTADO.md` | Sección «Pasada P16 → P20»: por qué, dónde está la referencia visual, tablero por commit, U1–U8, D-16.1…D-16.39, P17/P18/P19 con sus preguntas abiertas, las cinco evidencias de la parada. El encabezado dice que hay fase en curso |
+| `docs/pasos/P16/PLAN.md` | El plan aprobado, copiado del archivo de planificación **para que sobreviva a una compactación** (D-16.39): antes vivía fuera del repositorio |
+| `tools/audit/rules/frontend.rules.mjs` | **Tres reglas nuevas**, registradas en `forbidden.mjs`: `no-fecha-a-medianoche` (INC-013), `no-number-en-frontend` (CLAUDE.md §3, cierra `parseInt`, `Number(variable)` y `.toNumber()` que `no-restricted-syntax` deja pasar) y `no-tipti` (D8). De 36 reglas a 39 (y a **40** con la de INC-021, abajo); el contador de archivos pasa de 360 a **361**, y el +1 es exactamente `scripts/medir-bundle.mjs`, que las reglas de `scripts/**` examinan desde que existe (INC-007 caso 10: el número se mueve cuando el repositorio gana un archivo, y aquí se movió) |
+| `scripts/medir-bundle.mjs` · `npm run medir-bundle` | Lee el último build de `apps/web` y suma, por ruta, los chunks de JavaScript que el navegador baja para pintarla: el piso (`rootMainFiles`) más los del `page_client-reference-manifest.js` de esa ruta. Imprime bruto y gzip, y **el presupuesto se exige sobre gzip** |
+| `.gitignore` | `docs/Sistema ejemplo/` fuera de git (D-16.39) |
+| `docs/AUDITORIA.md` I9 | El presupuesto de bundle pasa de «solo P12/P13» a «todo commit que toque `apps/web`», con el comando |
+| `package.json` · `package-lock.json` | **`overrides: { multer: "2.3.0" }`** y la entrada del lock trasplantada a 2.3.0. Cierra los cuatro CVE altos de `multer@2.2.0` que `audit:deps` paró; ver «Problemas» e INC-021 |
+| `tools/audit/rules/repo.rules.mjs` | Regla nueva **`override-de-npm-reflejado-en-el-lock`**: cada `overrides` de la raíz tiene que verse en `package-lock.json`, porque npm lo ignora en silencio cuando ya hay lock (INC-021) |
+| `docs/incidencias/INC-021` | La ficha, con la prevención automatizada |
+
+### Decisiones técnicas tomadas
+
+| # | Decisión | Alternativas descartadas | Razón |
+|---|---|---|---|
+| 1 | **El presupuesto de bundle se mide en gzip**, y el script imprime también el bruto | Medir en bruto (piso 429 KiB, imposible bajo 200); medir con el tamaño que imprime `next build` (Next 16 ya no lo imprime) | El servidor autocontenido de Next comprime por defecto (`compress: true`) y Caddy solo reenvía: lo que viaja es gzip. El piso real son **126,9 KiB** comprimidos; la pantalla más cara, 138,6. El presupuesto 200/350 deja margen para el armazón y el kit, no para una dependencia nueva |
+| 2 | **Los chunks de una ruta salen del manifiesto por ruta, no del HTML prerenderizado** | Leer los `<script>` del `.html` | Una ruta dinámica (`/insumos/[id]`) no tiene HTML y sí manifiesto. Verificado: para las siete rutas actuales, manifiesto y HTML dan el mismo conjunto salvo el polyfill `noModule`, que solo baja un navegador antiguo y se excluye a propósito |
+| 3 | **`medir-bundle` mide el último build; no construye** | Que el script lanzara `next build` | Construir tarda medio minuto y ya lo hace `npm run build`. Para que un build viejo no pase por reciente, imprime el `BUILD_ID` y la hora del manifiesto |
+| 4 | **Caddy no gana `encode`** en este commit | Añadir `encode zstd gzip` al `Caddyfile` | Next ya comprime; añadirlo en el proxy sería comprimir dos veces o, peor, cambiar el despliegue sin repetir el ensayo que P14b enseñó a exigir |
+| 5 | **`docs/Sistema ejemplo/` se ignora, no se versiona** (D-16.39) | Commitearla como referencia | Es una app Vite ajena con su `package.json`, `bun.lock` y `server.ts`. Bajo los doce checks ya ponía `audit:forbidden` en rojo (`"start": node dist/server.cjs` → no existe). Vive en disco como el Excel de referencia, y `ESTADO.md` dice dónde |
+| 6 | `no-fecha-a-medianoche` **no marca `new Date()` sin argumentos** | Prohibir `new Date` entero | Las tres pantallas actuales lo usan para el mes por defecto; el instante actual no es una fecha a medianoche. Lo que se marca es `T00:00…` en una cadena, `new Date(aaaa, mm, …)` y `setHours(0)` |
+| 7 | **`multer` se fuerza a 2.3.0 con `overrides`, no se acepta en `ACEPTADAS`** | Aceptar el aviso con motivo; subir NestJS | `multer` viaja a la imagen de producción (`@nestjs/platform-express` lo importa al arrancar), así que no cumple el único criterio de `ACEPTADAS`. Toda la línea 11 de NestJS lo fija en 2.2.0 y la 12 es ESM (fuera de ADR-001). El override deja `core`/`common`/`platform-express` en 11.2.3 y cambia solo el paquete vulnerable. **Se retira cuando `platform-express` fije `multer ≥ 2.3.0`** |
+
+### Pruebas — los guardianes
+
+Salida literal, con la violación metida a mano en `ui/Tabla.tsx` y revertida después (el diff de
+`apps/web` queda vacío):
+
+```
+=== LINEA BASE ===
+audit:forbidden  OK — 39 reglas sobre 360 archivos
+=== GUARDIAN: cinco lineas coladas en ui/Tabla.tsx ===
+audit:forbidden  FALLO — 5 infraccion(es)
+  [no-fecha-a-medianoche]
+     apps/web/src/componentes/ui/Tabla.tsx:38  const colado1 = new Date('2026-09-01T00:00:00Z');
+     apps/web/src/componentes/ui/Tabla.tsx:39  const colado2 = new Date(2026, 8, 1);
+  [no-number-en-frontend]
+     apps/web/src/componentes/ui/Tabla.tsx:40  const colado3 = parseInt('   );
+     apps/web/src/componentes/ui/Tabla.tsx:41  const colado4 = Number(colado3);
+  [no-tipti]
+     apps/web/src/componentes/ui/Tabla.tsx:42  const colado5 = 'precio de tipti';
+=== REVERTIDO ===
+audit:forbidden  OK — 39 reglas sobre 360 archivos
+```
+
+(El extracto de `parseInt('   )` sale así porque la regla enmascara las cadenas antes de buscar:
+es lo que evita que el texto de ayuda de `decimales.ts`, que nombra `Number()` para explicar por qué
+no se usa, cuente como infracción.)
+
+`override-de-npm-reflejado-en-el-lock`, con `overrides.multer` puesto a mano en 2.4.0 y revertido:
+
+```
+audit:forbidden  FALLO — 1 infraccion(es)
+  [override-de-npm-reflejado-en-el-lock]  Un `overrides` de la raiz cuya version no es la que `package-lock.json` instala
+     package-lock.json  overrides pide multer@2.4.0, el lock instala node_modules/multer en 2.3.0
+exit=1
+=== REVERTIDO ===
+audit:forbidden  OK — 40 reglas sobre 361 archivos
+```
+
+`medir-bundle`, con el presupuesto bajado a mano a 100/135 y revertido:
+
+```
+  PASA    126.9 KiB gzip    428.6 KiB bruto  (piso, comun a todas)
+  PASA    138.2 KiB gzip    462.8 KiB bruto  /costeo
+  ok      133.6 KiB gzip    449.4 KiB bruto  /entrar
+  …
+medir-bundle  FALLO — alguna pantalla se pasa del presupuesto
+exit=1
+```
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo perdido |
+|---|---|---|
+| `audit:forbidden` estaba en rojo **antes de tocar nada**: el escáner lista también los archivos nuevos sin versionar, y `docs/Sistema ejemplo/package.json` tiene un `start` que apunta a un `dist/` que no existe | Ignorarla en git (D-16.39). No es incidencia: el mensaje decía exactamente qué pasaba | 5 min |
+| Turbopack no escribe `app-build-manifest.json`, que era la fuente prevista para medir por ruta | Se mide con `build-manifest.json` (`rootMainFiles`) más el `page_client-reference-manifest.js` de cada ruta, y se contrastó contra los `<script>` del HTML prerenderizado | 15 min |
+| El `.next` que había era de desarrollo (`next dev`), sin `server/app` | Se construyó en producción con `NEXT_PUBLIC_API_URL=/api`, que es lo que el script exige y dice | — |
+| **`audit:deps` en rojo por cuatro CVE altos nuevos de `multer@2.2.0`** (publicados después de P14b; `@nestjs/core` y `terminus` aparecían por la cadena). Y el arreglo se resistió: con `overrides` en la raíz, `npm install` decía «up to date» y dejaba 2.2.0; `--force`, `dedupe` y el override en el workspace, igual; borrar la entrada del lock hizo que npm **descartara `multer` entero** y siguiera sin quejarse; npm 12 lo mismo | Aislado con dos experimentos: sin lockfile npm resuelve 2.3.0 bien (también con workspaces); el bloqueo es que **con lock existente no re-resuelve la arista sobreescrita**. Como 2.3.0 declara exactamente las mismas dependencias que 2.2.0, se trasplantó al lock la entrada que npm resolvió sin lock, y se verificó con `npm ci --ignore-scripts` en copia limpia: instala 2.3.0, sin copia anidada, lock idéntico. `npm ls` la marca `invalid` por el mismo bug de carga; es cosmético y está dicho en INC-021 | 45 min |
+
+### Cómo probar
+
+```sh
+npm run audit                                   # 39 reglas; guardián arriba
+npm run build --workspace @costeo/web && npm run medir-bundle
+```
+
+### Incidencias registradas en este commit
+
+| Incidencia | Síntoma | ¿Se automatizó la prevención? |
+|---|---|---|
+| INC-021 | `npm install` dice «up to date» y la dependencia sigue en la versión vieja aunque `package.json` la sobreescribe con `overrides` | ✅ `override-de-npm-reflejado-en-el-lock` en `audit:forbidden`, con guardián |
+
+### Deuda y pendientes
+
+**El override de `multer` es deuda con condición de salida:** se retira cuando `@nestjs/platform-express` fije `multer ≥ 2.3.0`. Está en `ESTADO.md`. Lo demás: El glob `.tsx` de `audit:complexity` es del commit «Armazón», y está en el plan.
+
+---
+
+## Armazón (pantalla 1) · 2026-09-13
+
+### Objetivo
+
+Que las treinta pantallas que faltan sean **una carpeta y una línea**: el esqueleto común —cabecera,
+barra lateral por grupos, guardia de sucursal, permisos, mes— y el kit con el que se lee y se escribe,
+con las cuatro pantallas que ya existían migradas a él y partidas por debajo de los límites de
+complejidad que desde este commit también se miden en los `.tsx`.
+
+### Plan aprobado
+
+«Commit Armazón» del plan (`PLAN.md`): `app/(app)/layout.tsx` + `armazon/*` + `navegacion.ts` +
+`lib/permisos.tsx` + `lib/periodo.ts` + `lib/fechas.ts` + fábrica `seccion(permiso)`; `useLectura` +
+`Vista` y cada primitiva con su primer consumidor; `git mv` de las cuatro páginas con partición ≤ 40
+líneas; glob `.tsx` en `audit:complexity` con guardián; `/` → `/inicio`. **Lo último se movió al
+commit «Inicio»** (D-16.136): con `typedRoutes` no compila un `redirect` a una ruta que no existe.
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/layout.tsx` | El grupo de rutas autenticado: `ProveedorDePermisos` → `Suspense` → `Armazon`. `/entrar` y `/sucursal` quedan fuera |
+| `app/(app)/{costeo,menu,ventas,inventario}/layout.tsx` | Una línea cada uno: `export default seccion('<permiso>')` |
+| `app/(app)/{costeo,menu,ventas,inventario}/page.tsx` | Movidas con `git mv`. **Costeo y menú** leen con `useLectura` + `Vista`; el menú, con el mes de la URL y su fila extraída (`FilaDelMenu`). **Ventas**: `useVentasDelMes` (carta + mes + anterior en paralelo, con `useCarga`), `useCapturaDeVentas`, `RejillaDeVentas`, `BarraDeGuardado`, `FilaDeVenta`. **Inventario**: `conteoDelMes`, `conciliacionSiSePuede`, `useConteoDelMes`, `ConteoAbierto`, `AccionesDelConteo`, `HojaDeConteo`, `FilaParaContar`, `FilaConciliadaDeLaTabla` |
+| `componentes/armazon/` | `Armazon` (cabecera + lateral + lámina; la lámina enseña el error si la sesión no se pudo leer), `Cabecera` (marca, sucursal, mes si la sección lo tiene, salir), `BarraLateral` (grupos filtrados por permiso; el mes viaja en el enlace), `SelectorDeSucursal`, `SelectorDeMes`, `Permitido` + `seccion`, `navegacion.ts` (el registro) |
+| `componentes/Marco.tsx` | Adelgaza a lo que es de cada pantalla: título, ayuda, acciones y la guardia de sucursal. Ya no pinta la barra ni el `main` |
+| `componentes/ui/Vista.tsx` · `CeldaEditable.tsx` · `Campo.tsx` | Los cuatro estados de una lectura; la casilla de una rejilla de captura; el campo de texto con etiqueta (primer consumidor: `Entrar`) |
+| `lib/useLectura.ts` · `lib/useEnvio.ts` · `lib/rejilla.ts` | `useCarga`/`useLectura` con el origen del resultado; la escritura con su estado; Enter y flechas por la rejilla |
+| `lib/permisos.tsx` | `ProveedorDePermisos`, `usePermisos`, `useEntrarAlCaducar` |
+| `lib/fechas.ts` · `lib/periodo.ts` | El mes de Ecuador, `mesDeTexto` sin parsear, `mesAnterior`, `consultaDelMes`; `usePeriodo` sobre la URL |
+| `lib/api.ts` | `alCaducarSesion` (devuelve cómo quitarlo), `mensajeDe`, `codigoDe` y **la mutación sin sesión que sale sin token** (INC-023) |
+| `lib/decimales.ts` | `sinCerosDeSobra` |
+| `app/entrar/page.tsx` · `app/sucursal/page.tsx` | Partidas: `useEntrada` + `FormularioDeEntrada`; `/sucursal` con `useLectura` + `Vista` y `useEntrarAlCaducar` |
+| `styles/global.css` | `.aplicacion`, `.armazon`, `.lateral`, `.barra__contexto`, `.selector-compacto`, `.barra__interior--ancha`; todo con tokens |
+| `textos/es.ts` | Navegación, etiqueta de sucursal, nombres de los meses, mes sin abrir |
+| `apps/web/package.json` | `"typecheck": "next typegen && tsc --noEmit"` (INC-007, caso 13) |
+| `eslint.complexity.config.mjs` | El glob `'apps/*/src/**/*.tsx'` |
+| `tools/doctor.mjs` | «Puertos de la base (INC-015)»: `SSLRequest` a cada `host:puerto` de las cadenas de conexión; `revisar` pasa a asíncrono |
+| `apps/api/test/soporte/guardia-sin-base.ts` | Vigila **los puertos de las cadenas de conexión** (`DATABASE_URL`, `MIGRATION_DATABASE_URL`, `PGBOUNCER_DATABASE_URL`, del entorno o del `.env` leído sin cargarlo), además de `POSTGRES_PORT` y el 5432. Antes: `POSTGRES_PORT ?? 5432` de un entorno sin `.env` |
+| `tools/audit/tests.mjs` | La sonda pregunta al host y al puerto de `MIGRATION_DATABASE_URL`, que es donde conectan las de integración. Antes: `POSTGRES_PORT ?? 5432` sin leer el `.env` |
+| `docs/decisiones/ADR-020`, `ADR-022` | El armazón; cómo leen y escriben las pantallas |
+| `docs/incidencias/INC-023` · INC-015 · INC-007 | La nueva y las dos recurrencias |
+
+### Decisiones técnicas tomadas
+
+D-16.131…D-16.144 en `ESTADO.md`, con su porqué en ADR-020 y ADR-022. Las que más pesan:
+
+| # | Decisión | Alternativas descartadas | Razón |
+|---|---|---|---|
+| 1 | **Sin sesión, la mutación sale sin token** (D-16.137) | Flag `sinSesion` por llamada; token vacío | El flag es una lista en el cliente que se olvida en la quinta ruta pública (1b trae tres); el token vacío da 403 `CSRF_INVALIDO` donde el error verdadero es `SESION_INVALIDA` |
+| 2 | **El resultado de una lectura recuerda su origen** (D-16.131) | Poner a «cargando» en el efecto; cancelar con `AbortController` | Poner el estado en el efecto deja un render con los datos viejos bajo el mes nuevo; abortar no evita que llegue una respuesta que ya estaba en camino, y `llamar` no admite señal. Comparar el origen es una línea y no deja ventana |
+| 3 | **El estado editable se monta con los datos** (D-16.139) | Copiar los datos al estado con un `useEffect` | El efecto copia en cada relectura y pisa lo que se estaba escribiendo; montado, se inicializa una vez y `Vista` lo remonta al cambiar de mes |
+| 4 | **Dos `select` para el mes** (D-16.134) | `<input type="month">` | Firefox de escritorio lo degrada a texto libre |
+| 5 | **`typecheck` con `next typegen`** (D-16.138) | Construir el web en CI | Construir cuesta medio minuto y no es lo que el check dice medir; generar los tipos cuesta un segundo y deja el mismo `tsc` en local y en CI |
+
+### Cómo se verificó — en el navegador, con datos y con tres roles
+
+La pila de producción local (Caddy y el web viejo) no se tocó. Se levantaron **la API compilada en el
+puerto 3000 y el build de producción del web en el 3100**, con el tenant de ensayo sintético del
+runbook (`duena@`, `gerente@`, `bodega@ensayo.invalid`, dominio `.invalid`) y su catálogo de cinco
+ítems, cinco artículos, dos productos y seis líneas de receta, importado con `npm run importar`. Y
+Chrome sin cabeza conducido por el protocolo de DevTools desde un guion de la sesión (sin
+dependencias: `WebSocket` de Node 24), **entrando por el formulario**, no pegando una cookie.
+
+**33 capturas**: tres roles × 1280 y 360 px × `/sucursal`, `/costeo`, `/menu`, `/ventas`,
+`/inventario`, más el menú abierto en móvil. En todas, `scrollWidth ≤ clientWidth` (ninguna desborda).
+Lo que enseñan:
+
+| Rol | Barra lateral | `/costeo` · `/menu` · `/ventas` | `/inventario` |
+|---|---|---|---|
+| Dueña | Análisis (2) + Operación diaria (2) | Datos; en la bodega, costos `0.00` (duda #12) | Hoja + diferencia |
+| Gerente (Local Centro) | Las cuatro | Costeo 1,03 / 1,16 / 1,18 · food cost 17,2 % y 26,5 %; rejilla con los dos productos | Hoja + diferencia |
+| Bodega (Bodega Norte) | **Solo «Inventario y conteo»** | «Tu usuario no tiene acceso a esta pantalla», también escribiendo la URL | **Hoja sin diferencia** (el 403 de `count.read`) |
+
+**Y la escritura, en el mismo navegador** (gerente):
+
+```
+{
+  "antes": "Sin cambios que guardar",
+  "focoBajo": true,                    ← Enter en la primera casilla lleva el foco a la segunda
+  "letrasRechazadas": true,            ← «1a» no entra
+  "boton": "Guardar (1)",
+  "guardado": true,                    ← «Guardado» tras el POST con versión y token
+  "persistido": "29",                  ← tras recargar
+  "editable": "297",                   ← y se puede seguir escribiendo (antes: imposible)
+  "contado": "1.5",                    ← «1,5» anotado en la hoja, tras recargar
+  "contadoEditable": "1.",
+  "mesAnteriorEnOctubre": "29"         ← octubre enseña septiembre como mes anterior
+}
+```
+
+### Guardianes
+
+**El glob `.tsx` de `audit:complexity`** — el árbol de P16-C (`git show HEAD:…`) con la configuración
+nueva; con la de HEAD esos archivos no se examinaban y P16-C salió con `audit exit=0`:
+
+```
+  37:16  error  Function 'Entrar' has too many lines (79). Maximum allowed is 40
+   87:16  error  Function 'Inventario' has too many lines (141). Maximum allowed is 40
+   87:16  error  Function 'Inventario' has a complexity of 15. Maximum allowed is 10
+  258:1   error  Function 'HojaDeConteo' has too many lines (58). Maximum allowed is 40
+   71:16  error  Function 'MenuEngineering' has too many lines (43). Maximum allowed is 40
+  171:1   error  Function 'Cuadrante' has too many lines (49). Maximum allowed is 40
+  28:16  error  Function 'ElegirSucursal' has too many lines (71). Maximum allowed is 40
+  94:16  error  Function 'Ventas' has too many lines (163). Maximum allowed is 40
+  94:16  error  Function 'Ventas' has a complexity of 15. Maximum allowed is 10
+  35:8  error  Function 'Marco' has too many lines (87). Maximum allowed is 40
+✖ 10 problems (10 errors, 0 warnings)
+```
+
+Con el árbol de este commit: 0.
+
+**`typecheck` con `next typegen`** — `.next/types` y `next-env.d.ts` borrados, como en un clon limpio,
+y una sonda `<Link href="/ruta-que-no-existe">`:
+
+```
+--- antes del cambio (tsc a secas): sin salida, en verde
+--- ROJO esperado:
+✓ Types generated successfully
+src/app/sonda-rutas.tsx:5:16 - error TS2322: Type '"/ruta-que-no-existe"' is not assignable to type 'UrlObject | RouteImpl<"/ruta-que-no-existe">'.
+--- VERDE esperado (sonda retirada):
+✓ Types generated successfully
+```
+
+**`doctor`** — con el reenvío roto de verdad, con puertos cerrados y con el 6432 que sí contesta:
+
+```
+[ FALLO]  Puertos de la base (INC-015)   localhost:5432 cortada
+[ FALLO]  Puertos de la base (INC-015)   localhost:5999 rechazada · localhost:5998 rechazada
+[  OK  ]  Puertos de la base (INC-015)   localhost:6432 contestan
+```
+
+**La guardia de «unitarias sin base» con la base en otro puerto** — `.env` en el 5442 y una prueba unitaria que abre un socket a ese puerto:
+
+```
+=== GUARDIA VIEJA  (POSTGRES_PORT ?? 5432, sin .env)
+ ✓  unit  src/sonda-puerto.spec.ts (1 test) 7ms
+ Test Files  1 passed (1)                        ← una unitaria que toca la base, en verde
+=== GUARDIA NUEVA  (los puertos de las cadenas de conexión)
+ ×  sonda del puerto de la base > una unitaria que conecta al puerto de la base del .env
+Una prueba del proyecto "unit" intento conectar al puerto 5442 (PostgreSQL).
+ Test Files  1 failed (1)
+```
+
+Retirada la sonda, las 891 unitarias en verde. La de `audit:tests` se ve en la corrida completa: con
+la base en el 5442, sondeó el 5442 y corrió las 536 de integración.
+
+**INC-023 y las filas no editables** no tienen guardián automático —`apps/web` no tiene ejecutor de
+pruebas—: su guardián es el recorrido de arriba, hecho antes y después del arreglo (antes: «no
+coinciden» con 60 `GET /auth/sesion` y ningún `POST /auth/login`; «19.000000000000» que no admitía
+teclas).
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo perdido |
+|---|---|---|
+| **«Entrar» no funcionaba desde un navegador sin sesión**, desde P16-A2 | La mutación sin sesión sale sin token (D-16.137). **INC-023** | 15 min |
+| **Las filas guardadas de ventas y del conteo no se podían editar**: la API las devuelve a escala de almacenamiento y las casillas solo admiten dígitos o tres decimales | `sinCerosDeSobra` al precargar (D-16.140) | 10 min |
+| `tsc` del web en rojo contra un `.next/types/validator.ts` rancio tras el `git mv`; y, al tirar del hilo, **en un clon limpio no comprobaba las rutas tipadas** | `next typegen` antes de `tsc`. INC-007, caso 13 | 10 min |
+| **El puerto 5432 del host aceptaba y cortaba** (`Connection terminated unexpectedly`) con la base sana, tras un reinicio de Docker Desktop | Las capturas, por el 6432 de PgBouncer; la comprobación, escrita en `doctor`. **El usuario pidió publicar la base en otro puerto**: `.env` local al 5442 y contenedor recreado (D-16.145); datos intactos, Caddy, web y PgBouncer sin tocar. INC-015, recurrencia 1 | 20 min |
+| **Mover el puerto habría dejado ciegos dos checks**: la guardia de «unitarias sin base» y la sonda de `audit:tests` leían `POSTGRES_PORT ?? 5432` de un entorno sin `.env` | Las dos leen las cadenas de conexión. Guardián arriba. INC-007, caso 13 | 15 min |
+| El CSV de artículos del ensayo traía la cabecera `ivaTarifa`, que el importador no reconoce (acepta `iva` y sus alias, y el mensaje lo dice) | Copia con `iva`. Pendiente: D-16.44 nombra la columna `ivaTarifa` (abajo) | 5 min |
+| En escritorio el fondo de la lateral acababa a media pantalla; en el teléfono la cabecera ocupaba cuatro filas; «MES» pegado al selector de sucursal | `.aplicacion` a alto de ventana y lateral estirada; sucursal y mes a su fila con la etiqueta oculta a la vista; `column-gap`. **Visto en capturas** | 15 min |
+| El guion de bash con Python embebido se rompió con las comillas (otra vez) | Los guiones van a archivo con Write | 2 min |
+
+### Cómo probar
+
+```sh
+npm run typecheck --workspace @costeo/web     # genera los tipos de rutas y comprueba
+npm run audit:complexity                      # ahora también los .tsx
+npm run build --workspace @costeo/web && npm run medir-bundle
+npm run doctor                                # incluye los puertos de la base
+```
+
+Y en el navegador, con el tenant de ensayo del runbook: entrar con cada rol, elegir sucursal, recorrer
+las cuatro secciones a 1280 y 360 px, guardar ventas y un conteo, recargar y volver a editar.
+
+### Incidencias registradas en este commit
+
+| Incidencia | Síntoma | ¿Se automatizó la prevención? |
+|---|---|---|
+| **INC-023** (nueva) | «Entrar» dice «no coinciden» con credenciales correctas | Se eliminó el modo de fallo (no hay lista de rutas públicas que olvidar). Sin prueba automatizada: `apps/web` no tiene ejecutor |
+| INC-015, recurrencia 1 | `Connection terminated unexpectedly` en 5432 con la base sana | ✅ `npm run doctor`, con guardián |
+| INC-007, caso 13 | `tsc` en verde con un `href` a una ruta que no existe; y dos checks atados al 5432 | ✅ `next typegen` en `typecheck`, el glob `.tsx`, y la guardia y la sonda leyendo las cadenas de conexión; los cuatro con guardián |
+
+### Deuda y pendientes
+
+- **Duda #12**: el costeo de un producto sin receta en la sucursal sale `0.00`.
+- **La conciliación del conteo enseña doce decimales** (`3.652173913044`): es de la pantalla 23, que
+  la rehace.
+- **`/ventas` sigue leyendo `/costeo` entero** para saber qué productos hay: la pantalla 3 lo cambia a
+  `GET /productos/ubicaciones`, que existe desde P16-B.
+- **A 360 px la tabla de ventas desplaza en horizontal** dentro de su marco y la cabecera «Unidades»
+  queda a la derecha del borde. No desborda la página; se revisa con la pantalla 3.
+- **D-16.44 nombra la columna del CSV `ivaTarifa`**, y el importador acepta `iva`, `tarifa iva`,
+  `iva compra` y `tarifa de iva`, no `ivaTarifa`. El runbook dice `iva`. Se corrige el texto de la
+  decisión o se añade el alias en el próximo paquete que toque `imports`.
+- Siguen en pie: `DELETE /usuarios/roles` por Caddy (P16-C) y las dudas #9, #10 y #11.
+
+---
+
+## Inicio (pantalla 2) · 2026-09-14
+
+### Objetivo
+
+U2: la primera pantalla tras entrar es el mes de la sucursal de un vistazo —y, para `BODEGA`, qué
+reponer—; `/` y la elección de sucursal llevan ahí.
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/inicio/page.tsx` · `layout.tsx` | `ResumenDelMes` (nueve indicadores de `GET /analitica/resumen`) si la sesión tiene `analytics.read`; si no, `ReposicionDelMes` (`GET /analitica/reposicion`, lo que hay que reponer primero). La sección pide `replenishment.read`, que tienen todos los roles |
+| `componentes/ui/Indicador.tsx` | Etiqueta, cifra, nota y `data-semaforo`: el color lo decide `global.css` con el semáforo de la API |
+| `componentes/armazon/navegacion.ts` · `textos/es.ts` | Grupo «General» con Inicio arriba; los textos de la pantalla |
+| `componentes/ui/Vista.tsx` + las cinco pantallas | `vacio` pasa a ser `{ esVacio, titulo, ayuda } \| 'nunca'`: un resumen sin estado vacío propio lo declara en vez de pasar un vacío falso |
+| `app/page.tsx` · `app/sucursal/page.tsx` | `/` y la elección de sucursal van a `/inicio` (D-16.136) |
+| `lib/decimales.ts` | **`conSigno`** —el arreglo de INC-024— y `enPuntos` para la brecha en puntos porcentuales |
+| `lib/decimales.spec.ts` · `lib/fechas.spec.ts` | **Las primeras pruebas de `apps/web`**: 20, con `node --test` (ADR-027) |
+| `tools/audit/tests.mjs` | Corre las del web tras las unitarias de la API |
+| `apps/web/tsconfig.json` · `knip.json` · `eslint.config.mjs` | `allowImportingTsExtensions`; las pruebas como entrada de knip; `describe`/`it` de `node:test` fuera de `no-floating-promises` |
+| `styles/global.css` | `.indicadores` (rejilla que baja de fila) e `.indicador[data-semaforo]` |
+
+### Decisiones
+
+D-16.148…D-16.151 en `ESTADO.md`; la de las pruebas, con su porqué, en **ADR-027**.
+
+### Cómo se verificó
+
+**En el navegador** (build de producción, tenant de ensayo; se registraron dos compras sintéticas en la
+Bodega Norte para que `BODEGA` tuviera algo que reponer):
+
+| Rol | `/inicio` |
+|---|---|
+| Gerente (Local Centro, septiembre) | Venta neta 199.22 · food cost real **16,9 %** en verde (teórico 16,9 %) · brecha 0,0 pp · utilidad **164.96** en verde, margen de seguridad 100,0 % · prime cost 17,2 % · varianza 0.00 · cobertura «—» con «Sin conteo» · 3 por reponer · 0 sin costo |
+| Dueña (Bodega Norte) | Venta 0.00 y el resto «—»: la bodega no vende |
+| Bodega (Bodega Norte) | «Qué reponer»: Arroz · Bien, Cebolla paitena · Bien. **Sin cantidades**, y sin el resumen |
+
+Ninguna captura desborda a 360 px. `/` responde `307 → /inicio`. Ajustado **mirando las capturas**: la
+cifra no arrancaba a la misma altura en tarjetas vecinas (`align-content: start`), y «Sin conteo» iba
+como cifra en dos líneas (ahora es la nota bajo la raya).
+
+### Guardianes
+
+```
+=== W1-redondear-sin-signo: apps/web/src/lib/decimales.ts
+    $ node --test src/**/*.spec.ts -> exit 1
+      ✖ un negativo con acarreo conserva el signo (antes: 100.00) (3.5811ms)
+      ✖ un cero no lleva signo (0.6636ms)
+      ✖ el signo — el `-` no es un dígito (8.5992ms)
+      ℹ pass 18
+      ℹ fail 2
+      ✖ failing tests:
+      ✖ un negativo con acarreo conserva el signo (antes: 100.00) (3.5811ms)
+      ✖ un cero no lleva signo (0.6636ms)
+
+=== W2-porcentaje-sin-signo: apps/web/src/lib/decimales.ts
+    $ node --test src/**/*.spec.ts -> exit 1
+      ✖ un porcentaje negativo corre la coma sin ceros de más (antes: -007,5 %) (1.527ms)
+      ✖ el signo — el `-` no es un dígito (4.7826ms)
+      ℹ pass 19
+      ℹ fail 1
+      ✖ failing tests:
+      ✖ un porcentaje negativo corre la coma sin ceros de más (antes: -007,5 %) (1.527ms)
+
+=== W3-audit-tests-ve-el-web: apps/web/src/lib/fechas.spec.ts
+    $ node tools/audit/tests.mjs --solo-unitarias -> exit 1
+      ✓  unit  src/shared/infrastructure/http/error.filter.spec.ts (20 tests) 23ms
+      ✓  unit  src/shared/domain/errors/valor-en-mensaje.spec.ts (6 tests) 7ms
+      ✖ es la consulta que piden la API y la URL (1.3403ms)
+      ✖ consultaDelMes (1.6839ms)
+      ℹ pass 19
+      ℹ fail 1
+      ✖ failing tests:
+      ✖ es la consulta que piden la API y la URL (1.3403ms)
+      audit:tests  FALLO — pruebas de apps/web en rojo
+
+=== W4-lint-mira-las-pruebas-del-web: eslint.config.mjs
+    $ npx.cmd eslint apps/web/src/lib/fechas.spec.ts --max-warnings=0 --no-inline-config -> exit 1
+      10:1  error  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+      11:3  error  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+      17:3  error  Promises must be awaited, end with a call to .catch, end with a call to .then with a rejection handler or be explicitly marked as ignored with the `void` operator  @typescript-eslint/no-floating-promises
+      … (diez errores, uno por cada describe/it del archivo)
+```
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo |
+|---|---|---|
+| **`comoImporte('-9.999')` daba `100.00`** y un −7,5 % salía `-007,5 %` | `conSigno` y las pruebas del web. **INC-024** | 10 min |
+| El guion de aplicación se paró a medias: el ancla de `no-empty` está dos veces en `eslint.config.mjs` | Ancla única y segundo guion con los pasos que faltaban; nada quedó aplicado dos veces | 5 min |
+
+### Incidencias registradas
+
+| Incidencia | Síntoma | ¿Prevención automatizada? |
+|---|---|---|
+| **INC-024** | Un margen negativo se enseña como `100.00` | ✅ `lib/decimales.spec.ts` en `audit:tests`, con guardián |
+
+### Deuda y pendientes
+
+- La tabla de reposición de `BODEGA` enseña «Bien» para `OK`: la API colapsa `SIN_CONSUMO` y `OK`
+  (§4.3), así que «Bien» también significa «no se consume». Es lo que la API puede decir sin revelar el
+  teórico.
+- Siguen en pie: dudas #9, #10, #11 y #13; `DELETE /usuarios/roles` por Caddy.
+
+---
+
+## Pantalla 1b — Olvidé mi contraseña · Restablecer · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/olvide/page.tsx` | Correo → `POST /auth/password/olvido` → **la misma frase exista o no la cuenta**. El 429 se enseña con el mensaje de la API (dice cuánto esperar) |
+| `app/restablecer/page.tsx` | `?token=` → contraseña y repetición → `POST /auth/password/restablecimiento`. Sin token: «enlace incompleto». **Antes de enviar**, que tenga 12 caracteres y que coincidan: la API gasta el token antes de mirar la contraseña, y un error de tecleo obligaría a pedir otro enlace. Cualquier 400 ofrece «Pedir otro enlace»; un 429 deja el formulario, porque el límite se comprueba antes de tocar el token |
+| `app/entrar/page.tsx` | «¿Olvidaste tu contraseña?» |
+| `lib/useEnvio.ts` | Expone `codigo`, como `useLectura` |
+| `lib/api.ts` | **`cuerpoDe`**: un 202 sin cuerpo ya no revienta (INC-025). Importe `./csrf.ts` y `ErrorDeApi` con campos explícitos, para cargarlo con `node --test` |
+| `lib/api.spec.ts` | **11 pruebas del transporte** con `fetch` simulado: 202/204 vacíos, JSON, fallos con código y mensaje, sin red, **sin sesión la mutación sale sin cabecera (INC-023)**, con sesión lleva el token, una lectura no lo pide, reintento único ante `CSRF_INVALIDO` y sin bucle, el aviso de sesión caída solo al registrado |
+| `apps/web/tsconfig.json` | **`erasableSyntaxOnly`**: la sintaxis que Node no sabe quitar falla en `tsc` |
+| `textos/es.ts` · `styles/global.css` | Los textos de la recuperación; `.enlace` |
+
+### Decisiones
+
+D-16.152…D-16.155 en `ESTADO.md`.
+
+### Cómo se verificó — en el navegador
+
+Build de producción, 360 px, con la dueña del tenant de ensayo; el enlace se leyó del outbox, donde
+existe en claro solo mientras el correo está en vuelo:
+
+```
+enlaceEnEntrar     true
+pedidoInexistente  «Si ese correo tiene una cuenta activa, te llegará un enlace…»
+pedidoExistente    «Si ese correo tiene una cuenta activa, te llegará un enlace…»   ← mismaFrase: true
+sinToken           «Este enlace está incompleto. Ábrelo tal cual llegó en el correo, o pide otro.»
+tokenInventado     «El enlace de restablecimiento no es valido o ya caduco. Pide uno nuevo.» + Pedir otro enlace
+corta              «Tiene menos de 12 caracteres. Alárgala antes de guardar…»          (no se envió)
+noCoinciden        «Las dos contraseñas no coinciden.»                                  (no se envió)
+hecho              «Listo. Tu contraseña cambió y las demás sesiones se cerraron…»
+reutilizado        «El enlace … no es valido o ya caduco.» + Pedir otro enlace          (un solo uso)
+entraConLaNueva    true
+```
+
+**La primera pasada falló** en los dos «pedido»: la pantalla enseñaba «Failed to execute 'json' on
+'Response': Unexpected end of JSON input» (INC-025). La contraseña de ensayo se devolvió a la original
+con `POST /auth/password` tras cada pasada.
+
+### Guardianes
+
+```
+=== W5-cuerpo-vacio-como-json: apps/web/src/lib/api.ts -> exit 1
+      ✖ un 202 sin cuerpo es `undefined`, no un error de JSON (INC-025) (27.4865ms)
+      ✖ un 204 también (0.6583ms)
+      ✖ el cuerpo de una respuesta que salió bien (35.2827ms)
+      ℹ pass 9
+      ℹ fail 2
+      ✖ failing tests:
+
+=== W6-sin-sesion-el-error-sube: apps/web/src/lib/api.ts -> exit 1
+      ✖ sin sesión, la mutación sale SIN cabecera y llega a la API (INC-023) (0.9772ms)
+      ✖ el token anti-CSRF (5.497ms)
+      ℹ pass 10
+      ℹ fail 1
+      ✖ failing tests:
+      ✖ sin sesión, la mutación sale SIN cabecera y llega a la API (INC-023) (0.9772ms)
+
+=== erasableSyntaxOnly: una clase con `public readonly` en el constructor, colada en lib/csrf.ts
+src/lib/csrf.ts:38:22 - error TS1294: This syntax is not allowed when 'erasableSyntaxOnly' is enabled.
+```
+
+### Problemas encontrados
+
+| Problema | Solución | Tiempo |
+|---|---|---|
+| **Un 202 sin cuerpo reventaba al leerse como JSON** | `cuerpoDe`. **INC-025** | 5 min |
+| `api.spec.ts` no cargaba: `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` («parameter property is not supported in strip-only mode») | `ErrorDeApi` con campos explícitos y `erasableSyntaxOnly`, que lo caza en `tsc` | 5 min |
+
+### Deuda y pendientes
+
+- **Los mensajes de `iam/domain/errores.ts` van sin tildes** («no es valido o ya caduco») y llegan tal
+  cual a la pantalla. Es texto de la API; se corrige en el próximo paquete que toque `iam`.
+- El largo mínimo (12) está en el cliente como **ayuda**, con su porqué: si la API lo cambia, manda su 400.
+
+---
+
+## Pantalla 3 — Ventas (arreglo) · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/ventas/page.tsx` | **La carta sale de `GET /productos/ubicaciones`** y no de `GET /costeo`: la rejilla costeaba la carta entera —recetas, precios, cascada— solo para saber qué productos hay y cómo se llaman. Los cuatro roles que leen ventas leen productos (comprobado en `role_permission`) |
+| `styles/global.css` | `.celda-editable` a **5rem** en el teléfono y 7rem desde `60rem` |
+
+Cierra dos pendientes del armazón: «`/ventas` sigue leyendo `/costeo` entero» y «a 360 px la tabla de
+ventas desplaza en horizontal».
+
+La versión de la carga del mes (D-16.1, D-16.121), la precarga del mes anterior como referencia y el
+guardado de todas las filas con valor **ya estaban** desde P16-C y el armazón; esta pantalla no los toca.
+
+### Cómo se verificó
+
+- **Log de la API** durante el recorrido: `/productos/ubicaciones` 7 veces, `/costeo` **ninguna**.
+- **Escritura en el navegador** (gerente, Local Centro): Enter baja de fila, las letras no entran,
+  «Guardar (1)» → «Guardado», tras recargar `97` y se puede seguir escribiendo (`977`), y octubre enseña
+  septiembre como mes anterior.
+- **Capturas** de ventas e inventario, tres roles × 1280 y 360: ninguna desborda, y a 360 px las casillas
+  y la cabecera «Unidades» caben en su marco (antes se cortaban).
+
+### Decisiones
+
+D-16.156 y D-16.157 en `ESTADO.md`.
+
+---
+
+## Pantalla 4 — Insumos: listado · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/page.tsx` · `layout.tsx` | El catálogo: nombre (con tipo, unidad y «Archivado»), grupo, rendimiento y **costo neto por unidad de uso**. Lee ítems y grupos, y **`GET /precios/costos` solo si la sesión tiene `pricing.read`**: `BODEGA` ve el catálogo para contar, sin la columna y sin la llamada. Filtros de nombre (sin tildes ni mayúsculas) y grupo sobre la lista leída; «Incluir archivados» va a la API |
+| `componentes/ui/Casilla.tsx` · `Selector.tsx` | Primitivas con su primer consumidor |
+| `lib/decimales.ts` | **`comoCostoDeUso`**: con parte entera, dos decimales (`8.70 / kg`); sin ella, hasta cuatro (`0.0012 / g`). `comoImporte` enseñaría `0.00` a un costo por gramo |
+| `componentes/armazon/navegacion.ts` · `textos/es.ts` · `styles/global.css` | Grupo «Catálogo»; textos; `.filtros` y `.casilla` |
+
+**Sin enlaces a la ficha ni al alta todavía**: son las pantallas 5 y 6, y con `typedRoutes` un `href` a una
+ruta que no existe no compila. Entran con ellas.
+
+### Cómo se verificó
+
+- **Log de la API**: `/precios/costos` 4 veces (dueña y gerente, dos anchos) y **ninguna para `BODEGA`**.
+- **Capturas**, tres roles × 1280 y 360, sin desbordes: el gerente ve `2.43 / lt`, `1.20 / kg`, `8.70 / kg`
+  (tras el ajuste; la primera captura decía `8.6957`, que era ruido); `BODEGA` ve tres columnas y la ayuda
+  sin «cuánto cuesta» (también ajustado mirando la captura).
+- **Filtros en el navegador**: «LIMÓN» → `Limon sutil`; grupo «Granos» → `Arroz`; «zzz» → «Ningún insumo
+  coincide con la búsqueda».
+
+### Guardián
+
+`comoCostoDeUso` cambiado a `comoImporte` → «lo pequeño conserva hasta cuatro decimales» y «lo que cabe en
+dos se lee como un importe» en rojo (`ℹ fail 2`); restaurado → verde.
+
+### Decisiones
+
+D-16.158…D-16.160 en `ESTADO.md`.
+
+---
+
+## Pantalla 5 — Insumo: alta · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/nuevo/page.tsx` | `POST /catalogo/items` con nombre, tipo, **«¿se produce en lote?» solo en una preparación** (`null` en un comprado, como exige la API), unidad de uso **elegida de `GET /catalogo/unidades`**, rendimiento **en porcentaje**, grupo y origen del precio. Envuelta en `Permitido permiso="catalog.create"`. Al crear, vuelve al listado |
+| `componentes/ui/Formulario.tsx` · `Volver.tsx` | Primitivas con su primer consumidor: campos + error de la API junto al botón + botón bloqueado mientras envía; «← Volver» a una ruta |
+| `lib/decimales.ts` | **`fraccionDePorcentaje`**: «85» → `0.85`, «92,5» → `0.925`, corriendo la coma sobre el texto. No valida el rango: lo dice la API |
+| `app/(app)/insumos/page.tsx` | «Nuevo insumo» en las acciones, solo con `catalog.create` |
+| `textos/es.ts` · `styles/global.css` | Textos del alta (la ayuda avisa **antes** de que tipo y unidad no se podrán cambiar); `.boton` para enlaces con forma de botón; `.formulario` a 32rem |
+
+### Cómo se verificó — en el navegador y en la base
+
+```
+botonNuevo            true                           (dueña)
+comprado              creado  → vuelve a /insumos
+preparacion           creado  («92,5», lt, «Sí: se produce en lote»)
+repetido              «Ya existe un ítem con ese nombre.»
+rendimientoImposible  «El rendimiento es la fracción que queda tras limpiar el producto: va entre 0 y 1…»
+gerenteVeBoton        false
+gerenteEnNuevo        «Tu usuario no tiene acceso a esta pantalla.»
+```
+
+En la base, lo que viajó:
+
+```
+Fondo de pescado …|PRODUCIDO|lt|0.925000000000|t|(sin grupo)
+Sal de mesa …     |COMPRADO |g |1.000000000000| |Abarrotes
+```
+
+### Guardián
+
+`CIFRAS_PARA_CORRER_LA_COMA` de 3 a 2 → «corre la coma dos posiciones sin dividir» y «acepta la coma de
+es-EC» en rojo; restaurado → verde.
+
+### Decisiones
+
+D-16.161…D-16.163 en `ESTADO.md`.
+
+---
+
+## Pantalla 6 — Insumo: ficha, editar y archivar · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/[id]/page.tsx` | La ficha: rendimiento, grupo y su IVA, origen del precio, «¿se produce en lote?» si aplica; **lo que cuesta** (`GET /precios/costo/:itemId`: neto, bruto, sobrecosto de merma y vigencia, o «todavía no tiene precio confirmado» cuando la API responde `RECURSO_NO_ENCONTRADO`); **presentaciones de compra** (contenido e IVA); **historia del precio** con la píldora «Vigente» que decide la API. «Editar» con `catalog.update`. **Archivar / reactivar** con confirmación en línea y la versión leída |
+| `app/(app)/insumos/[id]/editar/page.tsx` | Nombre, rendimiento (precargado con `porcentajeDeFraccion`), grupo, origen del precio y lote si es preparación; **tipo y unidad a la vista como no editables**. 409 `CONFLICTO_DE_VERSION` → «Ver la versión actual», que vuelve a leer y **monta el formulario de nuevo** (la clave es la versión) |
+| `componentes/insumos/ficha.ts` · `opciones.ts` | La lectura de la ficha (precios solo con `pricing.read`), `guardarItem` y `cambioDe` para el `PUT` de estado completo; las opciones compartidas por alta y edición (sin copiarlas: `jscpd`) |
+| `componentes/ui/Confirmar.tsx` · `Pildora.tsx` | Primitivas con su primer consumidor |
+| `componentes/ui/Volver.tsx` | Genérico sobre `Route<T>`: con `typedRoutes`, un `Route` sin parámetro solo acepta rutas estáticas |
+| `lib/decimales.ts` · `lib/fechas.ts` | `porcentajeDeFraccion` (inverso de `fraccionDePorcentaje`, sin redondear) y **`comoFecha`** en la zona del negocio |
+| `app/(app)/insumos/page.tsx` · `nuevo/page.tsx` | El nombre de cada fila lleva a su ficha; tras crear, a la ficha nueva (D-16.163 se cumple) |
+
+### Cómo se verificó — en el navegador
+
+```
+ficha         Aceite de girasol | Comprado · lt | ← Volver | Editar | RENDIMIENTO 100,0 % | GRUPO Abarrotes |
+              IVA DE COMPRA DEL GRUPO — | ORIGEN DEL PRECIO Estimado, sin factura | Lo que cuesta | COSTO NETO
+              POR UNIDAD DE USO 2.43 / lt | … | VIGENTE DESDE 13 sept 2026 | Presentaciones de compra | Aceite
+              bidon 10 lt | La Favorita | 10 lt | 15,0 % | Historia del precio | 13 sept 2026 | 28.00 | Vigente | Archivar
+precargado    "100"
+trasEditar    RENDIMIENTO 95,0 %
+cambioAjeno   200            ← otro PUT con la versión vigente mientras el formulario estaba abierto
+conflicto     «Alguien más cambió este ítem mientras lo editabas. Recarga para ver lo que hay ahora…»
+trasRecargar  "90"           ← «Ver la versión actual» trae lo del otro, no lo escrito
+pregunta      «Al archivarlo deja de aparecer en el listado de insumos. Sus recetas, precios y movimientos no se tocan…»
+trasArchivar  Aceite de girasol | Comprado · lt · Archivado
+enElListado   false          ← y reactivado después
+bodega        la ficha sin «Lo que cuesta» ni «Historia del precio»; botones: []
+```
+
+El insumo quedó como estaba (`1.000000000000`, `ACTIVE`). La etiqueta «Rendimiento (%)» de la primera pasada
+en la ficha era la del formulario; se cambió por la del listado.
+
+### Guardianes
+
+- `comoFecha` con `timeZone: 'UTC'` → «lee el instante en la zona del negocio, no en UTC» en rojo.
+- `porcentajeDeFraccion` sin `sinCerosDeSobra` → «es el inverso de fraccionDePorcentaje» en rojo.
+
+### Decisiones
+
+D-16.164…D-16.167 en `ESTADO.md`.
+
+---
+
+## Pantalla 7 — Grupos · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/grupos/page.tsx` · `layout.tsx` | La lista con la tarifa de IVA de cada grupo, **«No define» cuando es `null`**, nunca 0 %. «Nuevo grupo» con `catalog.create`; el nombre lleva a la edición con `catalog.update` |
+| `app/(app)/grupos/nuevo/page.tsx` · `[id]/editar/page.tsx` | Alta (`POST`) y edición (`PUT`). **No hay `GET` de un grupo suelto**: la edición lo busca en la lista, y un id que no está enseña «ese grupo no existe en tu empresa» en vez de un formulario vacío |
+| `componentes/grupos/FormularioDeGrupo.tsx` | Un solo formulario para los dos: nombre y tarifa **en porcentaje**, vacía = `null` |
+| `navegacion.ts` · `textos/es.ts` | «Grupos» en Catálogo; la ayuda explica que vacío no es cero |
+
+### Cómo se verificó
+
+```
+creado      Especias 93310 | 12,0 %
+precargado  "12"
+sinTarifa   Especias 93310 | No define        → en la base: iva_tarifa NULL
+repetido    «Ya existe un grupo con ese nombre.»
+noExiste    «Ese grupo no existe en tu empresa. / Vuelve a la lista de grupos y elige uno.» (sin formulario)
+gerente     { nuevo: false, enlaces: 0, filas: 6 }
+```
+
+### Decisiones
+
+D-16.168 y D-16.169 en `ESTADO.md`.
+
+---
+
+## Pantalla 8 — Artículo: alta y editar · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/insumos/[id]/articulos/nuevo/page.tsx` | `POST /catalogo/articulos`: nombre, marca, proveedor, **cuánto trae y en qué unidad**, factor **solo si la unidad de la presentación es de otra dimensión que la de uso** (dato de `GET /catalogo/unidades`), y la **tarifa de IVA de la factura, obligatoria**, precargada con la del grupo del insumo si la define |
+| `app/(app)/insumos/[id]/articulos/[articuloId]/editar/page.tsx` | `PUT /catalogo/articulos/:id`: nombre, marca, proveedor, IVA y estado; **presentación, unidad y factor a la vista como no editables** («1 unid = 0.08 kg») |
+| `componentes/ui/CampoNumerico.tsx` | **`CampoDePorcentaje` y `CampoDeCantidad`**: un campo que solo deja escribir la forma de un número. Sustituye al patrón repetido en el alta y edición de insumos y en grupos (cuarta y quinta aparición) |
+| `lib/decimales.ts` | `conPuntoDecimal` (+1 prueba); la pantalla de inventario deja su copia local |
+| `app/(app)/insumos/[id]/page.tsx` | «Nueva presentación» con `catalog.create`; cada presentación lleva a su edición con `catalog.update` y dice «Archivada» si lo está |
+
+### Cómo se verificó
+
+```
+mismaDimension        Arroz, 5 kg        → sin campo de factor; creada: «5 kg | 0,0 %»
+otraDimension         Limón, 1 unid      → al elegir «unid» aparece el factor; «0,08» → «1 unid = 0.08 kg»
+editarPrecarga        { iva: "0", nota: "No se pueden cambiar: 1 unid = 0.08 kg" }
+trasEditar            «Limon por unidad … | Archivada | 1 unid | 15,0 %»
+gerente               { nueva: false, editar: 0 }
+```
+
+La precarga del IVA salió vacía en los dos: sus grupos no definen tarifa (`—` en la ficha), que es lo que
+debe hacer.
+
+### Decisiones
+
+D-16.170…D-16.172 en `ESTADO.md`.
+
+---
+
+## Pantalla 9 — Precios: bandeja y decidir · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/precios/page.tsx` | `GET /precios/pendientes` por cursor («Ver más» con `despuesDe`); cada sugerido **junto al vigente** que devuelve la API, con su artículo, fecha, nota y tarifa de IVA; **Confirmar / Rechazar** (`POST /precios/:id/decision`) solo con `pricing.confirm` |
+| `app/(app)/precios/layout.tsx` | `seccion('pricing.read')` |
+| `componentes/armazon/navegacion.ts` | «Precios por confirmar» en el grupo Catálogo, con `pricing.read` |
+| `textos/es.ts` | bloque `precios` |
+
+La bandeja se monta con clave = ids de la primera página: tras una decisión se vuelve a leer y lo añadido con
+«Ver más» se descarta, en vez de seguir enseñando una fila que ya se decidió.
+
+### Cómo se verificó
+
+Tres sugeridos sintéticos (`POST /precios` como dueña, `ivaCompra: null`, nota «Sugerido sintetico de la
+pantalla 9») sobre el tenant de ensayo:
+
+```
+bandejaDuena    «Arroz | Arroz funda 5 kg · desde 14 sept 2026 · … | 54.00  3.10 | IVA 0,0 % | Confirmar | Rechazar»
+                «Limon sutil | … | 7.50  3.10 | IVA 0,0 %» · «Aceite de girasol | … | 28.00  3.10 | IVA 15,0 %»
+movil 360       { desborda: false, px: 360 }  — la decisión se alcanza desplazando la tabla en su marco
+trasConfirmar   [Limon sutil, Aceite de girasol]
+trasRechazar    [Aceite de girasol]
+segunda decisión sobre el confirmado  → 409 CONFLICTO «Ese precio ya fue confirmado o rechazado.»
+gerente         { filas: 1, botones: 0, cabeceras: [Insumo, Vigente hoy, Sugerido] }
+bodega          «Tu usuario no tiene acceso a esta pantalla.»; sin enlace en la navegación
+```
+
+La tarifa `null` tomó la del artículo (0 % el arroz y el limón, 15 % el aceite): D-16.9 visto desde la
+bandeja. **Lo sintético se deshizo**: un sugerido de 54 para el arroz, confirmado (en la base, el vigente
+vuelve a ser `54.000000000000`, por `created_at` a igual `valid_from`), y el aceite rechazado; bandeja vacía.
+
+### Decisiones
+
+D-16.173…D-16.175 en `ESTADO.md`.
+
+---
+
+## Pantalla 10 — Precio: sugerir · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/precios/nuevo/page.tsx` | `POST /precios` con `pricing.suggest`. Insumo (precargado con `?itemId=` desde la ficha), **el vigente de hoy a la vista**, y según el `tipo` de la ficha: **comprado** → presentación activa, precio de la factura con IVA y tarifa opcional (vacía = `null`, la de la presentación; `0` = exenta); **preparación** → costo estándar por unidad de uso, sin presentación ni IVA (R10). Vigencia desde (hoy en Ecuador, a `12:00Z`) y nota. `origen` siempre `MANUAL`. Al terminar, a la bandeja |
+| `app/(app)/precios/page.tsx`, `app/(app)/insumos/[id]/page.tsx` | «Sugerir precio» con `pricing.suggest` en la bandeja y en la ficha |
+| `lib/fechas.ts` | `diaDeHoy` (Ecuador, forma de `<input type="date">`) e `instanteDelDia` (al mediodía UTC), +3 pruebas |
+| `lib/campos.ts` | `textoOpcional`: tercera repetición de «vacío viaja como `null`»; la usan también el alta y la edición de artículos. +2 pruebas |
+| `styles/global.css` | `.campo select { min-width: 0 }` |
+| bandeja, ficha, formulario | los precios de referencia con `comoCostoDeUso` |
+
+### Lo que destapó la verificación
+
+1. **Un `<select>` con opciones largas desbordaba la página a 360 px** (387 px): como elemento de rejilla no
+   bajaba de su opción más larga. Con `min-width: 0` ocupa el ancho del campo. Medido otra vez: 360.
+2. **El costo estándar de una preparación salía `0.00`** en la bandeja y en el historial de la ficha
+   (pantalla 6): su precio es por unidad de uso —`0.0045`— y `comoImporte` lo redondeaba a dos decimales.
+   Con `comoCostoDeUso`, que con parte entera da el mismo formato, sale `0.0045`.
+
+### Cómo se verificó
+
+```
+desdeLaFicha    url /precios/nuevo?itemId=…  «Vigente hoy: 54.00 · desde 14 sept 2026»
+                campos [Insumo, Presentación, Precio … con IVA, IVA de esta factura (%), Vigente desde, Nota]
+                presentación «Arroz funda 5 kg … — 5 kg · IVA 0,0 %» · desde 2026-09-14 · volver a la ficha
+precioCero      400 «precio: debe ser un decimal mayor que cero» junto al botón, sin salir del formulario
+compra          «55,50», IVA vacío → bandeja «54.00 → 55.50 · IVA 0,0 %» (la de la presentación)
+preparación     campos [Insumo, Costo estándar por lt, Vigente desde, Nota], sin IVA → bandeja «0.0045 · IVA 0,0 %»
+exenta          aceite «29», IVA «0» frente al 15 % de su presentación → «IVA 0,0 %»
+sinPresentación aviso + «Crear presentación» → /insumos/…/articulos/nuevo; sin formulario
+en la API       validFrom 2026-09-14T12:00:00.000Z en todos
+gerente         «Sugerir precio» sí, botones de decisión 0, formulario sí
+bodega          «sin acceso» en /precios/nuevo; sin «Sugerir precio» en la ficha
+movil 360       { desborda: false, px: 360 } (formulario y alta de insumo)
+```
+
+**Lo sintético se deshizo**: todos los sugeridos con nota «pantalla 10» rechazados; bandeja vacía.
+
+### Decisiones
+
+D-16.176…D-16.179 en `ESTADO.md`.
+
+---
+
+## Pantalla 11 — Productos: listado, alta y ficha · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/productos/page.tsx` | `GET /productos` (el maestro de la empresa) junto a `GET /productos/ubicaciones` de la sucursal del selector: **se vende / no se vende / sin configurar** y el PVP. Buscar sin tildes, categoría (de las que hay) e «Incluir archivados», sobre la lista leída |
+| `app/(app)/productos/nuevo/page.tsx` | `POST /productos`: nombre, tipo (con receta / combo) y categoría opcional; lleva a la ficha. 409 por nombre repetido junto al botón |
+| `app/(app)/productos/[id]/page.tsx` | `GET /productos/:id` y `GET /productos/:id/ubicaciones` (filtrado por alcance en la API) con los nombres de `GET /ubicaciones`; el empaque por su nombre de catálogo. **Solo lectura**: PVP, activación y empaque se editan en la pantalla 12 |
+| `app/(app)/productos/layout.tsx` | `seccion('product.read')` |
+| `componentes/armazon/navegacion.ts` | grupo **Carta** con «Productos» |
+| `lib/busqueda.ts` | `coincide`: buscar sin tildes ni mayúsculas, que vivía en insumos (segundo uso). +3 pruebas |
+| `componentes/ui/Dato.tsx` | el dato de una ficha, que vivía en la de insumos (segundo uso) |
+
+### Cómo se verificó
+
+```
+navegación      … Precios por confirmar · Productos · Costeo por producto …   (grupo «Carta»)
+Local Centro    «Arroz marinero | Con receta · Fuertes | Se vende | 7.90» · «Ceviche mixto | … | 6.50»
+                categorías [Todas, Entradas, Fuertes]; «ARROZ» → 1 fila; «Entradas» → 1 fila
+Bodega Norte    las mismas filas «Sin configurar | —»
+ficha           «Arroz marinero» · Tipo Con receta · Categoría Fuertes · Sin empaque · «Local Centro | Se vende | 7.90 | 1»
+alta            → /productos/01a0a164-… «Producto de ensayo P11 (sintetico)» · «Todavía no está configurado en ninguna sucursal»
+repetido        409 «Ya existe un producto con ese nombre.» sin salir del formulario
+gerente         lista sí, «Nuevo producto» no, /productos/nuevo «sin acceso», ficha solo con Local Centro
+bodega          «sin acceso»; sin «Productos» en la navegación
+360 px          lista y ficha { desborda: false }
+```
+
+**El producto de ensayo se queda** en el tenant sintético: **no hay forma de archivarlo ni de renombrarlo**,
+porque la API no tiene `PUT /productos/:id` (duda #14).
+
+### Decisiones
+
+D-16.180…D-16.182 en `ESTADO.md`; duda #14.
+
+---
+
+## Pantalla 12 — Producto: PVP y activación, empaque, simulador y desglose · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `app/(app)/productos/[id]/page.tsx` | La ficha compone sus bloques por permiso: datos · **lo que cuesta y deja en la sucursal elegida** (`costing.read`) · **configuración en esa sucursal** y **empaque** (`product.write`) · dónde se vende. Tras cada escritura se relee y los bloques se remontan con la versión nueva |
+| `componentes/productos/ficha.ts` | la lectura: ficha, configuraciones, sucursales e insumos (con archivados) |
+| `componentes/productos/CostoDelProducto.tsx` | `GET /costeo/:id?locationId=`: costo por porción, con provisión de merma, empaque, costo total; venta neta, margen, food cost con el semáforo de la API y multiplicador. **Simulador** con `?pvp=`, debajo de lo real. Sin receta, el aviso y nada más |
+| `componentes/productos/DesgloseDelCosto.tsx` | `costos.lineas` (solo con `recipe.read`): insumo, cantidad **con la unidad del catálogo**, base, costo y peso en el lote; las excluidas, atenuadas |
+| `componentes/productos/ConfiguracionEnSucursal.tsx` | `PUT /productos/:id/ubicaciones` con `version`: se vende, PVP con IVA y porciones por lote (vacío = `null`); 400 y 409 junto al botón |
+| `componentes/productos/EmpaqueDelProducto.tsx` | `PUT /productos/:id/empaque` con `version`: un insumo activo o «Sin empaque» |
+| `componentes/costeo/tipos.ts` | la forma de `GET /costeo`, compartida con la tabla de costeo (segundo uso) |
+| `componentes/ui/VolverACargar.tsx`, `lib/api.ts` | el botón del 409 (tercer uso) y `CONFLICTO_DE_VERSION` |
+
+### Lo que destapó la verificación
+
+**INC-026.** Los tres bloques remontables compartían la misma `key`: tras guardar, React dejaba el costo y
+el formulario viejos al lado de los nuevos —dos secciones de costo, una con el PVP anterior— y el siguiente
+envío se perdía. Una clave por bloque. Y un detalle de lectura: «porción 3.08 + empaque 0.00» no daba el
+«total 3.14» a la vista; entra el indicador **con provisión de merma** entre los dos.
+
+### Cómo se verificó
+
+Arroz marinero en Local Centro (receta de tres líneas), como dueña:
+
+```
+costo           porción 3.08 · con merma 3.14 · empaque 0.00 · total 3.14   (una sola sección)
+venta           neta 7.04 · margen 3.90 · food cost 44,6 % [ROJO] · multiplicador 2.24
+desglose        Arroz 0.2 kg AP 2.16 70,2 % · Camaron pelado 0.1 kg EP 0.87 28,2 % · Aceite 0.02 lt AP 0.05 1,6 %
+simulador       «9,50» → «Con PVP 9.50»: neta 8.26 · margen 5.12 · 38,0 % · 2.63; en la API el PVP no cambió
+sin PVP         el navegador no envía (PVP requerido si se vende); la API, directa: 400 «Un producto activo necesita PVP…»
+guardar 8,20    tabla 8.20 · venta neta 7.13 · campo «8.2» releído · secciones de costo: 1
+409             otra escritura con la versión actual (8.3) → «Alguien más cambió este producto…» + «Ver la versión actual» → campo 8.3
+empaque         Aceite de girasol → dato «Aceite de girasol», empaque 2.43, total 5.57; «Sin empaque» → 0.00 y 3.14
+Bodega Norte    «Sin receta en esta sucursal…»; configuración sin marcar
+sin receta      el producto de ensayo P11: aviso y sin simulador
+gerente         costo, simulador y desglose (3 líneas); ni configuración ni empaque
+360 px          { desborda: false }
+```
+
+**Lo que se tocó se restauró**: PVP 7.9, porciones 1, sin empaque (la versión del producto quedó en 10).
+
+### Decisiones
+
+D-16.183…D-16.186 en `ESTADO.md`; INC-026.
+
+---
+
+## Pantalla 13 — Componentes de combo · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `componentes/productos/ComponentesDelCombo.tsx` | En la ficha de un combo: `GET /productos/:id/componentes` (producto y cantidad, con enlace a cada uno) y «Editar componentes» con `product.write` |
+| `app/(app)/productos/[id]/componentes/page.tsx` | El editor: filas de producto y cantidad, añadir y quitar, y `PUT` de **la lista entera** con la `version` del combo. Ofrece productos con receta activos (más los que ya están); 400 con su motivo y 409 con «Ver la versión actual». Un producto con receta enseña que no tiene componentes |
+| `componentes/productos/CostoDelProducto.tsx` | Un combo sin nada que costear dice **«Sin componentes»**, no «escribe su receta» |
+
+### Cómo se verificó
+
+Con un combo sintético creado por la pantalla 11 («Combo de ensayo P13 (sintetico)»), como dueña en Local Centro:
+
+```
+ficha vacía     «Combo · Sin categoría» · Componentes «Todavía no tiene componentes.» · costo «Sin componentes: …» · «Editar componentes»
+editor          dos «Añadir componente» → Arroz marinero 1, Ceviche mixto 1 · opciones: los tres productos con receta, no el combo
+repetido        segunda fila = Arroz marinero → 400 «Un producto no puede aparecer dos veces en el mismo combo: sube su cantidad.»
+guardar         Arroz marinero 1 + Ceviche mixto 2 → ficha: componentes 2 filas · costo 6.14 · «no tiene PVP fijado en esta ubicación»
+409             otra escritura deja Ceviche mixto 3 → «Alguien más cambió este producto…» → «Ver la versión actual» → 1 fila, 3
+no es combo     /productos/<con receta>/componentes → «Este producto tiene receta, no componentes…»
+gerente         ficha con componentes y sin «Editar componentes»; el editor, «sin acceso»
+360 px          editor { desborda: false }
+```
+
+**El combo de ensayo se queda** (duda #14), **sin componentes**: la limpieza vació la lista.
+
+### Decisiones
+
+D-16.187…D-16.188 en `ESTADO.md`.
+
+---
+
+## Pantalla 14 — Receta · 2026-09-14
+
+### Qué se construyó
+
+| Archivo | Qué |
+|---|---|
+| `componentes/recetas/receta.ts` | La lectura para editar: `GET /recetas?locationId=&productId|itemId=` (vigente y `ultimaVersionId`), los insumos con archivados, el nombre y tipo del destino y el nombre de la sucursal. `admiteReceta`: un producto con receta o una preparación |
+| `componentes/recetas/EditorDeReceta.tsx` | `PUT /recetas` con `basadaEn`: líneas desde la vigente, **vale desde** (hoy, a `12:00Z`) y nota. Avisa si ya hay una versión futura. 409 con «Ver la versión actual» |
+| `componentes/recetas/FilaDeReceta.tsx` | Una línea: insumo (activos, más los que ya están; nunca el propio destino), cantidad **con la unidad de uso en la etiqueta**, **«Tal como se compra (AP)» / «Ya limpio (EP)»**, excluida, quitar |
+| `componentes/recetas/PaginaDeReceta.tsx` | La página común, con `recipe.write`, en la sucursal del selector; a un combo o a un insumo comprado les dice por qué no tienen receta |
+| `app/(app)/productos/[id]/receta`, `app/(app)/insumos/[id]/receta` | Las dos rutas; al guardar, vuelven a la ficha |
+| fichas de producto e insumo | «Receta» con `recipe.write`, solo en un producto con receta y en una preparación |
+
+### Cómo se verificó
+
+Arroz marinero en Local Centro (receta vigente desde el 13 sept, tres líneas), como dueña:
+
+```
+editor          «Receta · Arroz marinero» · «En Local Centro. …» · vigente desde el 13 sept 2026 · vale desde 2026-09-14
+                Arroz (kg) 0.2 AP · Camaron pelado (kg) 0.1 EP · Aceite de girasol (lt) 0.02 AP
+añadir/quitar   4 filas → 3, sin guardar
+guardar         arroz «0,25», aceite excluido, nota → ficha: porción 3.08 → 3.57 · food cost 45,7 % → 53,0 %
+                desglose «Arroz 0.25 kg AP 2.70 75,6 %» · «Aceite de girasol Excluida: no suma 0.02 lt AP 0.00 0,0 %»
+409             otra versión creada con el editor abierto → «Alguien más cambió esta receta…» → «Ver la versión actual» → 0.3 en las tres
+preparación     «Receta» en la ficha de Fondo de pescado; «Todavía no tiene receta vigente»; el selector no se ofrece a sí misma
+comprado        sin «Receta» en la ficha; la ruta dice «Un insumo comprado no tiene receta…»
+combo           sin «Receta» en la ficha; la ruta dice «Un combo no tiene receta…»
+gerente         «Receta» y editor con las tres líneas (su sucursal)
+bodega          «sin acceso»
+360 px          { desborda: false }; cada línea, una tarjeta
+```
+
+AP y EP se ven en el costo: el camarón en EP cuesta 0.87 con su rendimiento aplicado por la API.
+**La receta original se restauró** como versión nueva (con su nota): porción 3.08, food cost 45,7 %. Las
+versiones del ensayo quedan en el historial, que es lo que deben hacer.
+
+### Decisiones
+
+D-16.189…D-16.191 en `ESTADO.md`.
+
+---
+
+## Verificación multi-tenant · 2026-09-17
+
+> **El sistema es multi-tenant y la verificación tenía un solo tenant.** Las pantallas 1–14 se
+> comprobaron por rol —dueña, gerente, bodega— dentro de una company. Lo que no se había probado
+> desde la pantalla es lo que el cliente compra: que la company de al lado no exista para él.
+
+### Qué se hizo
+
+| | |
+|---|---|
+| **Segunda company sintética** | `npm run seed:tenant` con «Ensayo B (sintetico)»: mismas ubicaciones («Local Centro», «Bodega Norte») y, por la API, los mismos nombres de datos con cifras distintas — Arroz a 60.00 (ensayo: 54.00) y **«Arroz marinero» con PVP 9.90** (ensayo: 7.90) |
+| **D-16.194 · 🔴 nombre por company** | `productos.spec.ts`: el mismo nombre de producto en dos companies son **dos 201**, y repetirlo dentro de una es 409 |
+| **Corrección que destapó esa prueba** | el nombre repetido devolvía **400** y `docs/apis/app-cliente.md` decía **409** desde P4. Ahora es 409 `CONFLICTO` (`ProductoRepetidoError`), con el mismo razonamiento que el nombre repetido del catálogo: la petición está bien formada, lo que choca es el estado |
+| **Tildes de `iam`** | cinco mensajes que se leen en pantalla —«Sesión no válida», «Esa ubicación no está en tu alcance»— llevaban el texto sin tildes. Es el pendiente que arrastraba `ESTADO.md` y se cierra aquí; la verificación cruzada los puso en pantalla tres veces |
+| **`docs/pruebas/ESTRATEGIA.md`** | el procedimiento: el entorno de dos companies, las dos comprobaciones y por qué los nombres se repiten a propósito |
+
+### Cómo se verificó
+
+Como **dueña de ensayo-b**, contra el build de producción, con los 21 ids de ensayo en la mano:
+
+```
+(a) sin fugas en el listado  — 0 ids de ensayo en el HTML y 0 cifras suyas (54.00, 7.90, 6.50) en:
+    1 armazón (selector con sus dos sucursales) · 2 inicio · 3 ventas · 4 insumos · 5 alta de insumo
+    (grupos: «Sin grupo, Granos», los suyos) · 7 grupos · 9 precios (su pendiente, 62) · 11 productos
+
+(b) ficha con id ajeno, en sitio:
+    6  /insumos/<ajeno>                        «Ese ítem no existe en tu company.»          0 tablas · 0 campos
+    7  /grupos/<ajeno>/editar                  «Ese grupo no existe en tu empresa.»         0 tablas · 0 campos
+    8  /insumos/<ajeno>/articulos/<ajeno>/…    «Ese artículo de compra no existe en tu…»    0 tablas · 0 campos
+    10 /precios/nuevo?itemId=<ajeno>           «Ese ítem no existe en tu company.»          el selector, con SUS insumos
+    12 /productos/<ajeno>                      «Ese producto no existe en tu company.»      0 tablas · 0 campos
+    13 /productos/<combo ajeno>/componentes    «Ese producto no existe en tu company.»      0 tablas · 0 campos
+    14 /productos/<ajeno>/receta               «Ese producto no existe en tu company.»      0 tablas · 0 campos
+
+    sucursal ajena metida a mano en el navegador → «Esa ubicación no está en tu alcance.» en ventas,
+    costeo e inventario, en sitio y sin datos
+
+la API, directa, sobre lo ajeno:
+    /catalogo/items/:id 404 · /catalogo/articulos/:id 404 · /productos/:id 404 · …/ubicaciones 404 ·
+    …/componentes 404 · /recetas?locationId= 403 · /analitica/ventas 403 · /costeo 403 ·
+    /inventario/saldos 403      — ni un 200, ni un 500
+```
+
+**El id ajeno sí aparece en la página**, en el `href` del «← Volver» que se arma con el parámetro de
+la URL. No es una fuga —lo puso el navegador— y la comprobación lo separa: cuenta el id en el texto
+(0), en los enlaces (1) y en el resto del HTML (0).
+
+### Lo que queda dicho y no hecho
+
+- **D-16.195** restauración por tenant: commit propio, antes de la parada del piloto.
+- **D-16.196** el eje de IP del login **sí** puede dejar fuera una IP entera por los fallos de una
+  sola cuenta (25 fallos, escalada hasta 60 min): se relaja en su commit, con incidencia.
+- **D-16.197** `app_user.email` es único global: duda **#15** con plazo.
+- La pantalla 11 anotó su «repetido → 409» cuando la API aún devolvía 400; desde este commit es 409 de
+  verdad, que es lo que decía su documentación.
+
+### Decisiones
+
+D-16.193…D-16.197 en `ESTADO.md`; duda #15.

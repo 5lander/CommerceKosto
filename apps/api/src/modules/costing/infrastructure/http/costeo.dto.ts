@@ -14,21 +14,37 @@
 
 import { z } from 'zod';
 
+import type { Semaforo } from '../../../../shared/domain/indicadores/semaforo';
+import { decimalPositivo } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 /**
  * Los parámetros de consulta del costeo.
  *
- * NO ES `.strict()`, por la misma razón que `CONSULTA_DE_RECETA`: un navegador
- * puede añadir parámetros de rastreo a una URL y rechazar la petición por eso
- * sería hostil sin ganar nada. Lo que importa es que los campos que sí se leen
- * estén validados, y lo están.
+ * **ES `.strict()` DESDE P16-A2**, como los otros siete `CONSULTA_*`. Este
+ * comentario decía lo contrario, y por la misma razón que `CONSULTA_DE_RECETA`
+ * —los parámetros de rastreo de un navegador—; la refutación completa está allí
+ * y no se repite aquí. En una frase: ese rastreo se le añade a la URL de una
+ * página, no a una llamada `fetch`, y a cambio un parámetro de más se descartaba
+ * en silencio con un 200 (SEGURIDAD.md §3, asignación masiva).
  */
-export const CONSULTA_DE_COSTEO = z.object({
-  locationId: z.uuid(),
-  /** ISO 8601. Ausente = hoy. Es el criterio E8: se puede preguntar por atrás. */
-  fecha: z.iso.datetime().optional(),
-});
+export const CONSULTA_DE_COSTEO = z
+  .object({
+    locationId: z.uuid(),
+    /** ISO 8601. Ausente = hoy. Es el criterio E8: se puede preguntar por atrás. */
+    fecha: z.iso.datetime().optional(),
+  })
+  .strict();
 
 export type ConsultaDeCosteo = z.infer<typeof CONSULTA_DE_COSTEO>;
+
+/**
+ * `GET /costeo/:productId`: lo mismo, más el PVP a simular (D-16.107). Con IVA,
+ * como el de verdad (R14), y mayor que cero: un PVP de cero no es un escenario,
+ * es una división por cero.
+ */
+export const CONSULTA_DE_COSTEO_DE_PRODUCTO = CONSULTA_DE_COSTEO.extend({ pvp: decimalPositivo.optional() }).strict();
+
+export type ConsultaDeCosteoDeProducto = z.infer<typeof CONSULTA_DE_COSTEO_DE_PRODUCTO>;
 
 /** Un importe, en las dos escalas que hacen falta. */
 export interface ImporteDto {
@@ -47,6 +63,21 @@ export interface CostosDto {
   readonly costoTotalUnidad: ImporteDto;
   /** `null` cuando el lote bruto es cero, tal como el SPEC lo escribe. */
   readonly impactoMerma: string | null;
+  /**
+   * El desglose de SPEC §13. **`null` si la sesión no tiene `recipe.read`**
+   * (D-16.106): con las cantidades de cada línea, esto ES la receta.
+   */
+  readonly lineas: readonly LineaDto[] | null;
+}
+
+export interface LineaDto {
+  readonly itemId: string;
+  readonly nombre: string;
+  readonly cantidad: string;
+  readonly base: 'AP' | 'EP';
+  readonly estado: 'ACTIVA' | 'INACTIVA';
+  readonly costo: ImporteDto;
+  readonly participacion: string;
 }
 
 export interface VentaDto {
@@ -75,6 +106,16 @@ export interface ProductoCosteadoDto {
   readonly venta: VentaDto | SinVentaDto;
   /** Ítems del plato sin precio confirmado a esa fecha. Vacío es lo normal. */
   readonly itemsSinCosto: readonly string[];
+  /** Sin ninguna línea activa (o, en un combo, sin componentes): los costos cero no son un costo (D-16.146). */
+  readonly sinReceta: boolean;
+  /** El color lo decide la API con los umbrales de la company (D-16.105). `SIN_DATO` sin venta o sin receta. */
+  readonly semaforoFoodCost: Semaforo;
+}
+
+/** Un producto costeado con un PVP que no es el suyo: nada se guardó. */
+export interface ProductoSimuladoDto extends ProductoCosteadoDto {
+  /** El PVP con el que se calculó `venta`, o `null` si es el configurado. */
+  readonly pvpSimulado: string | null;
 }
 
 export interface CosteoDeCartaDto {

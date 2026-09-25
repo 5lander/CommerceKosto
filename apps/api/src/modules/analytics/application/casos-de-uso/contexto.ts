@@ -24,12 +24,18 @@ import { Count, Money, Quantity, Ratio } from '../../../../shared/domain/money/t
 import { unidadDeUso } from '../../../../shared/domain/unidad/unidad-de-uso';
 import type { ItemLeido } from '../../../catalog/application/ports/repositorio-de-catalogo.port';
 import type { PeriodoLeido } from '../../../periods/application/ports/repositorio-de-periodos.port';
+import type { EstadoDePeriodo } from '../../../periods/domain/cierre';
 import type {
   CosteoDelProducto,
   CostearCarta,
 } from '../../../costing/application/casos-de-uso/costear';
 import { totalesDelMes } from '../../../costing/domain/costeo-de-producto';
+import {
+  compartidoDeCompany,
+  type CompartidoDeCompany,
+} from '../../../costing/application/casos-de-uso/compartido';
 import type { ListarItems } from '../../../catalog/application/casos-de-uso/items';
+import type { LeerCarta } from '../../../recipes/application/casos-de-uso/carta';
 import type {
   CalcularConsumoTeorico,
   ConsultarAgregadosDelPeriodo,
@@ -49,6 +55,14 @@ import type { DependenciasDeCarga, MesDeUbicacion } from './carga';
 
 export interface DependenciasDeVistas extends DependenciasDeCarga {
   readonly costearCarta: CostearCarta;
+  /**
+   * NO SE USA DIRECTAMENTE AQUI: hace falta para abrir el ambito compartido.
+   *
+   * `CostearCarta` y `CalcularConsumoTeorico` piden la misma carta con los
+   * mismos argumentos, y el ambito solo puede unificarlas si lo posee quien las
+   * llama a las dos. Ver `costing/.../compartido.ts`.
+   */
+  readonly leerCarta: LeerCarta;
   readonly consumoTeorico: CalcularConsumoTeorico;
   readonly agregados: ConsultarAgregadosDelPeriodo;
   readonly conteoConfirmado: ConsultarConteoConfirmado;
@@ -68,6 +82,12 @@ export interface ParametrosDelPeriodo {
 export interface ContextoDelPeriodo {
   readonly anio: number;
   readonly mes: number;
+  /**
+   * El estado del mes TAL COMO LO DICE `period.status` (P16-C, D-16.124). Hasta
+   * entonces el consolidado lo deducía de si había conteo confirmado, y un mes
+   * reabierto que conserva su conteo salía «CERRADO».
+   */
+  readonly estadoDelPeriodo: EstadoDePeriodo;
   readonly carta: readonly CosteoDelProducto[];
   readonly catalogo: ReadonlyMap<ItemId, ItemLeido>;
 
@@ -100,17 +120,34 @@ export interface ContextoDelPeriodo {
   readonly umbrales: UmbralesDelResumen;
 }
 
+export interface PedidoDeContexto {
+  readonly deps: DependenciasDeVistas;
+  readonly sesion: SesionActiva;
+  readonly pedido: MesDeUbicacion;
+  /** Si no llega, se abre uno propio. Ver la nota de abajo. */
+  readonly compartido?: CompartidoDeCompany;
+}
+
 /**
  * Arma el contexto de un mes.
+ *
+ * **`compartido` ES LO QUE HACE VIABLE EL CONSOLIDADO.** Los ajustes, el
+ * catálogo de ítems y los costos al corte son de COMPANY: no cambian entre
+ * ubicaciones. Sin compartirlos, un consolidado de diez ubicaciones los leía
+ * diez veces —y los costos de los 500 ítems se calculaban veinte— y el
+ * presupuesto de §5 se pasaba en un 75 %. Lo midió `npm run bench`.
+ *
+ * Quien no pase uno recibe el suyo, así que llamar a `contexto` con tres
+ * argumentos sigue siendo correcto; lo que gana igual es dejar de repetir el
+ * cálculo de costos dentro de una misma pasada.
  *
  * @throws {PeriodoSinDatosError} si nadie ha tocado ese mes en esa ubicación.
  * @throws {UbicacionFueraDeAlcanceError}
  */
-export async function contexto(
-  deps: DependenciasDeVistas,
-  sesion: SesionActiva,
-  pedido: MesDeUbicacion,
-): Promise<ContextoDelPeriodo> {
+export async function contexto(entrada: PedidoDeContexto): Promise<ContextoDelPeriodo> {
+  const { deps, sesion, pedido } = entrada;
+  const compartido = entrada.compartido ?? compartidoDeCompany(deps, sesion);
+
   const periodo = await deps.consultarPeriodo.ejecutar(sesion, pedido);
   if (periodo === null) {
     throw new PeriodoSinDatosError(`${String(pedido.anio)}-${String(pedido.mes)}`);
@@ -119,10 +156,14 @@ export async function contexto(
   const [ventas, costos, ajustes, carta, items] = await Promise.all([
     deps.repositorio.ventasDe({ companyId: sesion.companyId, periodId: periodo.id }),
     deps.repositorio.costosDe({ companyId: sesion.companyId, periodId: periodo.id }),
-    deps.leerAjustes.ejecutar(sesion),
+    compartido.ajustes(),
     // El corte, no «hoy»: la carta se costea con lo vigente al cerrar el mes.
-    deps.costearCarta.ejecutar(sesion, { locationId: pedido.locationId, fecha: periodo.finEn }),
-    deps.listarItems.ejecutar(sesion, false),
+    deps.costearCarta.ejecutar(
+      sesion,
+      { locationId: pedido.locationId, fecha: periodo.finEn },
+      compartido,
+    ),
+    compartido.items(),
   ]);
 
   const unidadesPorProducto = new Map(
@@ -131,6 +172,7 @@ export async function contexto(
 
   return componer({
     deps,
+    compartido,
     sesion,
     periodo,
     pedido,
@@ -144,6 +186,7 @@ export async function contexto(
 
 interface Piezas {
   readonly deps: DependenciasDeVistas;
+  readonly compartido: CompartidoDeCompany;
   readonly sesion: SesionActiva;
   readonly periodo: PeriodoLeido;
   readonly pedido: MesDeUbicacion;
@@ -173,14 +216,20 @@ async function traerLoDerivado(piezas: Piezas): Promise<Derivado> {
   const { deps, sesion, periodo, pedido } = piezas;
 
   const [consumo, agregados, conteo, anterior, costosDeItems] = await Promise.all([
-    deps.consumoTeorico.ejecutar(sesion, {
-      locationId: pedido.locationId,
-      fecha: periodo.finEn,
-      ventas: [...piezas.ventas].map(([productId, unidades]) => ({
-        productId,
-        unidades: unidades.toExactString(),
-      })),
-    }),
+    deps.consumoTeorico.ejecutar(
+      sesion,
+      {
+        locationId: pedido.locationId,
+        fecha: periodo.finEn,
+        ventas: [...piezas.ventas].map(([productId, unidades]) => ({
+          productId,
+          unidades: unidades.toExactString(),
+        })),
+      },
+      // La carta que `CostearCarta` acaba de leer, no una segunda lectura de
+      // `recipe_line` con los mismos argumentos.
+      piezas.compartido.cartaDe(pedido.locationId, periodo.finEn),
+    ),
     deps.agregados.ejecutar(sesion, {
       locationId: pedido.locationId,
       desde: periodo.inicioEn,
@@ -188,7 +237,9 @@ async function traerLoDerivado(piezas: Piezas): Promise<Derivado> {
     }),
     deps.conteoConfirmado.ejecutar(sesion, { periodId: periodo.id }),
     conteoAnterior(piezas),
-    deps.costosDeItems.ejecutar(sesion, periodo.finEn),
+    // El MISMO corte con el que se costeó la carta, así que esta es la segunda
+    // llamada a una promesa que ya está en vuelo: cuesta cero.
+    piezas.compartido.costosAlCorte(periodo.finEn),
   ]);
 
   return { consumo, agregados, conteo, anterior, costosDeItems };
@@ -202,8 +253,12 @@ interface Derivado {
   readonly costosDeItems: { readonly porItem: ReadonlyMap<ItemId, { readonly costoNetoDeUso: Money }>; readonly sinPrecio: readonly ItemId[] };
 }
 
+/** Qué mes es y en qué estado está: lo que identifica al contexto, sin calcular nada. */
+function elMes(piezas: Piezas): Pick<ContextoDelPeriodo, 'anio' | 'mes' | 'estadoDelPeriodo'> {
+  return { anio: piezas.pedido.anio, mes: piezas.pedido.mes, estadoDelPeriodo: piezas.periodo.estado };
+}
+
 async function componer(piezas: Piezas): Promise<ContextoDelPeriodo> {
-  const { pedido } = piezas;
   const { consumo, agregados, conteo, anterior, costosDeItems } = await traerLoDerivado(piezas);
 
   const catalogo = new Map(piezas.items.map((item) => [item.id, item]));
@@ -216,8 +271,7 @@ async function componer(piezas: Piezas): Promise<ContextoDelPeriodo> {
   const porAgregado = new Map(agregados.map((agregado) => [agregado.itemId, agregado]));
 
   return {
-    anio: pedido.anio,
-    mes: pedido.mes,
+    ...elMes(piezas),
     carta: piezas.carta,
     catalogo,
     unidadesPorProducto: piezas.ventas,

@@ -17,6 +17,7 @@ import { IamModule } from '../iam/iam.module';
 import { CostingModule } from '../costing/costing.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PeriodsModule } from '../periods/periods.module';
+import { RecipesModule } from '../recipes/recipes.module';
 import { PricingModule } from '../pricing/pricing.module';
 import {
   ConsultarCostosFijos,
@@ -53,7 +54,17 @@ import { PrismaAnaliticaRepositorio } from './infrastructure/prisma-analitica.re
 type Deps = DependenciasDeAnaliticaNest;
 
 @Module({
-  imports: [CatalogModule, CostingModule, IamModule, InventoryModule, PeriodsModule, PricingModule],
+  imports: [
+    CatalogModule,
+    CostingModule,
+    IamModule,
+    InventoryModule,
+    PeriodsModule,
+    PricingModule,
+    // Por `LeerCarta`, que no se usa aqui: hace falta para abrir el ambito de
+    // lecturas compartidas que evita costear la misma carta dos veces.
+    RecipesModule,
+  ],
   controllers: [CargaController, AnaliticaController, ConsolidadoController, ReposicionController],
   providers: [
     { provide: REPOSITORIO_DE_ANALITICA, useClass: PrismaAnaliticaRepositorio },

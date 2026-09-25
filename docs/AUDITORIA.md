@@ -50,7 +50,7 @@
 | C11 | Secretos fuera del repositorio |
 | C12 | Cifrado a nivel de campo (AES-256-GCM, con `key_version` por registro) en **las líneas de receta con sus cantidades y en los precios de referencia** (SEGURIDAD.md §8) |
 | C13 | Errores al exterior genéricos; detalle solo en logs internos |
-| C14 | Logs sin datos personales ni datos de negocio del cliente en claro: los IDs sí, las cantidades de receta y los precios no |
+| C14 | Logs sin datos personales ni datos de negocio del cliente en claro: los IDs sí, las cantidades de receta y los precios no. **Y sin una sola credencial**: `authorization`, la `cookie` de la petición, el `set-cookie` de la respuesta y `X-CSRF-Token` se borran en `redact` (`logger.options.ts`). La lista completa la clava `logger.options.spec.ts` — **toda cabecera que lleve un secreto nuevo entra ahí en el mismo paquete que la introduce** *(P16-A2: el token anti-CSRF se quedó fuera y salió en claro en el log de cada mutación)* |
 | C15 | Sin concatenación en SQL, incluido `ORDER BY` dinámico (lista blanca de columnas) |
 | C16 | Límites anti fuerza bruta activos por cuenta **y** por IP en login, códigos y tokens (SEGURIDAD.md §2.1) |
 | C17 | Respuestas de login/recuperación idénticas y en tiempo constante (`timingSafeEqual`, hash dummy) |
@@ -114,6 +114,8 @@
 | E21 | `venta_neta = pvp / (1 + iva_venta)` y el food cost se calcula sobre venta neta, nunca sobre PVP | R14 | P5 |
 | E22 | Ningún importe ni cantidad usa punto flotante; todo pasa por el tipo `Money` y `numeric` en la base | R6/R7 | P0 |
 | E23 | El consolidado de company es exactamente la suma de sus ubicaciones | R2 | P9 |
+| E24 | **En cantidades:** `varianza_uso_kg = −mermas_y_ajustes_kg − diferencia_kg`, por ítem y ubicación sobre el mismo mes. Es una **identidad**, no una tolerancia | R15 | P16-J |
+| E25 | **En dinero:** `consumo_real − consumo_teórico = varianza_uso + varianza_precio`, y la de precio sale de `Σ(total_cost real − cantidad × costo_de_uso)`. Con el precio de compra igual al de referencia, la de precio da **exactamente cero** | R15 | P16-J |
 
 ## F. Frontend *(solo en P12, P13 y P14)*
 
@@ -171,9 +173,30 @@
 | I5 | Nada de CPU pesada en el proceso HTTP |
 | I6 | Concurrencia acotada en todo `Promise.all` sobre I/O |
 | I7 | Cachés nuevos cumplen las tres condiciones (lectura≫escritura, staleness tolerable, invalidación definida) |
-| I8 | Presupuestos de rendimiento medidos y en verde (p95) |
-| I9 | Presupuesto de bundle en verde *(solo P12/P13)* |
+| I8 | Presupuestos de rendimiento medidos y en verde (p95) — **`npm run bench`, ver abajo** |
+| I9 | Presupuesto de bundle en verde — **`npm run medir-bundle`** tras `npm run build --workspace @costeo/web`, en todo commit que toque `apps/web`. Mide en gzip lo que el navegador baja por pantalla: piso ≤ 200 KiB, pantalla ≤ 350 KiB. Si se pasa, se arregla la pantalla, no el umbral |
 | I10 | Optimizaciones no triviales documentadas con antes/después |
+
+### I8 — `npm run bench` no está en `npm run audit`, y hay que saberlo
+
+**Cuándo es obligatorio ejecutarlo:** en todo paquete que toque el camino de
+LECTURA de `costing`, `analytics`, `inventory` o `pricing`. En los demás, no.
+
+**Por qué está fuera de los doce checks.** Tarda unos dos minutos, casi todos
+sembrando 219.000 movimientos, y eso se pagaría en cada commit y en cada
+pre-commit. Es un compromiso consciente, no un olvido.
+
+**El riesgo que abre, dicho en voz alta:** un medidor fuera del pre-commit puede
+decaer sin que nadie se entere — que es exactamente lo que le pasó al
+presupuesto de §5 entre P9 y P15, cuando la deuda se aplazó tres veces y el
+consolidado acabó incumpliendo su límite en un 75 % sin que ningún check
+protestara. Por eso esta fila está aquí y no en una nota al pie.
+
+**Cómo se lee su salida.** Falla con código 1 si algún presupuesto se pasa.
+Cuando eso ocurra: **el check tiene razón hasta que se demuestre lo contrario, y
+lo que se arregla es la consulta, no el umbral.** El «suelo del entorno» que
+imprime arriba es lo que cuesta un viaje a la base en esa máquina; sin restarlo
+mentalmente, los otros números no significan nada.
 
 ---
 

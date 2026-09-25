@@ -13,7 +13,8 @@
  * cableada en `main.ts` no existe en los tests, y entonces el test de que
  * existe no prueba nada:
  *
- *   APP_GUARD        limitador de peticiones (SEGURIDAD.md §2.1)
+ *   APP_GUARD        limitador de peticiones (SEGURIDAD.md §2.1), contando por
+ *                    la IP que `ipDelCliente` resuelve tras el proxy (D-16.49)
  *   APP_INTERCEPTOR  timeout de peticion
  *   APP_FILTER       formato unico de error `{ code, message }`
  *
@@ -26,13 +27,14 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { TerminusModule } from '@nestjs/terminus';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CostingModule } from './modules/costing/costing.module';
 import { IamModule } from './modules/iam/iam.module';
+import { ImportsModule } from './modules/imports/imports.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PeriodsModule } from './modules/periods/periods.module';
 import { PricingModule } from './modules/pricing/pricing.module';
@@ -41,6 +43,7 @@ import type { Configuration } from './shared/infrastructure/config/environment';
 import { DatabaseHealthIndicator } from './shared/infrastructure/health/database.health';
 import { HealthController } from './shared/infrastructure/health/health.controller';
 import { ErrorFilter } from './shared/infrastructure/http/error.filter';
+import { LimitadorGlobalGuard } from './shared/infrastructure/http/limitador-global.guard';
 import { TimeoutInterceptor } from './shared/infrastructure/http/timeout.interceptor';
 import { loggerOptions } from './shared/infrastructure/observability/logger.options';
 import { SharedModule } from './shared/infrastructure/shared.module';
@@ -68,11 +71,13 @@ export class AppModule {
         PeriodsModule,
         InventoryModule,
         AnalyticsModule,
+        ImportsModule,
       ],
       controllers: [HealthController],
       providers: [
         DatabaseHealthIndicator,
-        { provide: APP_GUARD, useClass: ThrottlerGuard },
+        // Con la IP del cliente y no la del proxy (D-16.49): ver el guard.
+        { provide: APP_GUARD, useClass: LimitadorGlobalGuard },
         { provide: APP_INTERCEPTOR, useClass: TimeoutInterceptor },
         { provide: APP_FILTER, useClass: ErrorFilter },
       ],

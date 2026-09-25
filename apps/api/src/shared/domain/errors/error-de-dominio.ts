@@ -18,15 +18,22 @@ export type CodigoDeDominio =
   | 'ACCESO_BLOQUEADO'
   | 'SESION_INVALIDA'
   | 'PERMISO_DENEGADO'
+  | 'CSRF_INVALIDO'
   | 'RECURSO_NO_ENCONTRADO'
+  | 'PERIODO_SIN_DATOS'
   | 'LIMITE_DEL_PLAN'
   | 'CONFLICTO'
-  | 'ENTRADA_INVALIDA';
+  | 'CONFLICTO_DE_VERSION'
+  | 'ENTRADA_INVALIDA'
+  | 'LIMITE_DE_SOLICITUDES';
 
 /**
  * `mensaje` SALE AL CLIENTE TAL CUAL. Todo lo que se escriba aqui es publico:
  * nada de nombres de tabla, rutas, ni pistas sobre por que fallo de verdad.
- * El detalle para diagnosticar va en `detalle`, que solo viaja al log.
+ * El detalle para diagnosticar va en `detalle`, que solo viaja al log: lo
+ * escribe `ErrorFilter` en nivel `debug` (`diagnosticoDe`), nunca la respuesta.
+ * La frase llevaba desde P0 sin ser cierta —nadie leia el campo— y la revision
+ * de P16-A2 la convirtio en codigo en vez de borrarla.
  */
 export abstract class ErrorDeDominio extends Error {
   public abstract readonly codigo: CodigoDeDominio;

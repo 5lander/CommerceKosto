@@ -1,5 +1,6 @@
 /**
- * El puerto de analítica, sobre PostgreSQL. **Solo sus dos tablas.**
+ * El puerto de analítica, sobre PostgreSQL. **Sus dos tablas, y `period.version`**
+ * (D-16.121: ver la cabecera del puerto).
  *
  * Las dos escrituras son por **reemplazo**: `deleteMany` + `createMany` dentro
  * de la misma transacción de tenant. Es lo que hace posible guardar una grilla
@@ -16,11 +17,14 @@ import {
   productId as aProductId,
   type CompanyId,
   type PeriodId,
-  type UserId,
 } from '../../../shared/domain/identity/identificadores';
+import type { DesenlaceVersionado } from '../../../shared/application/concurrencia';
+import { escribirConVersion } from '../../../shared/infrastructure/persistence/escritura-versionada';
+import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type { ClasificacionDeCosto } from '../domain/punto-de-equilibrio';
 import type {
+  CargaVersionada,
   CostoLeido,
   RepositorioDeAnalitica,
   VentaLeida,
@@ -56,13 +60,10 @@ export class PrismaAnaliticaRepositorio implements RepositorioDeAnalitica {
     });
   }
 
-  public async reemplazarVentas(entrada: {
-    readonly companyId: CompanyId;
-    readonly periodId: PeriodId;
-    readonly userId: UserId;
-    readonly ventas: readonly VentaLeida[];
-  }): Promise<void> {
-    await this.transaccion.run(entrada.companyId, async (tx) => {
+  public async reemplazarVentas(
+    entrada: CargaVersionada & { readonly ventas: readonly VentaLeida[] },
+  ): Promise<DesenlaceVersionado> {
+    return this.conLaVersionDelMes(entrada, async (tx) => {
       await tx.productSales.deleteMany({
         where: { companyId: entrada.companyId, periodId: entrada.periodId },
       });
@@ -99,13 +100,10 @@ export class PrismaAnaliticaRepositorio implements RepositorioDeAnalitica {
     });
   }
 
-  public async reemplazarCostos(entrada: {
-    readonly companyId: CompanyId;
-    readonly periodId: PeriodId;
-    readonly userId: UserId;
-    readonly costos: readonly CostoLeido[];
-  }): Promise<void> {
-    await this.transaccion.run(entrada.companyId, async (tx) => {
+  public async reemplazarCostos(
+    entrada: CargaVersionada & { readonly costos: readonly CostoLeido[] },
+  ): Promise<DesenlaceVersionado> {
+    return this.conLaVersionDelMes(entrada, async (tx) => {
       await tx.fixedCost.deleteMany({
         where: { companyId: entrada.companyId, periodId: entrada.periodId },
       });
@@ -121,6 +119,35 @@ export class PrismaAnaliticaRepositorio implements RepositorioDeAnalitica {
           createdBy: entrada.userId,
         })),
       });
+    });
+  }
+
+  /**
+   * LA VERSIÓN PRIMERO, Y EN LA MISMA TRANSACCIÓN (D-16.121). Si no es la
+   * esperada no se borra ni una fila; si el reemplazo falla después, la
+   * transacción deshace también la subida, así que la versión nunca cuenta una
+   * carga que no ocurrió. La condición va en el `WHERE`: ver
+   * `escritura-versionada.ts`.
+   */
+  private async conLaVersionDelMes(
+    entrada: CargaVersionada,
+    reemplazar: (tx: ClienteDeTransaccion) => Promise<void>,
+  ): Promise<DesenlaceVersionado> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const donde = { id: entrada.periodId, companyId: entrada.companyId };
+      const desenlace = await escribirConVersion({
+        esperada: entrada.versionEsperada,
+        escribir: () =>
+          tx.period.updateMany({
+            where: { ...donde, version: entrada.versionEsperada },
+            data: { version: { increment: 1 } },
+          }),
+        existe: async () => (await tx.period.count({ where: donde })) > 0,
+      });
+      if (desenlace.clase !== 'escrito') return desenlace;
+
+      await reemplazar(tx);
+      return desenlace;
     });
   }
 }

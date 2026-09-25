@@ -12,10 +12,12 @@
  * de uso se puede construir a mano en una prueba con seis dobles y sin
  * contenedor de por medio.
  *
- * LOS DOS GUARDS SON GLOBALES, Y EL ORDEN IMPORTA. `SesionGuard` primero
- * —resuelve quien pregunta—, `PermisosGuard` despues —decide si puede—. Que
- * sean globales es lo que hace que la autorizacion sea deny-by-default: una
- * ruta nueva esta protegida sin que nadie tenga que acordarse de protegerla.
+ * LOS TRES GUARDS SON GLOBALES, Y EL ORDEN IMPORTA. `SesionGuard` primero
+ * —resuelve quien pregunta—, `CsrfGuard` despues —comprueba que la mutacion
+ * la origino de verdad la pagina de la aplicacion, P16-A2— y `PermisosGuard`
+ * al final —decide si puede—. Que sean globales es lo que hace que la
+ * autorizacion sea deny-by-default: una ruta nueva esta protegida, y desde
+ * P16-A2 tambien exige token si muta, sin que nadie tenga que acordarse.
  */
 
 import { Module } from '@nestjs/common';
@@ -26,25 +28,41 @@ import { RelojDelSistema } from '../../shared/infrastructure/time/reloj-del-sist
 import { CambiarContrasena } from './application/casos-de-uso/cambiar-contrasena';
 import { CerrarSesion } from './application/casos-de-uso/cerrar-sesion';
 import { IniciarSesion } from './application/casos-de-uso/iniciar-sesion';
+import {
+  RestablecerContrasena,
+  SolicitarRestablecimiento,
+} from './application/casos-de-uso/restablecer-contrasena';
 import { ValidarSesion } from './application/casos-de-uso/validar-sesion';
-import { CrearUbicacion, ListarUbicaciones } from './application/casos-de-uso/ubicaciones';
+import { ListarRoles, ListarUsuarios } from './application/casos-de-uso/lecturas-de-organizacion';
+import {
+  ActualizarUbicacion,
+  CrearUbicacion,
+  ListarUbicaciones,
+} from './application/casos-de-uso/ubicaciones';
 import {
   AceptarInvitacion,
   AsignarRol,
   InvitarUsuario,
+  ReenviarInvitacion,
   RevocarRol,
 } from './application/casos-de-uso/usuarios';
+import { ENLACES } from './application/ports/enlaces.port';
 import { GENERADOR_DE_TOKENS } from './application/ports/generador-de-tokens.port';
 import { HASHER_DE_CONTRASENAS } from './application/ports/hasher-de-contrasenas.port';
 import { REPOSITORIO_DE_AUTENTICACION } from './application/ports/repositorio-de-autenticacion.port';
 import { REPOSITORIO_DE_ORGANIZACION } from './application/ports/repositorio-de-organizacion.port';
 import { Argon2Hasher } from './infrastructure/argon2-hasher';
 import { DependenciasDeIam } from './infrastructure/dependencias-de-iam';
+import { EnlacesDeLaApp } from './infrastructure/enlaces-de-la-app';
 import { GeneradorDeTokensCriptografico } from './infrastructure/generador-de-tokens';
 import { AuthController } from './infrastructure/http/auth.controller';
 import { ContrasenaController } from './infrastructure/http/contrasena.controller';
+import { CsrfGuard } from './infrastructure/http/csrf.guard';
+import { InvitacionesDeUsuario } from './infrastructure/http/invitaciones-de-usuario';
 import { PermisosGuard } from './infrastructure/http/permisos.guard';
+import { Restablecimiento } from './infrastructure/http/restablecimiento';
 import { SesionGuard } from './infrastructure/http/sesion.guard';
+import { LecturasDeOrganizacionController } from './infrastructure/http/lecturas-de-organizacion.controller';
 import { UbicacionesController } from './infrastructure/http/ubicaciones.controller';
 import { RolesDeUsuario } from './infrastructure/http/roles-de-usuario';
 import { UsuariosController } from './infrastructure/http/usuarios.controller';
@@ -52,13 +70,20 @@ import { PrismaAutenticacionRepositorio } from './infrastructure/prisma-autentic
 import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizacion.repositorio';
 
 @Module({
-  controllers: [AuthController, ContrasenaController, UbicacionesController, UsuariosController],
+  controllers: [
+    AuthController,
+    ContrasenaController,
+    UbicacionesController,
+    UsuariosController,
+    LecturasDeOrganizacionController,
+  ],
   providers: [
     { provide: HASHER_DE_CONTRASENAS, useClass: Argon2Hasher },
     { provide: GENERADOR_DE_TOKENS, useClass: GeneradorDeTokensCriptografico },
     { provide: REPOSITORIO_DE_AUTENTICACION, useClass: PrismaAutenticacionRepositorio },
     { provide: REPOSITORIO_DE_ORGANIZACION, useClass: PrismaOrganizacionRepositorio },
     { provide: RELOJ, useClass: RelojDelSistema },
+    { provide: ENLACES, useClass: EnlacesDeLaApp },
 
     DependenciasDeIam,
 
@@ -82,6 +107,12 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
       inject: [DependenciasDeIam],
       useFactory: (deps: DependenciasDeIam): CambiarContrasena => new CambiarContrasena(deps),
     },
+    {
+      provide: Restablecimiento,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): Restablecimiento =>
+        new Restablecimiento(new SolicitarRestablecimiento(deps), new RestablecerContrasena(deps)),
+    },
 
     {
       provide: CrearUbicacion,
@@ -94,14 +125,29 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
       useFactory: (deps: DependenciasDeIam): ListarUbicaciones => new ListarUbicaciones(deps),
     },
     {
-      provide: InvitarUsuario,
+      provide: ActualizarUbicacion,
       inject: [DependenciasDeIam],
-      useFactory: (deps: DependenciasDeIam): InvitarUsuario => new InvitarUsuario(deps),
+      useFactory: (deps: DependenciasDeIam): ActualizarUbicacion => new ActualizarUbicacion(deps),
     },
     {
-      provide: AceptarInvitacion,
+      provide: ListarUsuarios,
       inject: [DependenciasDeIam],
-      useFactory: (deps: DependenciasDeIam): AceptarInvitacion => new AceptarInvitacion(deps),
+      useFactory: (deps: DependenciasDeIam): ListarUsuarios => new ListarUsuarios(deps),
+    },
+    {
+      provide: ListarRoles,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): ListarRoles => new ListarRoles(deps),
+    },
+    {
+      provide: InvitacionesDeUsuario,
+      inject: [DependenciasDeIam],
+      useFactory: (deps: DependenciasDeIam): InvitacionesDeUsuario =>
+        new InvitacionesDeUsuario(
+          new InvitarUsuario(deps),
+          new ReenviarInvitacion(deps),
+          new AceptarInvitacion(deps),
+        ),
     },
     {
       provide: RolesDeUsuario,
@@ -111,11 +157,14 @@ import { PrismaOrganizacionRepositorio } from './infrastructure/prisma-organizac
     },
 
     { provide: APP_GUARD, useClass: SesionGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermisosGuard },
   ],
   // `ListarUbicaciones` se exporta desde P9: el consolidado necesita saber
   // que ubicaciones tiene la company, y pedirlo por el caso de uso es lo que
   // mantiene el alcance de sesion aplicandose una sola vez y en un solo sitio.
-  exports: [ValidarSesion, ListarUbicaciones],
+  // `IniciarSesion` se exporta para el CLI de importacion, que abre su sesion
+  // por el MISMO camino que el navegador en vez de fabricarse una a mano.
+  exports: [IniciarSesion, ValidarSesion, ListarUbicaciones],
 })
 export class IamModule {}

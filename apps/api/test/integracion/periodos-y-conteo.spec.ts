@@ -34,6 +34,7 @@ import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher
 import { CalendarioDePeriodos } from '../../src/modules/periods/domain/periodo';
 import { ZONA_HORARIA_DE_PERIODOS } from '../../src/shared/infrastructure/config/periods';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -119,19 +120,19 @@ describe('periodos y conteo fisico', () => {
       .post('/auth/login')
       .send({ email, contrasena: CLAVE });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function confirmarPrecio(cuerpo: Cuerpo): Promise<void> {
     const sugerido = await request(servidor())
       .post('/precios')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({ ivaCompra: '0', validFrom: VIGENCIA, origen: 'MANUAL', nota: null, ...cuerpo });
     expect(sugerido.status).toBe(CREADO);
 
     const decision = await request(servidor())
       .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
   }
@@ -140,7 +141,7 @@ describe('periodos y conteo fisico', () => {
   async function itemCosteado(precio: string): Promise<ItemCosteado> {
     const item = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
         nombre: `Insumo ${randomUUID().slice(0, 8)}`,
         tipo: 'COMPRADO',
@@ -155,7 +156,7 @@ describe('periodos y conteo fisico', () => {
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
         itemId,
         nombre: `Presentacion ${randomUUID().slice(0, 8)}`,
@@ -164,6 +165,7 @@ describe('periodos y conteo fisico', () => {
         presentacion: '1',
         unidadDePresentacion: 'kg',
         factorExplicito: null,
+        ivaTarifa: '0',
       });
     expect(articulo.status).toBe(CREADO);
     const articuloId = (articulo.body as { id: string }).id;
@@ -175,13 +177,16 @@ describe('periodos y conteo fisico', () => {
   function movimiento(cuerpo: Cuerpo, quien = admin) {
     return request(servidor())
       .post('/inventario/movimientos')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({
         locationId: bodega,
         tipo: 'COMPRA',
         cantidad: '1',
         costoTotal: '20.00',
         purchaseArticleId: null,
+        // La tarifa es del cuerpo aquí: estos insumos no tienen grupo. Cero,
+        // para que el importe siga siendo el que las aserciones esperan.
+        ivaTarifa: '0',
         note: null,
         occurredAt: EN_MARZO,
         ...cuerpo,
@@ -195,9 +200,11 @@ describe('periodos y conteo fisico', () => {
   }
 
   function abrir(datos: { readonly mes: number; readonly donde?: string; readonly quien?: string }) {
+    const quien = datos.quien ?? admin;
     return request(servidor())
       .post('/conteos')
-      .set('Cookie', datos.quien ?? admin)
+      .set('Cookie', quien)
+      .set('X-CSRF-Token', csrfDe(quien))
       .send({ locationId: datos.donde ?? bodega, anio: 2026, mes: datos.mes, note: null });
   }
 
@@ -214,23 +221,23 @@ describe('periodos y conteo fisico', () => {
   function anotar(countId: string, lineas: readonly Cuerpo[], quien = admin) {
     return request(servidor())
       .put(`/conteos/${countId}/lineas`)
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({ lineas });
   }
 
   function confirmar(countId: string, quien = admin) {
-    return request(servidor()).post(`/conteos/${countId}/confirmacion`).set('Cookie', quien).send();
+    return request(servidor()).post(`/conteos/${countId}/confirmacion`).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien)).send();
   }
 
   function cerrarMes(countId: string, quien = admin) {
     return request(servidor())
       .post(`/conteos/${countId}/cierre-de-periodo`)
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send();
   }
 
   async function conciliacion(countId: string): Promise<ConciliacionDto> {
-    const respuesta = await request(servidor()).get(`/conteos/${countId}`).set('Cookie', admin);
+    const respuesta = await request(servidor()).get(`/conteos/${countId}`).set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin));
     expect(respuesta.status).toBe(OK);
     return respuesta.body as ConciliacionDto;
   }
@@ -239,7 +246,7 @@ describe('periodos y conteo fisico', () => {
     const respuesta = await request(servidor())
       .get('/periodos')
       .query({ locationId: bodega })
-      .set('Cookie', admin);
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin));
     expect(respuesta.status).toBe(OK);
     return (respuesta.body as readonly PeriodoDto[]).find(
       (periodo) => periodo.etiqueta === etiqueta,
@@ -250,7 +257,7 @@ describe('periodos y conteo fisico', () => {
     const respuesta = await request(servidor())
       .get('/conteos')
       .query({ locationId: donde })
-      .set('Cookie', quien);
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
     expect(respuesta.status).toBe(OK);
     return respuesta.body as readonly ConteoDto[];
   }
@@ -391,7 +398,7 @@ describe('periodos y conteo fisico', () => {
 
       const transferencia = await request(servidor())
         .post('/inventario/transferencias')
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({
           origen: bodega,
           destino: otra,
@@ -404,7 +411,7 @@ describe('periodos y conteo fisico', () => {
 
       const produccion = await request(servidor())
         .post('/inventario/producciones')
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({
           locationId: bodega,
           itemId: item.itemId,
@@ -417,7 +424,7 @@ describe('periodos y conteo fisico', () => {
 
       const consumo = await request(servidor())
         .post('/inventario/consumos')
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({
           locationId: bodega,
           ventas: [{ productId: randomUUID(), unidades: '1' }],
@@ -442,7 +449,7 @@ describe('periodos y conteo fisico', () => {
 
       const respuesta = await request(servidor())
         .post(`/inventario/movimientos/${compra}/correccion`)
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({ note: 'me equivoque' });
 
       expect(respuesta.status).toBe(CONFLICTO);
@@ -501,10 +508,11 @@ describe('periodos y conteo fisico', () => {
 
       const respuesta = await request(servidor())
         .post(`/periodos/${febrero?.id ?? ''}/reapertura`)
-        .set('Cookie', admin)
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
         .send({ motivo: 'falto una factura' });
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('el OWNER si, y despues el movimiento entra', async () => {
@@ -518,7 +526,7 @@ describe('periodos y conteo fisico', () => {
 
       const reapertura = await request(servidor())
         .post(`/periodos/${febrero?.id ?? ''}/reapertura`)
-        .set('Cookie', owner)
+        .set('Cookie', owner).set('X-CSRF-Token', csrfDe(owner))
         .send({ motivo: 'falto una factura de febrero' });
       expect(reapertura.status).toBe(SIN_CONTENIDO);
 
@@ -541,7 +549,7 @@ describe('periodos y conteo fisico', () => {
 
       const respuesta = await request(servidor())
         .post(`/periodos/${febrero?.id ?? ''}/reapertura`)
-        .set('Cookie', owner)
+        .set('Cookie', owner).set('X-CSRF-Token', csrfDe(owner))
         .send({ motivo: '' });
 
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
@@ -552,7 +560,7 @@ describe('periodos y conteo fisico', () => {
 
       const respuesta = await request(servidor())
         .post(`/periodos/${febrero?.id ?? ''}/reapertura`)
-        .set('Cookie', owner)
+        .set('Cookie', owner).set('X-CSRF-Token', csrfDe(owner))
         .send({ motivo: 'otra vez' });
 
       expect(respuesta.status).toBe(CONFLICTO);
@@ -571,7 +579,7 @@ describe('periodos y conteo fisico', () => {
         SIN_CONTENIDO,
       );
 
-      const hoja = await request(servidor()).get(`/conteos/${marzo}/hoja`).set('Cookie', admin);
+      const hoja = await request(servidor()).get(`/conteos/${marzo}/hoja`).set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin));
       expect(hoja.status).toBe(OK);
 
       const filas = (hoja.body as { filas: { itemId: string; cantidad: string | null }[] }).filas;
@@ -728,15 +736,19 @@ describe('periodos y conteo fisico', () => {
 
       const respuesta = await request(servidor())
         .get(`/conteos/${alguno}`)
-        .set('Cookie', bodeguero);
+        .set('Cookie', bodeguero).set('X-CSRF-Token', csrfDe(bodeguero));
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('tampoco cierra el mes: contar y sellar son permisos distintos', async () => {
       const alguno = (await conteosDe(bodega, bodeguero))[0]?.id ?? '';
 
-      expect((await cerrarMes(alguno, bodeguero)).status).toBe(PROHIBIDO);
+      const respuesta = await cerrarMes(alguno, bodeguero);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     /**
@@ -749,7 +761,7 @@ describe('periodos y conteo fisico', () => {
 
       const hoja = await request(servidor())
         .get(`/conteos/${alguno}/hoja`)
-        .set('Cookie', bodeguero);
+        .set('Cookie', bodeguero).set('X-CSRF-Token', csrfDe(bodeguero));
       expect(hoja.status).toBe(OK);
 
       for (const crudo of [JSON.stringify(hoja.body), JSON.stringify(conteos)]) {

@@ -11,6 +11,11 @@
  * mes pasado— sin escribir nada más. Un trigger en la base impide reescribir el
  * importe de una fila existente, porque el `GRANT UPDATE` que hace falta para
  * confirmar no sabe distinguir «cambiar el estado» de «cambiar el importe».
+ *
+ * **LA TARIFA DE IVA DE UN PRECIO YA NO TIENE VALOR POR DEFECTO** (D-16.43).
+ * Hasta P16-A1, omitirla tomaba `company_settings.iva_compra`, y el precio de
+ * un plátano nacía con el IVA del detergente. Ahora es cuerpo > artículo >
+ * grupo, y sin ninguna, 400: nunca se asume una tarifa (D-16.9).
  */
 
 import type { AuditLogPort } from '../../../../shared/application/ports/audit-log.port';
@@ -20,16 +25,22 @@ import type {
   PurchaseArticleId,
   ReferencePriceId,
 } from '../../../../shared/domain/identity/identificadores';
+import { TarifaDeIvaDesconocidaError } from '../../../../shared/domain/iva/errores';
+import { elegirTarifa } from '../../../../shared/domain/iva/precedencia';
+import { exigirTarifaValida } from '../../../../shared/domain/iva/tarifa';
 import { Money, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import type { LeerItem, ListarItems } from '../../../catalog/application/casos-de-uso/items';
 import type { ListarArticulos } from '../../../catalog/application/casos-de-uso/articulos';
+import type { TarifasDeIva } from '../../../catalog/application/casos-de-uso/tarifas-de-iva';
 import { costoDelItem, type CostoDelItem } from '../../domain/cadena-de-costo';
 import {
   ConflictoDePrecioError,
   ItemSinPrecioError,
   PrecioNoEncontradoError,
+  PrecioNoPositivoError,
 } from '../../domain/errores';
+import { tarifaDePreparacion } from '../../domain/preparacion';
 import { precioVigenteA } from '../../domain/vigencia';
 import type {
   DecisionSobrePrecio,
@@ -61,7 +72,12 @@ export interface DependenciasDePrecios {
    * uno solo.
    */
   readonly listarItems: ListarItems;
+  /** La tarifa del artículo y la del grupo, por el puerto de `catalog` (D-16.9). */
+  readonly tarifasDeIva: TarifasDeIva;
 }
+
+/** El tipo de ítem cuyo precio es un costo estándar, no una compra (R10). */
+const PRODUCIDO = 'PRODUCIDO';
 
 export interface DatosDeSugerencia {
   readonly itemId: ItemId;
@@ -80,12 +96,13 @@ export class SugerirPrecio {
     // Los decimales se parsean AQUÍ. Si la cadena no es un decimal exacto,
     // `Money` y `Ratio` lanzan en el borde y no seis capas más abajo con un
     // valor ya redondeado.
-    Money.fromDecimalString(datos.precio);
+    if (!Money.fromDecimalString(datos.precio).isPositive()) {
+      throw new PrecioNoPositivoError();
+    }
 
-    await this.exigirArticuloCoherente(sesion, datos);
-
-    const ivaCompra = datos.ivaCompra ?? (await this.ivaPorDefecto(sesion));
-    Ratio.fromDecimalString(ivaCompra);
+    const tipo = await this.exigirArticuloCoherente(sesion, datos);
+    const ivaCompra =
+      tipo === PRODUCIDO ? tarifaDePreparacion(datos.ivaCompra) : await this.tarifaDe(sesion, datos);
 
     const id = await this.deps.repositorio.sugerir({
       companyId: sesion.companyId,
@@ -116,7 +133,8 @@ export class SugerirPrecio {
   /**
    * Un precio sin presentación no significa nada: «2.30» solo es un dato junto
    * a «el saco de 2 kg». Y una preparación PRODUCIDA no se compra: su precio es
-   * el costo estándar por unidad de uso (R10), y no lleva artículo.
+   * el costo estándar por unidad de uso (R10), y no lleva artículo. Devuelve el
+   * tipo del ítem, que decide de dónde sale la tarifa.
    *
    * **UN TRIGGER YA LO IMPIDE EN LA BASE.** Esto lo EXPLICA: un `P0001` del
    * driver sale por el filtro como INTERNAL_ERROR 500 —un fallo del servidor—
@@ -126,7 +144,7 @@ export class SugerirPrecio {
   private async exigirArticuloCoherente(
     sesion: SesionActiva,
     datos: DatosDeSugerencia,
-  ): Promise<void> {
+  ): Promise<string> {
     const item = await this.deps.leerItem.ejecutar(sesion, datos.itemId);
     if (item === null) {
       throw new PrecioNoEncontradoError();
@@ -137,25 +155,32 @@ export class SugerirPrecio {
         'El precio de un ítem comprado necesita su artículo: un importe sin presentación no dice cuánto cuesta la unidad de uso.',
       );
     }
-    if (item.tipo === 'PRODUCIDO' && datos.purchaseArticleId !== null) {
+    if (item.tipo === PRODUCIDO && datos.purchaseArticleId !== null) {
       throw new ItemSinPrecioError(
         'Una preparación producida no se compra: su precio es el costo estándar por unidad de uso, sin artículo (R10).',
       );
     }
+
+    return item.tipo;
   }
 
   /**
-   * La tasa de la company es solo el VALOR POR DEFECTO. La que manda es la de
-   * la factura, que llega por `datos.ivaCompra`: en Ecuador el alimento sin
-   * procesar es 0 % y el detergente 15 %, y una única tasa por company estaría
-   * equivocada para uno de los dos.
+   * Cuerpo > artículo > grupo, SOLO para un ítem comprado. La de la factura
+   * manda: en Ecuador el alimento sin procesar es 0 % y el detergente 15 %. Y
+   * sin ninguna, 400. Una preparación no pasa por aquí: su tarifa es cero
+   * (`tarifaDePreparacion`, D-16.51), venga lo que venga del grupo.
+   *
+   * @throws {TarifaDeIvaDesconocidaError} @throws {TarifaDeIvaInvalidaError}
    */
-  private async ivaPorDefecto(sesion: SesionActiva): Promise<string> {
-    const ajustes = await this.deps.repositorio.ajustes(sesion.companyId);
-    if (ajustes === null) {
-      throw new ItemSinPrecioError('La company no tiene parámetros de costeo configurados.');
-    }
-    return ajustes.ivaCompra;
+  private async tarifaDe(sesion: SesionActiva, datos: DatosDeSugerencia): Promise<string> {
+    const catalogo = await this.deps.tarifasDeIva.ejecutar(sesion, {
+      itemId: datos.itemId,
+      purchaseArticleId: datos.purchaseArticleId,
+    });
+    const tarifa = elegirTarifa({ cuerpo: datos.ivaCompra, ...catalogo });
+    if (tarifa === null) throw new TarifaDeIvaDesconocidaError();
+
+    return exigirTarifaValida(tarifa).toStorageString();
   }
 }
 
@@ -202,11 +227,25 @@ export class ResolverPrecio {
   }
 }
 
+/** Un precio del historial, con la marca de si es el que manda hoy. */
+export interface PrecioDelHistorial extends PrecioLeido {
+  /**
+   * `true` en UNO como mucho: el que `precioVigenteA` elige a esta hora. Lo
+   * decide el dominio y no la pantalla (D-16.3): con dos confirmados de la
+   * misma vigencia, el desempate por `created_at` es una regla, y una regla
+   * copiada en el navegador es INC-020 esperando a pasar.
+   */
+  readonly vigente: boolean;
+}
+
 export class HistorialDePrecios {
   public constructor(private readonly deps: DependenciasDePrecios) {}
 
-  public async ejecutar(sesion: SesionActiva, itemId: ItemId): Promise<readonly PrecioLeido[]> {
-    return this.deps.repositorio.historial({ companyId: sesion.companyId, itemId });
+  public async ejecutar(sesion: SesionActiva, itemId: ItemId): Promise<readonly PrecioDelHistorial[]> {
+    const precios = await this.deps.repositorio.historial({ companyId: sesion.companyId, itemId });
+    const vigente = precioVigenteA(precios, this.deps.reloj.ahora());
+
+    return precios.map((p) => ({ ...p, vigente: p.id === vigente?.id }));
   }
 }
 
@@ -288,3 +327,4 @@ function presentar(vigente: PrecioLeido, costo: CostoDelItem): CostoVigente {
     sobrecostoDeMerma: costo.sobrecostoDeMerma.toStorageString(),
   };
 }
+

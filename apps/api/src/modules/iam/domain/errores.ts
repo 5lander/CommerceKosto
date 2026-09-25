@@ -16,6 +16,9 @@ import { ErrorDeDominio, type CodigoDeDominio } from '../../../shared/domain/err
 
 const MENSAJE_UNICO = 'Correo o contrasena incorrectos.';
 
+const MILISEGUNDOS_POR_SEGUNDO = 1_000;
+const SEGUNDOS_POR_MINUTO = 60;
+
 /** Causa real del fallo. Va al log de auditoria; jamas a la respuesta. */
 export type MotivoDelRechazo =
   | 'correo_desconocido'
@@ -44,17 +47,54 @@ export class AccesoBloqueadoError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ACCESO_BLOQUEADO';
 
   public constructor(public readonly bloqueadoHasta: Date) {
-    super('Demasiados intentos fallidos. Vuelve a intentarlo mas tarde.', {
+    super('Demasiados intentos fallidos. Vuelve a intentarlo más tarde.', {
       bloqueadoHasta: bloqueadoHasta.toISOString(),
     });
   }
 }
 
+/**
+ * Una IP que esta tanteando muchas cuentas distintas — D-16.196, ADR-028.
+ *
+ * NO ES UN BLOQUEO, y por eso no es `AccesoBloqueadoError`: no hay ninguna
+ * cuenta bloqueada, hay una direccion que tiene que esperar. La diferencia le
+ * importa a quien la lee —detras de una IP compartida puede estar alguien que
+ * no ha hecho nada— y le importa al cliente HTTP: 429 con `Retry-After`, no un
+ * 423 sobre una cuenta que esta perfectamente bien.
+ */
+export class RociadoDeContrasenasError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'LIMITE_DE_SOLICITUDES';
+
+  /** Nunca menor que 1: un `Retry-After: 0` no es una espera. */
+  public readonly reintentarEnSegundos: number;
+
+  public constructor(hasta: Date, ahora: Date) {
+    const segundos = Math.max(1, Math.ceil((hasta.getTime() - ahora.getTime()) / MILISEGUNDOS_POR_SEGUNDO));
+    const minutos = Math.max(1, Math.ceil(segundos / SEGUNDOS_POR_MINUTO));
+
+    super(
+      `Demasiados intentos desde esta conexión. Vuelve a intentarlo en ${String(minutos)} ${minutos === 1 ? 'minuto' : 'minutos'}.`,
+      { hasta: hasta.toISOString() },
+    );
+    this.reintentarEnSegundos = segundos;
+  }
+}
+
+/**
+ * `sin_csrf` ES DE P16-A2 Y SOLO OCURRE UNA VEZ POR SESION VIEJA. Las sesiones
+ * abiertas antes de que existiera `session.csrf_token` no tienen token, y una
+ * sesion que no puede probar el origen de sus mutaciones no es media sesion:
+ * es una sesion invalida. Sale como 401 —«vuelve a entrar»— y no como el 403
+ * de CSRF, que le diria al usuario que recargue una pagina que va a fallar
+ * igual. Ver ADR-021.
+ */
 export class SesionInvalidaError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'SESION_INVALIDA';
 
-  public constructor(motivo: 'ausente' | 'desconocida' | 'revocada' | 'caducada' | 'inactiva') {
-    super('Sesion no valida. Inicia sesion de nuevo.', { motivo });
+  public constructor(
+    motivo: 'ausente' | 'desconocida' | 'revocada' | 'caducada' | 'inactiva' | 'sin_csrf',
+  ) {
+    super('Sesión no válida. Inicia sesión de nuevo.', { motivo });
   }
 }
 
@@ -100,6 +140,22 @@ export class ContrasenaDebilError extends ErrorDeDominio {
 }
 
 /**
+ * El enlace de restablecimiento no sirve — y NO se dice por que.
+ *
+ * Vacio, inexistente, ya usado y caducado dan el MISMO error, igual que en la
+ * activacion: quien prueba tokens no debe poder distinguir «no existe» de «ya
+ * se uso», porque lo segundo confirma que hubo una cuenta detras. Es 400 y no
+ * 401: no hay sesion que invalidar, hay una peticion que no vale.
+ */
+export class TokenDeRestablecimientoInvalidoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor() {
+    super('El enlace de restablecimiento no es válido o ya caducó. Pide uno nuevo.');
+  }
+}
+
+/**
  * La ubicacion pedida no esta en el alcance de quien pregunta.
  *
  * ES LA ESCALADA HORIZONTAL, y vive en `iam` porque es una regla sobre la
@@ -112,10 +168,28 @@ export class ContrasenaDebilError extends ErrorDeDominio {
  * necesito. Dejarla alli habria obligado a `inventory` a importar un error de
  * dominio de `recipes` para hablar de permisos, o a duplicar la funcion.
  */
+/** P16-C: `PUT /ubicaciones/:id` sobre una que no existe en la company — ajena o inventada, el mismo texto. */
+export class UbicacionNoEncontradaError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+
+  public constructor() {
+    super('Esa ubicación no existe en tu company.');
+  }
+}
+
+/** P16-C: el indice `(company_id, name)` de `location`, traducido antes de que suba como 500 (INC-012). */
+export class NombreDeUbicacionEnUsoError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'CONFLICTO';
+
+  public constructor(nombre: string) {
+    super(`Ya hay una ubicacion llamada «${nombre}» en tu company. Elige otro nombre.`, { nombre });
+  }
+}
+
 export class UbicacionFueraDeAlcanceError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'PERMISO_DENEGADO';
 
   public constructor() {
-    super('Esa ubicacion no esta en tu alcance.');
+    super('Esa ubicación no está en tu alcance.');
   }
 }

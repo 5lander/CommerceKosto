@@ -31,9 +31,16 @@ export class ConceptoRepetidoError extends ErrorDeDominio {
  * No es lo mismo que un mes vacío: un mes **abierto** sin ventas cargadas tiene
  * vistas, todas en cero y con sus indicadores en `SIN_DATO`. Esto es que el
  * período no existe, y devolver ceros haría creer que el mes se analizó.
+ *
+ * **TIENE CÓDIGO PROPIO, Y ESE ES EL CONTRATO (D-16.2).** Sigue saliendo como
+ * 404 —no hay nada que devolver—, pero un `RECURSO_NO_ENCONTRADO` lo dejaba
+ * indistinguible del enlace roto: la pantalla recibía dos situaciones opuestas
+ * con la misma etiqueta y tenía que adivinar cuál. «Mes sin abrir» se arregla
+ * cargando las ventas del mes y es un estado normal del producto; «no existe»
+ * es un error. Quien consuma la API los separa por `code`, nunca por el estado.
  */
 export class PeriodoSinDatosError extends ErrorDeDominio {
-  public override readonly codigo: CodigoDeDominio = 'RECURSO_NO_ENCONTRADO';
+  public override readonly codigo: CodigoDeDominio = 'PERIODO_SIN_DATOS';
 
   public constructor(etiqueta: string) {
     super(

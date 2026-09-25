@@ -1,0 +1,30 @@
+{
+  // El codigo que corre en el NAVEGADOR del back office.
+  //
+  // POR QUE UN PROYECTO APARTE Y NO UNA CARPETA MAS. Necesita dos cosas que el
+  // resto de `apps/api` no debe tener nunca:
+  //
+  //   · `lib: DOM`  — si estuviera en la configuracion principal, el codigo de
+  //     servidor podria usar `document` o `window` y compilaria. Un endpoint que
+  //     toca `localStorage` no deberia llegar ni al lint.
+  //   · `module: ES2022` — el navegador carga un modulo ES; el servidor es
+  //     CommonJS (`apps/api` es `"type": "commonjs"`, ver INC-017).
+  //
+  // Se compila y se COMPRUEBA aparte, y las dos cosas estan cableadas:
+  // `npm run build` emite `dist/ui/`, y `audit:types` lo type-checkea. Un
+  // proyecto que se emite pero no se comprueba seria codigo sin tipos servido a
+  // un navegador — exactamente lo que este proyecto no permite en ningun sitio.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM"],
+    "types": [],
+    "rootDir": "src/navegador",
+    "outDir": "dist/ui",
+    "noEmit": false,
+    "sourceMap": true
+  },
+  "include": ["src/navegador/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

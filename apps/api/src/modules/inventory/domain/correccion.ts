@@ -9,9 +9,16 @@
  * contando una compra que se anuló, porque su corrección sería de otro tipo.
  * El mes cerraría con compras que nadie hizo.
  *
- * Corrigiendo con el mismo tipo, todo agregado filtrado por tipo se cancela
- * solo, sin que ninguna consulta futura tenga que acordarse de restar las
- * correcciones.
+ * Corrigiendo con el mismo tipo, **la cantidad** de todo agregado filtrado por
+ * tipo se cancela sola: lleva signo, y el de la corrección es el contrario.
+ *
+ * **EL DINERO NO, Y ESO COSTÓ UN FALLO (INC-029).** `total_cost` es una
+ * magnitud SIN signo (ADR-009 §2), así que `SUM(total_cost)` suma la compra y
+ * su corrección en vez de cancelarlas: `compras_del_mes` (SPEC §16) salía
+ * inflada por el doble de lo corregido, y esa cifra entra en el food cost real.
+ * Lo que esta cabecera prometía —«ninguna consulta futura tiene que acordarse
+ * de restar las correcciones»— vale para la cantidad y no para el importe. Las
+ * tres agregaciones de dinero las restan, y lo dicen donde lo hacen.
  *
  * EL PRECIO ES UNA EXCEPCIÓN A LA REGLA DE SIGNOS, y está acotada: la
  * corrección de una `COMPRA` es una `COMPRA` negativa, que la regla de dirección

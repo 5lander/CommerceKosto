@@ -26,16 +26,15 @@ import type {
   LocationId,
   ProductId,
 } from '../../../../shared/domain/identity/identificadores';
+import { semaforoPorBandas, type Semaforo } from '../../../../shared/domain/indicadores/semaforo';
 import { Money, Ratio } from '../../../../shared/domain/money/tipos-monetarios';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import type { CostosDeItems } from '../../../pricing/application/casos-de-uso/costos-de-items';
-import type { LeerCarta, CartaDeUbicacion } from '../../../recipes/application/casos-de-uso/carta';
+import type { CartaDeUbicacion } from '../../../recipes/application/casos-de-uso/carta';
 import type {
   ConfiguracionEnUbicacion,
   ProductoLeido,
   RecetaLeida,
 } from '../../../recipes/application/ports/repositorio-de-recetas.port';
-import type { LeerAjustes } from '../../../pricing/application/casos-de-uso/ajustes';
 import {
   resolverCostos,
   type CatalogoCosteable,
@@ -44,18 +43,20 @@ import {
 import { costearCombo } from '../../domain/combo';
 import {
   costearProducto,
+  ladoDeVenta,
+  sinRecetaActiva,
   type CosteoDeProducto,
   type LineaParaCostear,
+  type ResultadoDeVenta,
 } from '../../domain/costeo-de-producto';
 import { ProductoSinCosteoError } from '../../domain/errores';
-import type { ListarItems } from '../../../catalog/application/casos-de-uso/items';
+import {
+  compartidoDeCompany,
+  type CompartidoDeCompany,
+  type LecturasDeCompany,
+} from './compartido';
 
-export interface DependenciasDeCosteo {
-  readonly leerCarta: LeerCarta;
-  readonly costosDeItems: CostosDeItems;
-  readonly listarItems: ListarItems;
-  readonly leerAjustes: LeerAjustes;
-}
+export type DependenciasDeCosteo = LecturasDeCompany;
 
 export interface CosteoDelProducto {
   readonly productId: ProductId;
@@ -72,12 +73,48 @@ export interface CosteoDelProducto {
    * cost tiene derecho a saber sobre cuántos huecos está construido.
    */
   readonly itemsSinCosto: readonly ItemId[];
+  /**
+   * **Sin receta en esta ubicación** (D-16.146): ninguna línea activa en un
+   * producto simple, ningún componente en un combo. Sus costos salen en cero
+   * porque no hay nada que sumar, y la pantalla no los enseña como costo.
+   */
+  readonly sinReceta: boolean;
+  /**
+   * El color del food cost con los umbrales de la company (D-16.105). Lo decide
+   * la API: la pantalla lo pinta y no compara nada. `SIN_DATO` si no hay venta
+   * **o no hay receta**: un food cost sobre un costo que falta no está en verde.
+   */
+  readonly semaforoFoodCost: Semaforo;
+  /**
+   * El desglose de SPEC §13, una entrada por línea de la receta y en su orden:
+   * qué ítem, cuánto, y cuánto aporta. Vacío en un combo, que no tiene receta.
+   */
+  readonly lineas: readonly LineaDelDesglose[];
+}
+
+export interface LineaDelDesglose {
+  readonly itemId: ItemId;
+  readonly nombre: string;
+  readonly cantidad: string;
+  readonly base: 'AP' | 'EP';
+  readonly estado: 'ACTIVA' | 'INACTIVA';
+  readonly costo: Money;
+  /** `pct_del_producto`: sobre el costo neto del lote. */
+  readonly participacion: Ratio;
+}
+
+/** Los parámetros de venta de la company, para poder simular un PVP sin recostear. */
+export interface ParametrosDeVenta {
+  readonly ivaVenta: Ratio;
+  readonly umbralVerde: Ratio;
+  readonly foodCostMaximo: Ratio;
 }
 
 export interface CosteoDeLaCarta {
   readonly locationId: LocationId;
   readonly fecha: Date;
   readonly productos: readonly CosteoDelProducto[];
+  readonly parametros: ParametrosDeVenta;
 }
 
 const COMBO = 'COMBO';
@@ -85,33 +122,48 @@ const COMBO = 'COMBO';
 export class CostearCarta {
   public constructor(private readonly deps: DependenciasDeCosteo) {}
 
+  /**
+   * `compartido` deja que quien ya haya leido lo de company no lo relea.
+   *
+   * Si no llega, se abre uno propio: el comportamiento de un llamante que no
+   * sabe nada de esto no cambia. Ver `compartido.ts` para el porque.
+   */
   public async ejecutar(
     sesion: SesionActiva,
     entrada: { readonly locationId: LocationId; readonly fecha: Date },
+    compartido: CompartidoDeCompany = compartidoDeCompany(this.deps, sesion),
   ): Promise<CosteoDeLaCarta> {
     const [carta, costosDePrecio, items, ajustes] = await Promise.all([
-      this.deps.leerCarta.ejecutar(sesion, entrada),
-      this.deps.costosDeItems.ejecutar(sesion, entrada.fecha),
-      this.deps.listarItems.ejecutar(sesion, false),
-      this.deps.leerAjustes.ejecutar(sesion),
+      compartido.cartaDe(entrada.locationId, entrada.fecha),
+      compartido.costosAlCorte(entrada.fecha),
+      compartido.items(),
+      compartido.ajustes(),
     ]);
 
     const resueltos = resolverCostos(
       catalogoCosteable({ items, carta, costosDePrecio: costosDePrecio.porItem }),
     );
 
+    const parametros: ParametrosDeVenta = {
+      ivaVenta: Ratio.fromDecimalString(ajustes.ivaVenta),
+      umbralVerde: Ratio.fromDecimalString(ajustes.foodCostUmbralVerde),
+      foodCostMaximo: Ratio.fromDecimalString(ajustes.foodCostMaximo),
+    };
     const contexto: ContextoDeCosteo = {
       carta,
       costos: resueltos.porItem,
       sinCosto: new Set(resueltos.sinCosto),
-      ivaVenta: Ratio.fromDecimalString(ajustes.ivaVenta),
+      ivaVenta: parametros.ivaVenta,
       provisionMerma: Ratio.fromDecimalString(ajustes.provisionMerma),
+      parametros,
+      nombres: new Map(items.map((i) => [i.id, i.nombre])),
     };
 
     return {
       locationId: entrada.locationId,
       fecha: entrada.fecha,
       productos: costearTodos(contexto),
+      parametros,
     };
   }
 }
@@ -119,13 +171,21 @@ export class CostearCarta {
 export class CostearUnProducto {
   public constructor(private readonly costearCarta: CostearCarta) {}
 
-  /** @throws {ProductoSinCosteoError} */
+  /**
+   * `pvpSimulado` es el simulador de U6 (D-16.107): recalcula SOLO el lado de
+   * venta con la misma `ladoDeVenta` que el costeo real, sobre el costo ya
+   * calculado. No escribe nada, y el costo no cambia: lo que se pregunta es
+   * «¿y si lo vendiera a esto?», no «¿y si costara otra cosa?».
+   *
+   * @throws {ProductoSinCosteoError}
+   */
   public async ejecutar(
     sesion: SesionActiva,
     entrada: {
       readonly productId: ProductId;
       readonly locationId: LocationId;
       readonly fecha: Date;
+      readonly pvpSimulado: Money | null;
     },
   ): Promise<CosteoDelProducto> {
     const carta = await this.costearCarta.ejecutar(sesion, entrada);
@@ -134,8 +194,31 @@ export class CostearUnProducto {
     if (suyo === undefined) {
       throw new ProductoSinCosteoError();
     }
-    return suyo;
+    return entrada.pvpSimulado === null ? suyo : simular(suyo, entrada.pvpSimulado, carta.parametros);
   }
+}
+
+function simular(producto: CosteoDelProducto, pvp: Money, parametros: ParametrosDeVenta): CosteoDelProducto {
+  const venta = ladoDeVenta({ pvp, ivaVenta: parametros.ivaVenta, costoTotalUnidad: producto.costeo.costos.costoTotalUnidad });
+  return {
+    ...producto,
+    costeo: { ...producto.costeo, venta },
+    semaforoFoodCost: semaforoDe(venta, parametros, producto.sinReceta),
+  };
+}
+
+/**
+ * `SIN_DATO` cuando no hay venta —un plato sin PVP no está en verde, está sin
+ * medir— y cuando no hay receta: el food cost de un costo que falta es 0 %, y
+ * pintarlo de verde sería la mejor noticia posible sobre un dato que no existe.
+ */
+function semaforoDe(venta: ResultadoDeVenta, parametros: ParametrosDeVenta, sinReceta: boolean): Semaforo {
+  if (sinReceta) return 'SIN_DATO';
+  return semaforoPorBandas({
+    valor: venta.clase === 'vendible' ? venta.foodCostPct : null,
+    verde: parametros.umbralVerde,
+    rojo: parametros.foodCostMaximo,
+  });
 }
 
 interface ContextoDeCosteo {
@@ -144,6 +227,8 @@ interface ContextoDeCosteo {
   readonly sinCosto: ReadonlySet<ItemId>;
   readonly ivaVenta: Ratio;
   readonly provisionMerma: Ratio;
+  readonly parametros: ParametrosDeVenta;
+  readonly nombres: ReadonlyMap<ItemId, string>;
 }
 
 /**
@@ -210,6 +295,7 @@ function costearSimple(producto: ProductoLeido, contexto: ContextoDeCosteo): Cos
   const enUbicacion = contexto.carta.enUbicacion.get(producto.id);
   const receta = contexto.carta.recetasDeProducto.get(producto.id);
   const lineas = (receta?.lineas ?? []).map((linea) => lineaParaCostear(linea, contexto));
+  const sinReceta = sinRecetaActiva(lineas);
 
   const costeo = costearProducto({
     lineas,
@@ -224,7 +310,36 @@ function costearSimple(producto: ProductoLeido, contexto: ContextoDeCosteo): Cos
     ...identidad(producto, enUbicacion),
     costeo,
     itemsSinCosto: sinCostoDe(receta, contexto),
+    sinReceta,
+    semaforoFoodCost: semaforoDe(costeo.venta, contexto.parametros, sinReceta),
+    lineas: desglose(receta, costeo, contexto),
   };
+}
+
+/**
+ * Las líneas de la receta con lo que aporta cada una. El motor devuelve el costo
+ * y la participación EN EL MISMO ORDEN en que recibió las líneas —todas, las
+ * inactivas con costo cero—, y aquí se vuelven a unir por posición.
+ */
+function desglose(
+  receta: RecetaLeida | undefined,
+  costeo: CosteoDeProducto,
+  contexto: ContextoDeCosteo,
+): readonly LineaDelDesglose[] {
+  return (receta?.lineas ?? []).flatMap((linea, posicion) => {
+    const costeada = costeo.costos.lineas[posicion];
+    return costeada === undefined
+      ? []
+      : [{
+          itemId: linea.itemId,
+          nombre: contexto.nombres.get(linea.itemId) ?? '',
+          cantidad: linea.cantidad,
+          base: linea.base,
+          estado: linea.estado,
+          costo: costeada.costo,
+          participacion: costeada.participacion,
+        }];
+  });
 }
 
 function costearUnCombo(
@@ -244,6 +359,9 @@ function costearUnCombo(
     pvp: pvpDe(enUbicacion),
     ivaVenta: contexto.ivaVenta,
   });
+  // La «receta» de un combo son sus componentes: sin ninguno, cuesta cero por
+  // la misma razón que un plato sin líneas.
+  const sinReceta = componentes.length === 0;
 
   return {
     ...identidad(producto, enUbicacion),
@@ -263,6 +381,9 @@ function costearUnCombo(
       venta: combo.venta,
     },
     itemsSinCosto: [],
+    sinReceta,
+    semaforoFoodCost: semaforoDe(combo.venta, contexto.parametros, sinReceta),
+    lineas: [],
   };
 }
 

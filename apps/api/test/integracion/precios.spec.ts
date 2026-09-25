@@ -23,10 +23,12 @@ import { companyId as aCompanyId } from '../../src/shared/domain/identity/identi
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { PrismaConnection } from '../../src/shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../src/shared/infrastructure/persistence/tenant-transaction';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
 const SIN_CONTENIDO = 204;
+const PETICION_INVALIDA = 400;
 const NO_ENCONTRADO = 404;
 const PROHIBIDO = 403;
 const CONFLICTO = 409;
@@ -65,14 +67,14 @@ describe('precios de referencia', () => {
       .send({ email, contrasena: CONTRASENA });
 
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /** Un ítem comprado con su artículo de 2 kg, medido en gramos. */
   async function itemConArticulo(): Promise<{ itemId: string; articuloId: string }> {
     const item = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `Harina ${randomUUID().slice(0, 8)}`,
         tipo: 'COMPRADO',
@@ -87,7 +89,7 @@ describe('precios de referencia', () => {
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         itemId,
         nombre: `Saco 2kg ${randomUUID().slice(0, 8)}`,
@@ -96,6 +98,7 @@ describe('precios de referencia', () => {
         presentacion: '2',
         unidadDePresentacion: 'kg',
         factorExplicito: null,
+        ivaTarifa: '0.15',
       });
     expect(articulo.status).toBe(CREADO);
 
@@ -105,19 +108,19 @@ describe('precios de referencia', () => {
   function sugerir(cuerpo: Cuerpo, quien = cookie) {
     return request(servidor())
       .post('/precios')
-      .set('Cookie', quien)
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien))
       .send({ ivaCompra: '0.15', origen: 'MANUAL', nota: null, ...cuerpo });
   }
 
   function confirmar(precioId: string, decision = 'CONFIRMED') {
     return request(servidor())
       .post(`/precios/${precioId}/decision`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ decision });
   }
 
   function costo(itemId: string, fecha?: string) {
-    const peticion = request(servidor()).get(`/precios/costo/${itemId}`).set('Cookie', cookie);
+    const peticion = request(servidor()).get(`/precios/costo/${itemId}`).set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
     return fecha === undefined ? peticion : peticion.query({ fecha });
   }
 
@@ -183,7 +186,7 @@ describe('precios de referencia', () => {
 
   describe('la company nace con sus parámetros de costeo (D3)', () => {
     it('los valores son los del Excel original, y ninguno está en el código', async () => {
-      const respuesta = await request(servidor()).get('/ajustes').set('Cookie', cookie);
+      const respuesta = await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
       expect(respuesta.status).toBe(OK);
       expect(respuesta.body).toMatchObject({
@@ -201,22 +204,22 @@ describe('precios de referencia', () => {
     });
 
     it('un IVA de 15 en vez de 0.15 se rechaza: multiplicaría el costo por dieciséis', async () => {
-      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
 
       const respuesta = await request(servidor())
         .put('/ajustes')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...actuales, ivaVenta: '15' });
 
       expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
     });
 
     it('los umbrales del semáforo tienen que ir en orden', async () => {
-      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
 
       const respuesta = await request(servidor())
         .put('/ajustes')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...actuales, foodCostObjetivo: '0.30', foodCostUmbralVerde: '0.28' });
 
       expect((respuesta.body as { message: string }).message).toContain('orden');
@@ -239,7 +242,7 @@ describe('precios de referencia', () => {
       const historial = await request(servidor())
         .get('/precios')
         .query({ itemId })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       expect((historial.body as unknown[]).length).toBe(1);
 
       const sinConfirmar = await costo(itemId, MARZO);
@@ -289,10 +292,11 @@ describe('precios de referencia', () => {
 
       const intento = await request(servidor())
         .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-        .set('Cookie', suya)
+        .set('Cookie', suya).set('X-CSRF-Token', csrfDe(suya))
         .send({ decision: 'CONFIRMED' });
 
       expect(intento.status).toBe(PROHIBIDO);
+      expect(intento.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -340,10 +344,10 @@ describe('precios de referencia', () => {
 
       const conRecuperacion = (await costo(itemId, MARZO)).body as { costoNetoDeUso: string };
 
-      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))).body as Cuerpo;
       await request(servidor())
         .put('/ajustes')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({ ...actuales, ivaCompraRecuperable: false });
 
       const sinRecuperacion = (await costo(itemId, MARZO)).body as { costoNetoDeUso: string };
@@ -354,7 +358,102 @@ describe('precios de referencia', () => {
         10,
       );
 
-      await request(servidor()).put('/ajustes').set('Cookie', cookie).send(actuales);
+      await request(servidor()).put('/ajustes').set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie)).send(actuales);
+    });
+  });
+
+  describe('las lecturas de precios de P16-B', () => {
+    it('🔴 un precio de cero o negativo es 400, no el 500 del CHECK (INC-012, D-16.110)', async () => {
+      const { itemId, articuloId } = await itemConArticulo();
+
+      const cero = await sugerir({ itemId, purchaseArticleId: articuloId, precio: '0', validFrom: ENERO });
+      const negativo = await sugerir({ itemId, purchaseArticleId: articuloId, precio: '-1', validFrom: ENERO });
+
+      expect([cero.status, negativo.status]).toEqual([PETICION_INVALIDA, PETICION_INVALIDA]);
+      expect(cero.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+      expect(negativo.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    it('el historial marca UNO como vigente: el confirmado más reciente que ya empezó', async () => {
+      const { itemId, articuloId } = await itemConArticulo();
+      const viejo = await sugerir({ itemId, purchaseArticleId: articuloId, precio: '2.00', validFrom: ENERO });
+      const nuevo = await sugerir({ itemId, purchaseArticleId: articuloId, precio: '2.40', validFrom: FEBRERO });
+      await sugerir({ itemId, purchaseArticleId: articuloId, precio: '9.99', validFrom: MARZO });
+      await confirmar((viejo.body as { id: string }).id);
+      await confirmar((nuevo.body as { id: string }).id);
+
+      const historial = await request(servidor()).get('/precios').query({ itemId }).set('Cookie', cookie);
+
+      const vigentes = (historial.body as { id: string; vigente: boolean }[]).filter((p) => p.vigente);
+      expect(vigentes.map((p) => p.id)).toEqual([(nuevo.body as { id: string }).id]);
+    });
+
+    it('la bandeja trae el sugerido con nombres y el precio vigente al lado, y no los confirmados', async () => {
+      const { itemId, articuloId } = await itemConArticulo();
+      const confirmado = await sugerir({ itemId, purchaseArticleId: articuloId, precio: '2.10', validFrom: ENERO });
+      await confirmar((confirmado.body as { id: string }).id);
+      const pendiente = await sugerir({ itemId, purchaseArticleId: articuloId, precio: '2.45', validFrom: FEBRERO });
+
+      const bandeja = await request(servidor()).get('/precios/pendientes').query({ limite: '200' }).set('Cookie', cookie);
+
+      expect(bandeja.status).toBe(OK);
+      const filas = (bandeja.body as { pendientes: { id: string; itemNombre: string; articuloNombre: string; precioVigente: string | null }[] }).pendientes;
+      const suya = filas.find((p) => p.id === (pendiente.body as { id: string }).id);
+      expect(suya?.itemNombre).toMatch(/^Harina /u);
+      expect(suya?.articuloNombre).toMatch(/^Saco 2kg /u);
+      expect(suya?.precioVigente).toMatch(/^2\.1/u);
+      expect(filas.map((p) => p.id)).not.toContain((confirmado.body as { id: string }).id);
+    });
+
+    it('la bandeja pagina por cursor: la segunda página empieza después de la primera', async () => {
+      const { itemId, articuloId } = await itemConArticulo();
+      await sugerir({ itemId, purchaseArticleId: articuloId, precio: '1.00', validFrom: ENERO });
+      await sugerir({ itemId, purchaseArticleId: articuloId, precio: '1.10', validFrom: FEBRERO });
+
+      const primera = await request(servidor()).get('/precios/pendientes').query({ limite: '1' }).set('Cookie', cookie);
+      const cursor = (primera.body as { siguiente: string | null }).siguiente;
+      expect(cursor).not.toBeNull();
+
+      const segunda = await request(servidor()).get('/precios/pendientes').query({ limite: '1', despuesDe: cursor ?? '' }).set('Cookie', cookie);
+      const [unica] = (segunda.body as { pendientes: { id: string }[] }).pendientes;
+      expect(unica?.id).not.toBe((primera.body as { pendientes: { id: string }[] }).pendientes[0]?.id);
+      expect((unica?.id ?? '') > (cursor ?? '')).toBe(true);
+    });
+
+    it('los costos a una fecha traen los que tienen precio y aparte los que no', async () => {
+      const conPrecio = await itemConArticulo();
+      const sinPrecio = await itemConArticulo();
+      const sugerido = await sugerir({ itemId: conPrecio.itemId, purchaseArticleId: conPrecio.articuloId, precio: '2.30', validFrom: ENERO });
+      await confirmar((sugerido.body as { id: string }).id);
+
+      const respuesta = await request(servidor()).get('/precios/costos').query({ fecha: MARZO }).set('Cookie', cookie);
+
+      expect(respuesta.status).toBe(OK);
+      const cuerpo = respuesta.body as { costos: { itemId: string; costoNetoDeUso: string }[]; sinPrecio: string[] };
+      expect(cuerpo.costos.find((c) => c.itemId === conPrecio.itemId)?.costoNetoDeUso).toMatch(/^0\.001/u);
+      expect(cuerpo.sinPrecio).toContain(sinPrecio.itemId);
+      expect(cuerpo.costos.map((c) => c.itemId)).not.toContain(sinPrecio.itemId);
+    });
+
+    it('una fecha que no es fecha es 400, no un 404 «sin precio» que mentía (D-16.111)', async () => {
+      const { itemId } = await itemConArticulo();
+      const respuesta = await costo(itemId, 'basura');
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
+
+    it('los ajustes ya no tienen IVA de compra: ni se leen ni se aceptan (D-16.109)', async () => {
+      const actuales = (await request(servidor()).get('/ajustes').set('Cookie', cookie)).body as Cuerpo;
+      expect(Object.keys(actuales)).not.toContain('ivaCompra');
+
+      const respuesta = await request(servidor())
+        .put('/ajustes')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ ...actuales, ivaCompra: '0.15' });
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
     });
   });
 

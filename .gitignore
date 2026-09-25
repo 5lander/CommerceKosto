@@ -26,6 +26,22 @@ Desktop.ini
 .vscode/*
 !.vscode/extensions.json
 
+# Respaldos locales — datos, jamas en el repositorio
+.respaldos/
+
 # Registros locales
 *.log
 npm-debug.log*
+
+# Next.js
+apps/web/.next/
+apps/web/next-env.d.ts
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
+
+# Referencia visual que el usuario dejó para la pasada P16 (docs/Sistema ejemplo/).
+# Es una aplicación ajena, con su propio package.json y lockfile: versionarla
+# metería sus scripts, sus CRLF y sus dependencias bajo los doce checks de un
+# proyecto que no es el suyo. Vive en disco, como el Excel de referencia, y
+# ESTADO.md dice dónde. Se lee; no se importa.
+docs/Sistema ejemplo/

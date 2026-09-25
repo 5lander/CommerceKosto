@@ -27,7 +27,7 @@ Declaradas en `.env.example`. **`.env` nunca se versiona** — lo garantiza `.gi
 | Variable | Obligatoria | Notas |
 |---|---|---|
 | `POSTGRES_DB` | compose | Nombre de la base. Por defecto `costeo` |
-| `POSTGRES_PORT` | compose | Puerto publicado en el host |
+| `POSTGRES_PORT` | compose | Puerto publicado en el host. Si cambia (p. ej. 5442 cuando otro proyecto usa el 5432, D-16.145), las cinco cadenas `localhost:<puerto>` cambian con él: la guardia de las unitarias y `audit:tests` leen el puerto **de las cadenas**, y `npm run doctor` comprueba que contestan |
 | `POSTGRES_SUPERUSER` / `POSTGRES_SUPERUSER_PASSWORD` | compose | Solo para `initdb` y para las aserciones de las pruebas. **La aplicación jamás se conecta con esto** |
 | `COSTEO_MIGRATOR_PASSWORD` | compose | Contraseña de `costeo_migrator`, la usa `initdb` |
 | `COSTEO_APP_PASSWORD` | compose | Contraseña de `costeo_app` |
@@ -45,13 +45,31 @@ Declaradas en `.env.example`. **`.env` nunca se versiona** — lo garantiza `.gi
 | `REQUEST_TIMEOUT_MS` | `15000` | Timeout de petición. Es la **segunda** defensa: la primera es `statement_timeout`, fijado en el rol `costeo_app` |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Ventana del limitador |
 | `RATE_LIMIT_MAX` | `300` | Peticiones por ventana. En P0 el contador vive en memoria del proceso; pasa a Redis en P1 |
+| `APP_URL` | `http://localhost:3001` en desarrollo; **obligatoria en producción** | URL pública del frontend, **sin barra final**. De aquí salen los enlaces de los correos: `APP_URL/activacion?token=…` y `APP_URL/restablecer?token=…` *(P16-A1)* |
+| `HORAS_DE_RESTABLECIMIENTO` | `1` | Cuánto vive un enlace de restablecimiento de contraseña. Entero entre 1 y 24 (D-16.34). La invitación caduca a los siete días y no se configura *(P16-A1)* |
+| `PROXY_DE_CONFIANZA` | vacía | Desde qué direcciones se cree `X-Forwarded-For` (D-16.49): IPv4, redes IPv4 en CIDR o IPv6 exactas, separadas por comas. `ipDelCliente` toma el **último salto** de la cabecera solo si el socket viene de una de ellas; si no, la IP es la del socket. **Vacía = ninguna** (desarrollo). En producción, la IP **fija** de Caddy en la red de compose, `172.28.0.10` (no la subred entera: incluiría la pasarela y los demás contenedores). Se valida **en el campo** (INC-008): una entrada que no es una dirección no arranca. La leen la API (esquema) y el back office (a mano, `proxies-de-confianza.ts`). Es la IP del bloqueo del login, del límite de tasa y del limitador global *(P16-A1)* |
 
 ### Selectores de adaptador (CLAUDE.md §12)
 
 | Selector | Valores | Efecto |
 |---|---|---|
-| `MAIL_ADAPTER` | `fake` \| `real` | Correo transaccional. El real llega en P1 |
+| `MAIL_ADAPTER` | `fake` \| `consola` \| `resend` | Correo transaccional. Lo honra la API (que solo encola en `email_outbox`, ADR-025) y lo **usa** el despachador. `fake` guarda en memoria; `consola` escribe destinatario y asunto por la salida estándar (y el cuerpo entero solo fuera de producción); `resend` envía por `POST https://api.resend.com/emails` y **exige `RESEND_API_KEY` y `RESEND_REMITENTE`**, o el proceso no arranca. En desarrollo, `consola`. La elección vive en un solo sitio, `shared/infrastructure/correo/mailer.provider.ts`, para los dos procesos *(P16-A1)* |
+| `RESEND_API_KEY` · `RESEND_REMITENTE` | — | Solo con `resend`. El remitente (`Nombre <correo@dominio>` o el correo) va con el dominio verificado en Resend (DKIM, SPF, DMARC). Una cadena vacía cuenta como ausente *(P16-A1)* |
 | `STORAGE_ADAPTER` | `fake` \| `real` | Almacenamiento de archivos. El real llega en P10 |
+
+### Despachador de correo (P16-A1, ADR-025)
+
+| Variable | Obligatoria | Notas |
+|---|---|---|
+| `COSTEO_DESPACHADOR_PASSWORD` | compose | Contraseña de `costeo_despachador`. La usa `initdb` en un cluster nuevo y `npm run rol:despachador` en uno que ya existía |
+| `DESPACHADOR_DATABASE_URL` | despachador | Rol `costeo_despachador`, puerto directo (nunca PgBouncer), `connection_limit=2`. **La API no la lee** —su esquema no la conoce— y el despachador **no acepta `DATABASE_URL`**: su esquema propio (`modules/correo/infrastructure/entorno-del-despachador.ts`) rechaza en el campo cualquier usuario que no sea `costeo_despachador` (INC-008). Tres reglas de `audit:forbidden` (`correo.rules.mjs`) impiden nombrarla, nombrar `DespachadorConnection` o importar `CorreoModule` fuera de `modules/correo/`, `despachador.ts` y `test/integracion/correo*.spec.ts` |
+| `MAIL_ADAPTER` (en el despachador) | despachador | Mismos valores que arriba. **En producción `fake` no arranca**: marcaría `ENVIADO` lo que nadie recibió. El servicio `correo` de compose lo toma del `.env` (`consola` si falta); la superposición de producción lo exige |
+| `CORREO_INTERVALO_MS` | despachador (`5000`) | Cada cuánto pasa por la cola. Entero entre 500 y 600000 |
+| `CORREO_LOTE` | despachador (`20`) | Correos por pasada. Entero entre 1 y 500 |
+| `CORREO_LATIDO` | despachador (`<tmpdir>/costeo-correo.latido`) | El archivo que el proceso toca tras cada pasada completa; el `healthcheck` del contenedor lo mira (sano si tiene menos de 60 s). Compose lo fija en `/tmp/costeo-correo.latido` |
+| `CORREO_MINUTOS_DE_ALERTA` | back office (`15`) | A partir de cuántos minutos un `PENDIENTE` cuenta como retrasado en `GET /correo/salud` (D-16.27c). Entero entre 1 y 1440; se lee a mano, como `BACKOFFICE_PORT` |
+
+El despachador es el **tercer binario** (`npm run correo:despachar`, `apps/api/src/despachador.ts`; en compose, el servicio `correo` con la misma imagen que `api` y `command: node apps/api/dist/despachador.js`, `restart: unless-stopped`). Un bucle: una pasada por la cola (`SELECT … FOR UPDATE SKIP LOCKED` + reserva de cinco minutos del lote, **renovada fila a fila justo antes de cada envío** con la firma de la pasada: si otra instancia volvió a tomar la fila, se cede sin enviar; render, envío, marca), purga de `rate_limit_hit` con más de 24 h, latido, espera. `SIGTERM`/`SIGINT` **solo** paran el bucle: la pasada en curso termina, después se cierra el contexto (y con él el pool) y el proceso sale con 0. **No usa `enableShutdownHooks()` de Nest** —cerraría el pool con la pasada a medias y re-emitiría la señal sin receptor, matando el proceso con un correo aceptado por el proveedor y todavía `PENDIENTE`—, y la regla `despachador-sin-ganchos-de-nest` de `audit:forbidden` impide que vuelva. Un fallo de envío se marca y no para la pasada; un fallo al **marcar** un correo ya aceptado sube y corta la pasada sin pasar por `marcarFallo` (la fila queda con su reserva; si la base vuelve antes de que caduque se reenvía una vez: la única ventana de doble envío, de milisegundos). Reintentos con espera 1 → 2 → 4 → 8 min y `FALLIDO` al quinto, con `datos` reemplazado por `{plantilla, destinatario}` al cerrar el correo (D-16.34, D-16.46).
 
 **Con todos los selectores en `fake` el sistema funciona de punta a punta sin una sola credencial real.** Es criterio de aceptación de P0, y CI lo ejecuta: levanta el stack completo con `docker compose` y responde `/health` y `/ready`.
 
@@ -97,9 +115,13 @@ CONNECTION LIMIT                    40
 
 Nueve pruebas de integración verifican contra la base real que no es superusuario, que `rolbypassrls` es falso, que no es dueño de ninguna tabla, que no puede crear ni destruir objetos, que no lee `pg_authid` ni el historial de migraciones, y que sus `DEFAULT PRIVILEGES` son exactamente `SELECT` + `INSERT`.
 
-### `costeo_backoffice` — **no existe todavía**
+### `costeo_backoffice` — el rol que puentea RLS *(desde P11, ADR-017)*
 
-El nombre está reservado. Un rol con login y contraseña que nadie usa es superficie de ataque sin contrapartida: se crea en P11, con su propio ADR.
+Reservado desde P0 y creado en P11: el único con `BYPASSRLS`, `CONNECTION LIMIT 4`, privilegios concedidos tabla por tabla y vivo solo en el proceso del back office (`BACKOFFICE_DATABASE_URL`, `COSTEO_BACKOFFICE_PASSWORD`). Desde P16-A1 tiene además `SELECT` por columnas sobre `email_outbox` —todas menos `datos`— para `GET /correo/salud`. El detalle y las cuatro condiciones, en ADR-017.
+
+### `costeo_despachador` — el proceso que entrega el correo *(P16-A1, ADR-025)*
+
+`NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT`, `CONNECTION LIMIT 2`, mismos timeouts que el back office (`30s / 10s / 3s`). **No puentea RLS**: lo que ve lo ve por una política permisiva sobre exactamente dos tablas —`email_outbox` (`SELECT, UPDATE`) y `rate_limit_hit` (`DELETE`, y `SELECT` solo sobre la columna `at`, lo justo para decidir qué es viejo)— y sobre el resto no tiene ni `SELECT`; una prueba de integración lo comprueba tabla por tabla. Lo crea `roles.sql` en un cluster nuevo y `npm run rol:despachador` (idempotente, no rota la contraseña) en uno que ya estaba en pie; la migración de P16-A1 **falla en alto** si no existe, como hizo P11 con el del back office.
 
 ---
 
@@ -130,7 +152,7 @@ Los parámetros de costeo de `DECISIONES.md` D3. Se siembran al crear el tenant 
 
 | Archivo | Contiene | Desde |
 |---|---|---|
-| `config/branding.ts` | Nombre visible del producto (D1) | P1 |
+| `apps/web/src/textos/es.ts` | Nombre visible del producto y firma verbal (D1, cerrada en P14: **Platise**). El `config/branding.ts` que D1 daba por hecho nunca existió: los textos visibles viven donde los pone D11 | P12 · P14 |
 | **`shared/infrastructure/config/periods.ts`** | **La zona horaria del calendario contable (D6, D11)** | **P7 ✅** |
 | `config/plans.ts` | Límites por plan (D5) | P11 |
 | `config/locale.ts` | Idioma, moneda, zona horaria, formatos (D11) | P1 |
@@ -187,6 +209,15 @@ Viven en el dominio, como constantes con nombre, no en variables de entorno: son
 | Escala de bloqueo | 1 → 5 → 15 → 60 min | ídem |
 | Largo de contraseña | 12–128 | `politica-de-contrasenas.ts` |
 | Caducidad de invitación | 7 días | `usuarios.ts` |
+| Límite de tasa `password.olvido` | IP 10/h · destinatario 3/h | `shared/domain/limite-de-tasa/politicas.ts` (D-16.50) |
+| Límite de tasa `password.restablecimiento` | IP 10/h | ídem |
+| Límite de tasa `usuario.invitar` · `usuario.reenvio` | IP 30/h · destinatario 3/h | ídem |
+| Bloqueo del límite de tasa | 60 min desde el último golpe | ídem; purga de `rate_limit_hit` a las 24 h por el despachador |
+| Golpes que se leen por decisión | `umbral × escalones + 1` | `shared/domain/acceso/politica-de-intentos.ts` (`golpesQueDeciden`) |
+| Reintentos del despachador | espera 1 → 2 → 4 → 8 min; `FALLIDO` al 5.º | `modules/correo/domain/reintentos.ts` (D-16.46) |
+| Reserva de un correo tomado | 5 min, renovada fila a fila antes de cada envío | `modules/correo/infrastructure/prisma-cola-de-correo.ts` |
+| Timeout de envío a Resend | 10 s | `shared/infrastructure/correo/resend-mailer.ts` |
+| Purga de `rate_limit_hit` | golpes de más de 24 h, en cada pasada | `modules/correo/application/despachar-correo.ts` (D-16.28) |
 | Parámetros de Argon2id | m=65536, t=3, p=1 | `argon2-hasher.ts` |
 
 El límite de ubicaciones **sí** es configuración, y por company: `company.max_locations`, con valor por defecto 10 (D5). El plan como entidad llega en P11.

@@ -14,7 +14,7 @@
  * su consulta no devuelve nada.
  */
 
-const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts'];
 const META = ['tools/audit/**', 'apps/*/test/fixtures/**'];
 
 /** Los dos unicos archivos autorizados a tocar el cliente crudo. */
@@ -46,9 +46,19 @@ export const tenantRules = [
       'ya viene atado a una transaccion con su tenant.',
     patron: /from\s+['"][^'"]*generated\/prisma['"]/g,
     incluye: CODIGO,
-    excluye: [...META, 'apps/*/src/shared/infrastructure/persistence/**'],
+    // El back office y el despachador construyen SU PROPIO cliente, con otro
+    // rol y otro pool, y eso es justo lo que SPEC §1 y D-16.23 exigen: procesos
+    // que no comparten conexion. Que puedan instanciarlo no los deja sueltos —
+    // `backoffice.rules.mjs` y `correo.rules.mjs` impiden que esas clases se
+    // nombren fuera de su modulo.
+    excluye: [
+      ...META,
+      'apps/*/src/shared/infrastructure/persistence/**',
+      'apps/*/src/modules/backoffice/infrastructure/backoffice-connection.ts',
+      'apps/*/src/modules/correo/infrastructure/despachador-connection.ts',
+    ],
     desde: 'P1',
-    referencia: 'CLAUDE.md §4.1 · ADR-006',
+    referencia: 'CLAUDE.md §4.1 · ADR-006 · ADR-017 · ADR-025',
   },
   {
     id: 'sin-set-local-a-mano',

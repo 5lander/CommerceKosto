@@ -47,6 +47,7 @@ import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { MOTIVO_TRANSPORTE, SE_EXIGE_EL_PRESUPUESTO } from '../soporte/transporte';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CONTRASENA = 'doce platos servidos';
@@ -105,8 +106,8 @@ describe('rendimiento del consolidado con diez ubicaciones', () => {
     await duena.query(
       `INSERT INTO purchase_article
          (company_id, item_id, name, presentation_amount, presentation_unit,
-          conversion_factor, status)
-       SELECT $1, i.id, 'Presentacion ' || i.name, 1000, 'kg', 1000, 'ACTIVE'
+          conversion_factor, iva_tarifa, status)
+       SELECT $1, i.id, 'Presentacion ' || i.name, 1000, 'kg', 1000, 0.15, 'ACTIVE'
        FROM item i WHERE i.company_id = $1`,
       [company],
     );
@@ -240,7 +241,7 @@ describe('rendimiento del consolidado con diez ubicaciones', () => {
     const respuesta = await request(servidor())
       .post('/auth/login')
       .send({ email: correo, contrasena: CONTRASENA });
-    cookie = (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    cookie = cookieConCsrf(respuesta);
   }, 300_000);
 
   afterAll(async () => {
@@ -270,7 +271,7 @@ describe('rendimiento del consolidado con diez ubicaciones', () => {
       const respuesta = await request(servidor())
         .get('/consolidado')
         .query({ anio: ANIO, mes: MARZO })
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       tiempos.push(performance.now() - inicio);
 
       expect(respuesta.status).toBe(OK);

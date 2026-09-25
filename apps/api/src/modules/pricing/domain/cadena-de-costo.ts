@@ -13,6 +13,11 @@
  * copiadas del SPEC y no derivadas de memoria, y por eso el módulo entero se
  * prueba con la base apagada.
  *
+ * LA PRIMERA LÍNEA NO VIVE AQUÍ SINO EN `shared/domain/iva/neteo.ts` (D-16.40):
+ * desde P16-A1 la necesita también el libro de inventario, que netea el total
+ * de la factura que teclea el bodeguero. Una sola fórmula para los dos, o el
+ * costo del plato y el food cost real dejarían de hablar del mismo número.
+ *
  * **DIVIDIR POR EL RENDIMIENTO ENCARECE**, y es lo que más se lee al revés. No
  * es un descuento: es el costo de comprar producto que se pierde al limpiarlo.
  * Con rendimiento 0.8, cada gramo aprovechable cuesta lo de 1.25 gramos
@@ -30,6 +35,7 @@
  */
 
 import { DIVISION } from '../../../shared/domain/decimal/escalas';
+import { netear } from '../../../shared/domain/iva/neteo';
 import { Money, Ratio } from '../../../shared/domain/money/tipos-monetarios';
 
 export interface EntradaDeCostoDeItem {
@@ -57,9 +63,11 @@ export interface CostoDelItem {
 }
 
 export function costoDelItem(entrada: EntradaDeCostoDeItem): CostoDelItem {
-  const precioNeto = entrada.ivaRecuperable
-    ? entrada.precioDeCompra.dividedBy(entrada.ivaCompra.onePlus(), DIVISION)
-    : entrada.precioDeCompra;
+  const precioNeto = netear({
+    bruto: entrada.precioDeCompra,
+    tarifa: entrada.ivaCompra,
+    recuperable: entrada.ivaRecuperable,
+  });
 
   // El cero significa «sin capturar», no «gratis». Devolverlo es lo que permite
   // que un catálogo a medio llenar se pueda mirar sin que reviente.

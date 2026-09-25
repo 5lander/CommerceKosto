@@ -3,12 +3,14 @@
  *
  * DOS CAMINOS, Y LA DIFERENCIA ES DE SEGURIDAD, NO DE ESTILO:
  *
- *   sin tenant   `buscarCredencial` y `contextoDeSesion`. Son las DOS unicas
- *                lecturas del sistema que ocurren antes de saber el tenant, y
- *                por eso van por funciones `SECURITY DEFINER` con la forma
- *                exacta del hueco: se entra por el correo o por el hash del
- *                token, y sale una fila. No admiten ningun otro filtro, asi
- *                que con ellas no se puede enumerar nada.
+ *   sin tenant   `buscarCredencial` y `contextoDeSesion`, las dos lecturas que
+ *                ocurren antes de saber el tenant; y desde P16-A1
+ *                `solicitarRestablecimiento` y `consumirRestablecimiento`, las
+ *                dos ESCRITURAS que ocurren sin sesion (D-16.47). Todas van
+ *                por funciones `SECURITY DEFINER` con la forma exacta del
+ *                hueco: se entra por el correo o por el hash del token, y
+ *                sale una fila o ninguna. No admiten ningun otro filtro, asi
+ *                que con ellas no se puede enumerar ni reescribir nada mas.
  *
  *   con tenant   todo lo demas. Pasa por `TenantTransaction.run()`, con RLS
  *                filtrando por debajo.
@@ -30,6 +32,10 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 
+import {
+  datosParaGuardar,
+  type CorreoAEncolar,
+} from '../../../shared/application/correo/correo-a-encolar';
 import type { AuditOutcome } from '../../../shared/application/ports/audit-log.port';
 import {
   companyId,
@@ -40,6 +46,7 @@ import {
   type SessionId,
   type UserId,
 } from '../../../shared/domain/identity/identificadores';
+import { escribirEnOutbox } from '../../../shared/infrastructure/persistence/outbox';
 import type { ClienteDeTransaccion } from '../../../shared/infrastructure/persistence/prisma-connection';
 import { TenantTransaction } from '../../../shared/infrastructure/persistence/tenant-transaction';
 import type {
@@ -48,9 +55,24 @@ import type {
   FallosRecientes,
   NuevaSesion,
   RepositorioDeAutenticacion,
+  UsuarioRestablecido,
 } from '../application/ports/repositorio-de-autenticacion.port';
 
 const RESULTADO_FALLIDO = 'failure';
+
+/**
+ * Una funcion `RETURNS void` no devuelve nada que Prisma sepa leer: el motor
+ * falla con «Failed to deserialize column of type 'void'». Se pide `::text`
+ * —una cadena vacia— y se valida como tal: lo que se comprueba no es un valor,
+ * es que la sentencia se ejecuto y devolvio su unica fila.
+ */
+const RESULTADO_DE_SOLICITUD = z.tuple([z.object({ hecho: z.string() })]);
+
+const FILA_DE_RESTABLECIMIENTO = z.object({
+  user_id: z.uuid(),
+  company_id: z.uuid(),
+});
+const RESTABLECIMIENTOS = z.array(FILA_DE_RESTABLECIMIENTO);
 
 const FILA_DE_CREDENCIAL = z.object({
   user_id: z.uuid(),
@@ -73,6 +95,8 @@ const FILA_DE_SESION = z.object({
   permisos: z.array(z.string()),
   ubicaciones: z.array(z.uuid()),
   alcance_company: z.boolean(),
+  ubicaciones_de_company: z.array(z.uuid()),
+  csrf_token: z.string().nullable(),
 });
 
 const CREDENCIALES = z.array(FILA_DE_CREDENCIAL);
@@ -86,6 +110,8 @@ const SESIONES = z.array(FILA_DE_SESION);
 const MOTIVO_LOGIN = 'login: el tenant se DEDUCE de quien entra, asi que no existe todavia';
 const MOTIVO_SESION = 'Barrera 3: el tenant sale de la sesion, y la sesion es lo que se esta resolviendo';
 const MOTIVO_INTENTOS = 'login_attempt no tiene tenant a proposito (ver la migracion de P1)';
+const MOTIVO_RESTABLECIMIENTO =
+  'restablecimiento: ocurre sin sesion; la definer decide si hay usuario y lo atribuye a su company (D-16.47)';
 
 @Injectable()
 export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacion {
@@ -111,10 +137,67 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
     };
   }
 
+  public async solicitarRestablecimiento(entrada: {
+    readonly email: string;
+    readonly tokenHash: string;
+    readonly expiraEn: Date;
+    readonly correo: CorreoAEncolar;
+  }): Promise<void> {
+    // Los datos del correo viajan como texto y se convierten a `jsonb` en la
+    // base: campo a campo, para que nada de mas llegue al outbox.
+    const datos = JSON.stringify(datosParaGuardar(entrada.correo));
+
+    const filas = await this.transaccion.runWithoutTenant(MOTIVO_RESTABLECIMIENTO, async (tx) =>
+      tx.$queryRaw`SELECT password_reset_request(${entrada.email}, ${entrada.tokenHash},
+                                                 ${entrada.expiraEn}::timestamptz, ${datos}::jsonb)::text AS hecho`,
+    );
+
+    RESULTADO_DE_SOLICITUD.parse(filas);
+  }
+
+  public async consumirRestablecimiento(entrada: {
+    readonly tokenHash: string;
+    readonly ahora: Date;
+  }): Promise<UsuarioRestablecido | null> {
+    const filas = await this.transaccion.runWithoutTenant(MOTIVO_RESTABLECIMIENTO, async (tx) =>
+      tx.$queryRaw`SELECT user_id, company_id
+                   FROM password_reset_consume(${entrada.tokenHash}, ${entrada.ahora}::timestamptz)`,
+    );
+
+    const [fila] = RESTABLECIMIENTOS.parse(filas);
+    if (fila === undefined) {
+      return null;
+    }
+
+    return { userId: userId(fila.user_id), companyId: companyId(fila.company_id) };
+  }
+
+  public async correoDelUsuario(entrada: {
+    readonly companyId: CompanyId;
+    readonly userId: UserId;
+  }): Promise<string | null> {
+    return this.transaccion.run(entrada.companyId, async (tx) => {
+      const fila = await tx.appUser.findFirst({
+        where: { id: entrada.userId, companyId: entrada.companyId },
+        select: { email: true },
+      });
+      return fila?.email ?? null;
+    });
+  }
+
+  public async encolarCorreo(entrada: {
+    readonly companyId: CompanyId;
+    readonly userId: UserId;
+    readonly correo: CorreoAEncolar;
+  }): Promise<void> {
+    await this.transaccion.run(entrada.companyId, async (tx) => escribirEnOutbox(tx, entrada));
+  }
+
   public async contextoDeSesion(tokenHash: string): Promise<ContextoDeSesion | null> {
     const filas = await this.transaccion.runWithoutTenant(MOTIVO_SESION, async (tx) =>
       tx.$queryRaw`SELECT session_id, user_id, company_id, created_at, last_seen_at, expires_at,
-                          revoked_at, user_status, company_status, permisos, ubicaciones, alcance_company
+                          revoked_at, user_status, company_status, permisos, ubicaciones,
+                          alcance_company, ubicaciones_de_company, csrf_token
                    FROM session_lookup(${tokenHash})`,
     );
 
@@ -139,6 +222,8 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
       alcance: fila.alcance_company
         ? { clase: 'company' }
         : { clase: 'ubicaciones', ids: fila.ubicaciones.map(locationId) },
+      ubicacionesDeCompany: fila.ubicaciones_de_company.map(locationId),
+      csrfToken: fila.csrf_token,
     };
   }
 
@@ -162,10 +247,13 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
           ? []
           : await tx.loginAttempt.findMany({
               where: { ip, outcome: RESULTADO_FALLIDO, at: { gte: desde } },
-              select: { at: true },
+              select: { at: true, email: true },
             });
 
-      return { porCuenta: porCuenta.map((f) => f.at), porIp: porIp.map((f) => f.at) };
+      return {
+        porCuenta: porCuenta.map((f) => f.at),
+        porIp: porIp.map((f) => ({ at: f.at, email: f.email })),
+      };
     });
   }
 
@@ -197,6 +285,7 @@ export class PrismaAutenticacionRepositorio implements RepositorioDeAutenticacio
           companyId: nueva.companyId,
           userId: nueva.userId,
           tokenHash: nueva.tokenHash,
+          csrfToken: nueva.csrfToken,
           expiresAt: nueva.expiresAt,
           ip: nueva.ip,
           userAgent: nueva.userAgent,

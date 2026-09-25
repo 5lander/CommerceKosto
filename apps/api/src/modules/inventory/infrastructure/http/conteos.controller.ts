@@ -29,6 +29,7 @@ import {
 } from '../../../../shared/domain/identity/identificadores';
 import { Requiere } from '../../../../shared/infrastructure/http/autorizacion';
 import { EsquemaPipe } from '../../../../shared/infrastructure/http/esquema.pipe';
+import { IdentificadorDeRuta } from '../../../../shared/infrastructure/http/identificador-de-ruta.pipe';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
 import { SesionActual } from '../../../iam/infrastructure/http/decoradores';
 import {
@@ -129,7 +130,7 @@ export class ConteosController {
   @Requiere('count.write')
   public async hoja(
     @SesionActual() sesion: SesionActiva,
-    @Param('countId') countId: string,
+    @Param('countId', IdentificadorDeRuta) countId: string,
   ): Promise<HojaDeConteoDto> {
     const hoja = await this.lecturas.hoja.ejecutar(sesion, {
       countId: aPhysicalCountId(countId),
@@ -150,7 +151,7 @@ export class ConteosController {
   @Requiere('count.write')
   public async guardarLineas(
     @SesionActual() sesion: SesionActiva,
-    @Param('countId') countId: string,
+    @Param('countId', IdentificadorDeRuta) countId: string,
     @Body(new EsquemaPipe(CUERPO_DE_LINEAS)) cuerpo: CuerpoDeLineas,
   ): Promise<void> {
     await this.escrituras.lineas.ejecutar(sesion, {
@@ -171,7 +172,7 @@ export class ConteosController {
   @Requiere('count.write')
   public async confirmar(
     @SesionActual() sesion: SesionActiva,
-    @Param('countId') countId: string,
+    @Param('countId', IdentificadorDeRuta) countId: string,
   ): Promise<void> {
     await this.escrituras.confirmar.ejecutar(sesion, { countId: aPhysicalCountId(countId) });
   }
@@ -182,7 +183,7 @@ export class ConteosController {
   @Requiere('count.write', 'period.close')
   public async cerrarPeriodo(
     @SesionActual() sesion: SesionActiva,
-    @Param('countId') countId: string,
+    @Param('countId', IdentificadorDeRuta) countId: string,
   ): Promise<void> {
     await this.escrituras.cierre.ejecutar(sesion, { countId: aPhysicalCountId(countId) });
   }
@@ -202,7 +203,7 @@ export class ConciliacionController {
   @Requiere('count.read')
   public async leer(
     @SesionActual() sesion: SesionActiva,
-    @Param('countId') countId: string,
+    @Param('countId', IdentificadorDeRuta) countId: string,
   ): Promise<ConciliacionDto> {
     const resultado = await this.conciliacion.ejecutar(sesion, {
       countId: aPhysicalCountId(countId),

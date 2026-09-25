@@ -133,12 +133,14 @@ model Company {
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  /// Limite de plan (D5). El plan como entidad llega en P11; hasta entonces el
-  /// limite vive aqui con un valor generoso. Se verifica en el backend desde el
-  /// primer paquete que lo toca, que es este.
-  maxLocations Int @default(10) @map("max_locations")
+  /// El plan que declara los limites (D5). Llego en P11 y SUSTITUYE al antiguo
+  /// `max_locations` de la company: dos sitios donde vive el mismo limite son
+  /// dos sitios que un dia dejan de coincidir.
+  planCode String @default("BASICO") @map("plan_code")
 
   estado                CompanyStatus         @relation(fields: [status], references: [code])
+  plan                  Plan                  @relation(fields: [planCode], references: [code])
+  accesosDeBackoffice   BackofficeAccessLog[]
   settings              CompanySettings?
   locations             Location[]
   usuarios              AppUser[]
@@ -162,8 +164,29 @@ model Company {
   lineasDeConteo        PhysicalCountLine[]
   ventas                ProductSales[]
   costosFijos           FixedCost[]
+  importaciones         ImportJob[]
+  correos               EmailOutbox[]
 
   @@map("company")
+}
+
+/// Los planes de suscripcion y, sobre todo, SUS LIMITES (D5).
+///
+/// LOS TRES LIMITES SE VERIFICAN. Una columna de limite que nadie comprueba es
+/// peor que no tenerla: aparenta una garantia que no existe, y ningun check la
+/// delata — es la leccion de `combo_component`, que estuvo seis paquetes con
+/// lectura y sin escritura sin que nada protestara.
+model Plan {
+  code String @id
+  name String
+
+  maxLocations Int @map("max_locations")
+  maxItems     Int @map("max_items")
+  maxProducts  Int @map("max_products")
+
+  companies Company[]
+
+  @@map("plan")
 }
 
 /// ACTIVE - SUSPENDED - CLOSED
@@ -185,11 +208,11 @@ model CompanySettings {
   companyId String @id @map("company_id") @db.Uuid
 
   ivaVenta             Decimal @map("iva_venta") @db.Decimal(24, 12)
+  /// R13. La TARIFA no vive aqui desde P16-B (D-16.109): es del articulo o del
+  /// grupo del item (D-16.9). La columna `iva_compra` que habia era un valor
+  /// por defecto que P16-A1 dejo de leer, y se retiro para que nadie volviera a
+  /// hacerlo.
   ivaCompraRecuperable Boolean @map("iva_compra_recuperable")
-  /// Tasa de IVA de compra por DEFECTO, la que se propone al capturar un
-  /// precio. La que manda es la de cada `reference_price`: la factura dice cual
-  /// aplico, y en Ecuador el alimento sin procesar es 0 % y el detergente 15 %.
-  ivaCompra            Decimal @map("iva_compra") @db.Decimal(24, 12)
   provisionMerma       Decimal @map("provision_merma") @db.Decimal(24, 12)
   foodCostObjetivo     Decimal @map("food_cost_objetivo") @db.Decimal(24, 12)
   foodCostMaximo       Decimal @map("food_cost_maximo") @db.Decimal(24, 12)
@@ -292,12 +315,16 @@ model AppUser {
   transferencias InventoryTransfer[]
   producciones   InventoryProduction[]
 
-  periodosCerrados   Period[]        @relation("cerro")
-  periodosReabiertos Period[]        @relation("reabrio")
-  conteosCreados     PhysicalCount[] @relation("conteos_creados")
-  conteosConfirmados PhysicalCount[] @relation("conteos_confirmados")
-  ventasCargadas     ProductSales[]
-  costosCargados     FixedCost[]
+  periodosCerrados      Period[]             @relation("cerro")
+  periodosReabiertos    Period[]             @relation("reabrio")
+  conteosCreados        PhysicalCount[]      @relation("conteos_creados")
+  conteosConfirmados    PhysicalCount[]      @relation("conteos_confirmados")
+  ventasCargadas        ProductSales[]
+  importacionesSubidas  ImportJob[]          @relation("importaciones_subidas")
+  importacionesAnuladas ImportJob[]          @relation("importaciones_anuladas")
+  costosCargados        FixedCost[]
+  correos               EmailOutbox[]
+  restablecimientos     PasswordResetToken[]
 
   @@index([companyId, status])
   @@map("app_user")
@@ -389,6 +416,13 @@ model Session {
   ip        String? @db.Inet
   userAgent String? @map("user_agent")
   deviceId  String? @map("device_id") @db.Uuid
+
+  /// Token anti-CSRF de esta sesion, EN CLARO (ADR-021).
+  ///
+  /// Nullable solo por las sesiones abiertas ANTES de P16-A2: una sesion sin
+  /// el se trata como invalida y obliga a volver a entrar. Ninguna sesion
+  /// nueva nace sin token.
+  csrfToken String? @map("csrf_token")
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
   usuario AppUser @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -509,6 +543,10 @@ model ItemGroup {
   id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   companyId String   @map("company_id") @db.Uuid
   name      String
+  /// La tarifa de IVA de compra que heredan los items del grupo cuando la
+  /// compra no trae articulo (P16-A1, D-16.9). `NULL` = «el grupo no define»:
+  /// entonces no hay tarifa y la compra se rechaza. NUNCA se asume una.
+  ivaTarifa Decimal? @map("iva_tarifa") @db.Decimal(24, 12)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
@@ -541,6 +579,10 @@ model Item {
   /// inventario, o si al vender se explota su receta (SPEC §5). NULL para
   /// COMPRADO, y un CHECK lo hace cumplir.
   keepsStock Boolean? @map("keeps_stock")
+
+  /// CONCURRENCIA OPTIMISTA DEL ITEM (P16-B, D-16.100, ADR-023). Sube en cada
+  /// `PUT /catalogo/items/:id`, que exige la version leida.
+  version Int @default(1)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -593,6 +635,16 @@ model PurchaseArticle {
   /// para que el costeo no dependa de leer el catalogo de unidades en cada
   /// consulta.
   conversionFactor Decimal @map("conversion_factor") @db.Decimal(24, 12)
+
+  /// LA TARIFA DE IVA DE COMPRA ES DEL ARTICULO (P16-A1, D-16.9): la factura
+  /// del saco de harina dice 0 % y la del detergente 15 %, y ninguna company
+  /// tiene «una» tarifa. Es el segundo escalon de la precedencia
+  /// cuerpo > articulo > grupo con la que se netea una COMPRA. Obligatoria: un
+  /// articulo sin tarifa es una compra que no se puede netear.
+  ///
+  /// Los articulos anteriores a P16-A1 nacieron con 0.15 de SEMILLA, no de
+  /// verdad (dicho en la migracion): se corrigen por `PUT /catalogo/articulos/:id`.
+  ivaTarifa Decimal @map("iva_tarifa") @db.Decimal(24, 12)
 
   status    String
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -709,7 +761,11 @@ model ReferencePrice {
   /// Igualdad antes que rango, y el rango descendente porque «vigente» es
   /// «el mas reciente que ya empezo».
   @@index([companyId, itemId, validFrom(sort: Desc)])
-  @@index([companyId, status])
+  /// P16-B: con `id` al final. La bandeja de pendientes pagina por cursor
+  /// (`status = SUGGESTED AND id > $cursor ORDER BY id`) y sin él recorría la
+  /// clave primaria entera filtrando por company. El prefijo sigue sirviendo a
+  /// las lecturas por estado de antes.
+  @@index([companyId, status, id])
   @@map("reference_price")
 }
 
@@ -802,6 +858,14 @@ model Product {
   /// Con esto, `empaque_neto` de SPEC §14 es exactamente el `costo_neto_uso`
   /// del item: la misma formula, sin una linea nueva.
   packagingItemId String? @map("packaging_item_id") @db.Uuid
+
+  /// CONCURRENCIA OPTIMISTA DEL AGREGADO PRODUCTO (P16-B, D-16.100, ADR-023).
+  ///
+  /// Sube en cada escritura del maestro, de su configuracion por ubicacion y de
+  /// sus componentes de combo, y cada una exige la version que el formulario
+  /// leyo. Dos personas que editan el mismo producto a la vez no se pisan: la
+  /// segunda recibe 409 en vez de sobrescribir en silencio lo de la primera.
+  version Int @default(1)
 
   company       Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
   tipo          ProductType         @relation(fields: [type], references: [code])
@@ -1042,6 +1106,23 @@ model InventoryMovement {
   /// (SPEC 16) dejaria de cuadrar con lo que el cliente pago.
   totalCost Decimal? @map("total_cost") @db.Decimal(24, 12)
 
+  /// EL DESGLOSE DE IVA DE UNA COMPRA (P16-A1, D-16.10). El bodeguero teclea
+  /// el total de la factura CON IVA (`total_bruto`); la tarifa sale del cuerpo,
+  /// del articulo o del grupo (`iva_tarifa_aplicada`) y la recuperabilidad de
+  /// la company (`iva_recuperable_aplicado`); `total_cost` es el NETO:
+  /// `neto = recuperable ? bruto / (1 + tarifa) : bruto` (SPEC §12).
+  ///
+  /// Son la FOTO del momento de la compra (D-16.42): cambiar el ajuste despues
+  /// no reescribe el libro, que es append-only.
+  ///
+  /// `desglose_conocido = false` es el estado de las COMPRA anteriores a
+  /// P16-A1 y de todo movimiento que no es COMPRA (D-16.18, D-16.25): los tres
+  /// campos van NULL y `total_cost` es lo que se tecleo. NO se rellenan.
+  totalBruto             Decimal? @map("total_bruto") @db.Decimal(24, 12)
+  ivaTarifaAplicada      Decimal? @map("iva_tarifa_aplicada") @db.Decimal(24, 12)
+  ivaRecuperableAplicado Boolean? @map("iva_recuperable_aplicado")
+  desgloseConocido       Boolean  @default(false) @map("desglose_conocido")
+
   /// Para una COMPRA: en que presentacion se compro. Es lo que permite el
   /// desglose por marca del SPEC 7, que es vista informativa y no saldo.
   purchaseArticleId String? @map("purchase_article_id") @db.Uuid
@@ -1055,6 +1136,16 @@ model InventoryMovement {
   /// correccion, y es el UNICO caso en que el signo puede contradecir a la
   /// direccion del tipo — porque su cantidad no la escribe nadie, se deriva.
   reversesMovementId String? @unique @map("reverses_movement_id") @db.Uuid
+
+  /// De que importacion vino esta fila (D-16.200). `null` es lo normal: casi
+  /// todo el libro se escribe a mano. Sin este hilo, anular una importacion
+  /// seria adivinar que filas entraron por el archivo.
+  ///
+  /// LAS ANULACIONES NO LO LLEVAN: la fila de signo contrario no la trajo el
+  /// archivo, y su vinculo con el original ya es `reverses_movement_id`. Si lo
+  /// llevara, «los movimientos de esta importacion» devolveria tambien lo que
+  /// la deshizo, y la segunda anulacion intentaria anular la primera.
+  importJobId String? @map("import_job_id") @db.Uuid
 
   /// Cuando ocurrio en el negocio. Es la fecha que manda para todo informe.
   occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
@@ -1075,6 +1166,7 @@ model InventoryMovement {
   corrige    InventoryMovement?    @relation("correccion", fields: [reversesMovementId], references: [id], onDelete: Restrict)
   correccion InventoryMovement?    @relation("correccion")
   autor      AppUser               @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  importJob  ImportJob?            @relation(fields: [importJobId], references: [id], onDelete: Restrict)
 
   /// CLAUDE.md 5: "movimientos de una ubicacion en un rango de fechas".
   @@index([companyId, locationId, occurredAt])
@@ -1197,6 +1289,11 @@ model Period {
   reopenedBy String?   @map("reopened_by") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// P16-C (D-16.121, ADR-023): la versión de la CARGA DEL MES. La suben solo
+  /// las dos cargas por reemplazo —ventas y costos fijos—, nunca un movimiento,
+  /// el cierre ni la reapertura.
+  version Int @default(1)
 
   company      Company      @relation(fields: [companyId], references: [id], onDelete: Restrict)
   location     Location     @relation(fields: [locationId, companyId], references: [id, companyId], onDelete: Restrict)
@@ -1419,4 +1516,223 @@ model FixedCost {
   @@unique([periodId, concept])
   @@index([companyId, periodId])
   @@map("fixed_cost")
+}
+
+/// El catalogo de estados de una importacion — enum en tabla, no nativo (D5).
+model ImportJobStatus {
+  code String @id
+
+  importaciones ImportJob[]
+
+  @@map("import_job_status")
+}
+
+/// Una importacion: el archivo subido, su analisis y su desenlace.
+///
+/// **EL ANALISIS SE GUARDA, Y ESO ES LA DECISION.** Confirmar NO vuelve a
+/// parsear el archivo: escribe exactamente lo que la previsualizacion enseño.
+/// Volver a parsear seria abrir la puerta a que lo escrito no sea lo visto —el
+/// catalogo pudo cambiar entre medias, y el usuario aprobo una propuesta
+/// concreta, no «lo que salga de este archivo».
+///
+/// Es una CACHE de un analisis, no una fuente de verdad: si se pierde, se
+/// vuelve a subir el archivo. Por eso vive en `jsonb` y no en tablas.
+model ImportJob {
+  id        String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+
+  /// Que se esta importando: ITEMS, ARTICULOS, PRODUCTOS, RECETAS, MOVIMIENTOS.
+  kind   String
+  status String
+
+  /// La clave del archivo en el almacenamiento. **UUID generado por el
+  /// sistema**, nunca el nombre original (SEGURIDAD.md §5.3).
+  storageKey   String @map("storage_key")
+  /// El nombre que trajo el archivo, SOLO para enseñarselo al usuario. No se
+  /// usa para nada mas: no abre ninguna ruta ni decide ningun formato.
+  originalName String @map("original_name")
+  byteSize     Int    @map("byte_size")
+
+  /// El analisis completo. `null` mientras no se ha analizado.
+  analysis Json? @db.JsonB
+
+  /// Cuantas filas se escribieron al confirmar. `null` si no se confirmo.
+  writtenRows Int? @map("written_rows")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String    @map("created_by") @db.Uuid
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+
+  /// Quien la deshizo y cuando (D-16.200). `ANULADA` si y solo si hay fecha, y
+  /// el autor va con ella: poder deshacer sin dejar dicho quien deshizo seria
+  /// media funcion.
+  voidedAt DateTime? @map("voided_at") @db.Timestamptz(6)
+  voidedBy String?   @map("voided_by") @db.Uuid
+
+  company  Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  autor    AppUser         @relation("importaciones_subidas", fields: [createdBy], references: [id], onDelete: Restrict)
+  anulador AppUser?        @relation("importaciones_anuladas", fields: [voidedBy], references: [id], onDelete: Restrict)
+  estado   ImportJobStatus @relation(fields: [status], references: [code])
+
+  /// Las filas del libro que trajo. La anulacion las lee por aqui.
+  movimientos InventoryMovement[]
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("import_job")
+}
+
+// ============================================================================
+// BACK OFFICE (P11)
+//
+// TRES TABLAS QUE LA APLICACION CLIENTE NO PUEDE TOCAR NI PARA LEER. No es una
+// cuestion de permisos de aplicacion: `costeo_app` no tiene politica RLS ni
+// GRANT sobre ninguna de ellas, asi que la barrera es de base de datos.
+//
+// Y NO LLEVAN `company_id` COMO LLAVE DE AISLAMIENTO, a diferencia de todas las
+// demas: un operador de back office no pertenece a ningun tenant. Que no
+// pertenezca es justamente lo que le permite mirar a todos, y lo que obliga a
+// que cada mirada quede registrada con su motivo.
+// ============================================================================
+
+/// Un operador del back office. NO es un `AppUser`: no tiene company.
+model BackofficeUser {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  status       String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sesiones BackofficeSession[]
+  accesos  BackofficeAccessLog[]
+
+  @@map("backoffice_user")
+}
+
+model BackofficeSession {
+  id         String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  ip         String?   @db.Inet
+  userAgent  String?   @map("user_agent")
+
+  /// Token anti-CSRF del operador, EN CLARO. Mismo criterio que `Session`.
+  csrfToken String? @map("csrf_token")
+
+  usuario BackofficeUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, expiresAt])
+  @@map("backoffice_session")
+}
+
+/// El registro append-only de TODO acceso cross-tenant (CLAUDE.md §4.2).
+///
+/// `reason` es NOT NULL con longitud minima en un CHECK, y eso es el corazon de
+/// la tabla: un motivo opcional se deja vacio, y un registro sin motivo no
+/// responde la unica pregunta que un log de acceso privilegiado existe para
+/// responder. La base lo exige; no es una convencion de la aplicacion.
+model BackofficeAccessLog {
+  id         String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+  operatorId String   @map("operator_id") @db.Uuid
+  /// `null` solo en las acciones que no miran a un tenant concreto (listar).
+  companyId  String?  @map("company_id") @db.Uuid
+  action     String
+  reason     String
+  ip         String?  @db.Inet
+
+  operador BackofficeUser @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+  company  Company?       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  @@index([at(sort: Desc)])
+  @@index([companyId, at(sort: Desc)])
+  @@map("backoffice_access_log")
+}
+
+// ============================================================================
+// P16-A1 — Correo transaccional y limite de tasa (ADR-025, ADR-026).
+//
+// TRES TABLAS, Y NINGUNA ES DE NEGOCIO EN EL SENTIDO DE LAS DEMAS:
+//
+//   email_outbox           la cola. La API ENCOLA dentro de la misma transaccion
+//                          que crea la invitacion o el token; un proceso aparte
+//                          —el despachador, con su propio rol— entrega y marca.
+//   password_reset_token   el token de restablecimiento, hasheado. La aplicacion
+//                          NO tiene politica sobre esta tabla: solo la tocan las
+//                          dos funciones SECURITY DEFINER que escriben.
+//   rate_limit_hit         los contadores del limite de tasa por IP y por
+//                          destinatario. Sin tenant, como `login_attempt`.
+// ============================================================================
+
+/// Un correo pendiente de entrega, o ya entregado.
+///
+/// `datos` LLEVA EL ENLACE CON EL TOKEN EN CLARO MIENTRAS EL CORREO ESTA EN
+/// VUELO, y solo entonces (D-16.34): al marcar `ENVIADO`, o `FALLIDO` tras el
+/// tope de reintentos, el despachador lo reemplaza por `{plantilla,
+/// destinatario}`. Ninguna lectura de esta tabla devuelve `datos` a un cliente.
+///
+/// `companyId` es anulable porque un restablecimiento se pide sin sesion; lo
+/// rellena la funcion definer con la company del usuario que lo pidio.
+model EmailOutbox {
+  id                 String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  companyId          String?   @map("company_id") @db.Uuid
+  userId             String?   @map("user_id") @db.Uuid
+  destinatario       String
+  /// INVITACION · RESTABLECIMIENTO · BLOQUEO (el aviso del login; sin `datos`)
+  plantilla          String
+  datos              Json      @db.JsonB
+  /// PENDIENTE · ENVIADO · FALLIDO
+  estado             String
+  intentos           Int       @default(0)
+  error              String?
+  /// Espera exponencial entre reintentos (1 → 2 → 4 → 8 min). NULL = ya.
+  siguienteIntentoEn DateTime? @map("siguiente_intento_en") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt             DateTime? @map("sent_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  usuario AppUser? @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([estado, siguienteIntentoEn, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("email_outbox")
+}
+
+/// El token de restablecimiento de contrasena, HASHEADO, de un solo uso.
+///
+/// LA APLICACION NO LO VE. No hay politica para `costeo_app` y sus privilegios
+/// estan revocados: la unica forma de crear uno es `password_reset_request` y
+/// la unica de gastarlo es `password_reset_consume`, las dos funciones definer
+/// que escriben (D-16.47). Ni un `SELECT` por descuido puede enumerarlos.
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  usuario AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("password_reset_token")
+}
+
+/// Un golpe al limite de tasa. Sin tenant a proposito, como `login_attempt`:
+/// el que pide un restablecimiento no tiene sesion, y la IP no es de nadie.
+///
+/// `clave` es `ip:<ip>` o `correo:<sha256>`: no se guardan correos de
+/// desconocidos (D-16.50). Los borra el despachador en cada pasada (D-16.28).
+model RateLimitHit {
+  id    String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  /// password.olvido · password.restablecimiento · usuario.invitar · usuario.reenvio
+  kind  String
+  clave String
+  at    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([kind, clave, at(sort: Desc)])
+  @@map("rate_limit_hit")
 }

@@ -207,6 +207,28 @@ operador del back office.
 con previsualización, detección de duplicados por similitud ("Tomate riñón" / "tomate
 riñon" / "TOMATE") y resolución de unidades **antes** de escribir.
 
+### 10.1 Toda importación que escribe en el libro se deshace COMO IMPORTACIÓN (D-16.200)
+
+Un archivo de movimientos mal armado —el mes cambiado, la cantidad en la unidad que no era, el
+archivo de la otra sucursal— deja cientos de filas en un libro que **no se edita** (R3).
+Corregirlas de una en una desde la pantalla, sabiendo cuáles son, no es un procedimiento: es una
+forma de dejar el saldo mal para siempre en cuanto alguien se salte una.
+
+| Regla | |
+|---|---|
+| **Cada movimiento sabe de qué importación vino** | `inventory_movement.import_job_id`. Sin ese hilo no hay forma de saber qué filas deshacer |
+| **Deshacer es escribir, nunca borrar** | `POST /importaciones/:id/anulacion` emite los movimientos de signo contrario **en una sola transacción** (R3). Media importación deshecha no existe |
+| **El mes cerrado sigue mandando** | La fila contraria conserva la fecha de la original, así que una importación que cayó en un mes cerrado se detiene con **409** y su motivo. Para deshacerla hay que reabrir el mes, que es una decisión con dueño |
+| **La importación queda `ANULADA`** | Es un estado, no un borrado: el rastro de lo que pasó —quién la subió, qué decía el análisis, quién la deshizo y cuándo— se conserva entero |
+| **Solo la de MOVIMIENTOS** | Deshacer una importación de ítems o de recetas no es escribir la fila contraria: es borrar catálogo del que ya cuelgan precios, recetas y movimientos. Eso se mira caso por caso, no en un endpoint. El resto recibe 409 con el motivo |
+| **Reintentarla es seguro** | Lo ya corregido se salta, así que una caída entre las dos escrituras se arregla volviendo a lanzarla |
+
+**Permiso: `import.write`** — el mismo que escribir. Quien puede meter un archivo entero en el libro
+puede sacarlo; pedir otro obligaría a llamar a alguien para arreglar lo que uno acaba de romper.
+
+> **Esta regla es de la importación, no del endpoint**: cuando §24 (importación desde la UI, P20)
+> se escriba, la hereda tal cual y le añade su pantalla.
+
 **Unidades vendidas: digitación manual en Fase 1.** Decisión confirmada.
 
 > **Riesgo de producto.** De este único dato dependen tres de las seis vistas (menu
@@ -228,7 +250,7 @@ Toda la lógica lee de aquí. En el SaaS son configuración **por company**.
 | Parámetro | Valor en el Excel | Uso |
 |---|---|---|
 | IVA de venta | 0.15 | Los PVP están CON IVA. El food cost se calcula sobre venta neta. |
-| IVA de compra recuperable | SI | Si SI, el IVA pagado no es costo. Si NO, el costo sube. |
+| IVA de compra recuperable | SI | Si SI, el IVA pagado no es costo. Si NO, el costo sube. **Es el único parámetro de IVA de compra que vive en la company** (R13). |
 | Provisión de merma no atribuible | 0.02 | Solo lo que el rendimiento por ingrediente NO explica. |
 | Food cost objetivo mínimo | 0.25 | |
 | Food cost máximo aceptable | 0.32 | Sobre esto, semáforo rojo. |
@@ -237,6 +259,14 @@ Toda la lógica lee de aquí. En el SaaS son configuración **por company**.
 | Días operativos al mes | 22 | |
 | Días de cobertura objetivo | 7 | Define el punto de reorden. |
 | Regla de popularidad | 0.70 | Estándar Kasavana-Smith. |
+
+> **La TARIFA de IVA de compra NO es un parámetro de la company** (P16-A1, D-16.9). El Excel
+> la traía por insumo en `T1`, y en el SaaS vive en **dos niveles**: en el **artículo de compra**
+> (obligatoria: la factura del saco de harina dice 0 % y la del detergente 15 %) y, para las
+> compras sin artículo, en el **grupo del ítem** (opcional). Por encima de los dos, la que traiga
+> la propia petición o fila del archivo. **Nunca hay un valor por defecto**: sin tarifa en ningún
+> nivel, la compra —o el precio de referencia— se rechaza y el mensaje dice dónde ponerla.
+> `company_settings.iva_compra` dejó de leerse (D-16.43) y se retira en P16-B.
 
 > **Por qué la merma es 2% y no 4%** (nota del autor en el Excel): antes un único 4%
 > cubría cáscara, hoja botada, derrame y error de pase. Ahora cada insumo declara su
@@ -254,6 +284,33 @@ sobrecosto_merma = costo_neto_uso - costo_bruto_uso
 
 Dividir por el rendimiento **encarece** el insumo: es el costo de comprar producto que
 se pierde al limpiarlo.
+
+**De dónde salen `iva_compra` e `iva_recuperable` (P16-A1, D-16.9):**
+
+```
+iva_compra      = tarifa de la petición ?? tarifa del artículo de compra ?? tarifa del grupo del ítem
+                  (sin ninguna: ERROR — nunca se asume una tarifa)
+iva_recuperable = company_settings.iva_compra_recuperable   (R13; nunca por ítem)
+```
+
+**Una preparación (`PRODUCIDO`) no entra en esa precedencia: su `iva_compra` es 0** (D-16.51). Su
+precio de referencia es el costo estándar por unidad de uso (R10), que ya es neto —sale de insumos
+neteados uno a uno— y netearlo otra vez lo dejaría dividido entre `1 + tarifa`. Nace con 0 ignore lo
+que diga su grupo; cualquier otra tarifa en la petición o en la fila se rechaza.
+
+**La misma primera línea netea el libro de inventario.** El bodeguero teclea el **total de la
+factura con IVA** (`total_bruto`), y cada `COMPRA` persiste los cuatro importes (D-16.10):
+
+```
+total_cost               = iva_recuperable ? total_bruto / (1 + iva_compra) : total_bruto
+iva_tarifa_aplicada      = iva_compra en el momento de la compra
+iva_recuperable_aplicado = iva_recuperable en el momento de la compra
+desglose_conocido        = true
+```
+
+Son la **foto del momento**: cambiar el ajuste después no reescribe el libro (D-16.42). Las
+`COMPRA` anteriores a P16-A1 quedan con `desglose_conocido = false` y `total_cost` tal como se
+tecleó; no se rellenan (D-16.18). `compras_del_mes` (§16) sigue sumando `total_cost`.
 
 ```
 consumo_teorico_mes = Σ(consumo_mes de las líneas de receta que usan este ítem)
@@ -299,6 +356,13 @@ impacto_merma = costo_bruto_lote = 0 ? null : costo_neto_lote / costo_bruto_lote
 venta_neta_mes = venta_neta × unidades_mes
 mc_mes         = margen_contribucion × unidades_mes
 ```
+
+**Sin receta no hay costo, aunque la suma dé cero** *(P16-D, decisión del usuario)*. Si el producto no
+tiene ninguna línea `ACTIVA` en la ubicación —no hay receta, está vacía o todas sus líneas están
+excluidas— o, en un combo, ningún componente, las fórmulas de arriba dan cero y **eso no es un costo**.
+El resultado lleva la marca `sin_receta` y el semáforo del food cost es «sin dato». Ninguna fórmula
+cambia: cambia que se dice. Qué hacen con esos platos la ingeniería de menú, el food cost real y el
+consolidado está abierto (duda #13 de `ESTADO.md`).
 
 ## 15. Menu engineering (V_MENU_ENGINEERING · Kasavana-Smith)
 

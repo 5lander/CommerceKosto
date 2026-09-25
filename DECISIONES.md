@@ -6,13 +6,25 @@
 
 ---
 
-## D1 — Nombre del proyecto 🟡
+## D1 — Nombre del proyecto ✅
 
-**Valor provisional:** `costeo-saas` como nombre de trabajo del repositorio y los paquetes.
+**Cerrada en P14, el 2026-09-08, leyendo el manual de marca. El producto se llama PLATISE.**
 
-No hay nombre comercial definido. **No inventar branding.** Usar el nombre de trabajo en código y rutas; los textos visibles al usuario que necesiten el nombre del producto leen de `config/branding.ts`, con el valor provisional `"Costeo"`.
+El valor provisional era `"Costeo"`, con esta nota: *«No hay nombre comercial definido. **No inventar branding.**»* Y era falsa desde antes de que empezara el proyecto: `docs/Manual de Marca/platise-brand-book.pdf` se titula **Manual de marca PLATISE**, cierra con «PLATISE · MANUAL DE MARCA V3.0 · AGOSTO 2026» y su capítulo digital lleva el dominio **platise.ec**. El nombre estaba definido; lo que faltaba era abrir el archivo.
 
-Destranca: dominio, marca, correo transaccional. Ver `docs/FASE0-CHECKLIST.md` A1.
+Usarlo no contradice la nota: `CLAUDE.md` §10 declara ese manual **fuente única** de la identidad, así que tomar el nombre de ahí es leerlo, no inventarlo.
+
+| Qué | Valor | Dónde |
+|---|---|---|
+| Nombre del producto | **Platise** | `apps/web/src/textos/es.ts` → `TEXTOS.producto` |
+| Firma verbal | **«El margen, plato por plato.»** | `TEXTOS.firma`. Va **sin cifra**: el manual (p. 11) dice que «un precio caduca y convierte la firma en promoción» |
+| Dominio | `platise.ec` | Manual, capítulo 6 |
+
+**Lo que NO cambia:** el repositorio, los paquetes de npm y las rutas del código siguen siendo `costeo-saas` / `@costeo/*`. Renombrarlos no aporta nada al cliente y tocaría el `docker-compose`, los roles de base de datos (`costeo_app`, `costeo_migrator`, `costeo_backoffice`) y las cadenas de conexión. **El nombre comercial es un texto visible; el nombre de trabajo es infraestructura.**
+
+**Y no existe `config/branding.ts`.** El valor provisional lo daba por hecho; los textos visibles viven en `textos/es.ts` desde la Fase C, que es donde D11 los pone. Se deja dicho para que nadie lo busque.
+
+Sigue destrancado y sigue siendo trabajo de negocio, no de código: el registro en SENADI (clases 9 y 42) está en la lista de pendientes del propio manual, p. 36.
 
 ---
 
@@ -116,23 +128,55 @@ Valores confirmados, tomados del Excel original. **Son configuración por compan
 
 ---
 
-## D4 — Qué representa el tipo `LNK` en T1 del Excel 🔴
+## D4 — Qué representa el tipo `LNK` en T1 del Excel ✅
 
-**Bloquea:** la migración de datos desde el Excel (no bloquea P0–P8).
+**Resuelta en P10, el 2026-09-07, leyendo el archivo.** El detalle completo, con las fórmulas como
+evidencia, está en **`docs/decisiones/ADR-014`**.
 
-Cuatro filas de `T1_INSUMOS` están marcadas `LNK` y el LEEME no las documenta. Los otros tres tipos sí están resueltos: `INS` → ítem comprado, `SUB` → ítem producido, `SUP` → nivel de confianza del precio.
+**`LNK` no es un tipo de insumo: es el apaño con el que el Excel armaba un COMBO.** La celda de
+precio de esas cuatro filas no contiene un precio, contiene
+`=INDEX(V_COSTEO!$H, MATCH("<código>", V_COSTEO!$B))` — el *costo neto por porción* de un **producto
+de venta**. Y las cuatro se usan en una única línea de receta, tres de ellas de un producto de la
+categoría `COMBOS UNIVERSITARIOS`.
 
-Hasta tener respuesta: **no modelar nada para `LNK`.** Si aparece al importar, se rechaza la fila con un error explícito y se pregunta.
+En una hoja, un producto solo puede tener ingredientes; para meter un plato dentro de otro hay que
+disfrazar el plato de ingrediente. **Este sistema no lo necesita**: SPEC §8 modela `COMBO` con
+componentes que son productos simples, y ADR-008 §14 fija que el combo suma componentes **ya
+costeados**. Un `LNK` se traduce a una fila de `combo_component`, nunca a un ítem — hacerlo como ítem
+congelaría un costo derivado y cobraría la merma dos veces (R12).
+
+Queda cerrado también el resto de la columna: `INS` → `COMPRADO` con confianza `FACTURA`; **`SUP` →
+`COMPRADO` con confianza `ESTIMADO`** (es un precio *supuesto*, y sus 8 filas son estructuralmente
+idénticas a las `INS`); `SUB` → `PRODUCIDO`.
+
+**Lo que el hallazgo destapó:** `combo_component` existía desde P4 y **nadie la había escrito nunca**.
+Un combo se podía crear y jamás componer, y costaba cero. P10 abrió esa ruta.
+
+Dos de las cuatro filas tienen defecto propio y se tratan aparte: **INS-149** enlaza a un producto
+que no existe y el `IFERROR` lo vuelve **0** —se rechaza, un cero es un número que entra en un
+margen—, e **INS-090** está marcada `LNK` sin enlazar nada, así que es un `INS` mal tipado.
 
 ---
 
-## D5 — Modelo de suscripción y precios 🟡
+## D5 — Modelo de suscripción y precios ✅ *(implementada en P11)*
 
-**Valor provisional:** suscripción mensual por company con límite de ubicaciones incluidas. Estructura de tres planes, sin precios definidos.
+**Cerrada en la parte que es código; los precios siguen sin definir, que es otra decisión.**
 
-En código: la company tiene un `plan_id` y el plan declara límites (`max_locations`, `max_items`, `max_products`). Los límites se **verifican en el backend** desde el primer paquete que los toque, con valores generosos por defecto.
+La tabla `plan` existe con los tres planes —`BASICO`, `PROFESIONAL`, `CADENA`— y `company.plan_code` apunta a ella. **`company.max_locations` desapareció:** dos sitios donde vive el mismo límite son dos sitios que un día dejan de coincidir.
 
-No implementar cobro, pasarela ni facturación en este proyecto. Ver D9.
+Los tres límites que esta decisión nombraba **se verifican de verdad**, y eso era la mitad que faltaba:
+
+| Límite | Dónde se hace cumplir |
+|---|---|
+| `max_locations` | `CrearUbicacion` (desde P1, ahora leyendo del plan) |
+| `max_items` | `CrearItem` y `CrearItemsEnLote` |
+| `max_products` | `CrearProducto` y `CrearProductosEnLote` |
+
+Los tres con candado sobre la fila de `company` dentro de la transacción que inserta (`shared/infrastructure/persistence/limites-del-plan.ts`). Una columna de límite que nadie comprueba aparenta una garantía que no existe, y ningún check la delata — es lo que le pasó a `combo_component` durante seis paquetes.
+
+`BASICO` lleva **exactamente 10 ubicaciones** a propósito: era el `DEFAULT` de la columna que sustituye, así que ninguna company existente vio cambiar su límite.
+
+No hay cobro, pasarela ni facturación, y sigue sin haberlos. Ver D9.
 
 ---
 
@@ -214,13 +258,37 @@ No diseñar la integración. Solo no cerrarle la puerta.
 
 ---
 
-## D10 — Hosting y despliegue 🟡
+## D10 — Hosting y despliegue ✅
 
-**Valor provisional:** contenedores sobre AWS, con PostgreSQL gestionado. La decisión concreta de servicio se posterga al paquete de endurecimiento.
+**Resuelta en la Fase B, el 2026-09-08. El detalle completo está en `docs/decisiones/ADR-016`.**
 
-Consecuencia obligatoria desde P0: **nada específico de proveedor en el código de aplicación.** Almacenamiento de archivos y correo van tras puerto con fake.
+**Un único VPS en Hostinger corriendo el `docker-compose` del proyecto: PostgreSQL, PgBouncer y la
+API en la misma máquina.** El valor provisional decía «contenedores sobre AWS con PostgreSQL
+gestionado»; se decidió distinto, y estas son las tres razones:
+
+1. **El arranque de roles funciona tal cual está probado.** `docker/postgres/initdb/` crea
+   `costeo_migrator` y `costeo_app` y aplica `grants.sql`. Ese hook **solo existe si la base es
+   nuestra**: con un gestionado hay que reescribirlo como script de arranque — código nuevo, no
+   probado, en la pieza de la que depende la Barrera 1 entera.
+2. **PgBouncer es el nuestro, en modo transacción**, que es exactamente contra lo que
+   `pgbouncer.spec.ts` demuestra la cuarta condición de D12.
+3. **Con un cliente, lo que importa es poder arreglarlo a las once de la noche**, y eso es
+   `docker compose logs`, no una consola con VPC, IAM y grupos de parámetros.
+
+**Lo que se pierde, registrado como decisión y no como olvido:** no hay failover, los parches del
+sistema son nuestros, y **el respaldo es nuestro**. Los de Hostinger son semanales y del VPS entero;
+el libro de inventario es append-only y no se reconstruye desde ningún otro sitio. Por eso la
+decisión viene con una condición no opcional: **`pg_dump` diario más archivado de WAL fuera de la
+máquina, con restauración probada** (`scripts/respaldo.mjs`).
+
+**Se revisa** con el segundo cliente de pago, con más de diez ubicaciones en una company, tras
+cualquier caída que cueste datos, o en P15 — lo que llegue antes.
+
+Consecuencia obligatoria desde P0, que no cambia: **nada específico de proveedor en el código de
+aplicación.** Almacenamiento de archivos y correo van tras puerto con fake.
 
 ---
+
 
 ## D11 — Idioma y localización 🟡
 
@@ -235,5 +303,5 @@ Los textos visibles viven en archivos de recursos desde el primer componente, au
 - Claude Code **usa estos valores sin preguntar** mientras estén en 🟡
 - Si una tarea exige decidir algo que **no está aquí ni en el SPEC** → se agrega a `ESTADO.md` como duda, se elige la opción **más conservadora y configurable**, y se deja registrado
 - El usuario cambia 🟡 → ✅ al confirmar, o corrige el valor
-- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ver ADR-001); el único 🔴 vivo es **D4** (qué representa `LNK`), que bloquea la migración de datos reales pero no P0–P8
+- Los 🔴 sí detienen. **D2 quedó resuelta en P0** (ADR-001), **D4 en P10** (ADR-014) y **D1 en P14** (ADR-019): **no queda ningún 🔴 vivo, y de las doce decisiones solo D6, D7, D9 y D11 siguen en 🟡**
 - D12 (ORM) quedó confirmada en Prisma. Sus cuatro condiciones se verifican al cerrar P1.

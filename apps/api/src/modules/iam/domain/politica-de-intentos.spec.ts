@@ -10,6 +10,7 @@ import {
   bloqueoEfectivo,
   cruzaUmbralDeBloqueo,
   evaluarIntentos,
+  evaluarRociadoPorIp,
   type DecisionDeAcceso,
 } from './politica-de-intentos';
 
@@ -22,7 +23,7 @@ function fallos(...minutosAtras: readonly number[]): Date[] {
 }
 
 function evaluar(lista: readonly Date[], ahora: Date = AHORA) {
-  return evaluarIntentos({ fallos: lista, ahora, eje: 'cuenta' });
+  return evaluarIntentos({ fallos: lista, ahora });
 }
 
 describe('evaluarIntentos', () => {
@@ -157,24 +158,85 @@ describe('cruzaUmbralDeBloqueo', () => {
   });
 });
 
-describe('el umbral depende del eje', () => {
+describe('la cuenta se bloquea; la IP solo se limita (D-16.196)', () => {
   /** Cinco fallos, todos ahora mismo: el bloqueo cuenta desde el ultimo. */
   const CINCO = fallos(0, 0, 0, 0, 0);
 
+  /** `cuentas` correos distintos, `porCuenta` fallos cada uno, hace `hace` minutos. */
+  const desdeUnaIp = (cuentas: number, porCuenta = 1, hace = 0): { at: Date; email: string }[] =>
+    Array.from({ length: cuentas }, (_, n) =>
+      Array.from({ length: porCuenta }, () => ({
+        at: new Date(AHORA.getTime() - hace * MINUTO),
+        email: `empleado${String(n)}@snacklab.ec`,
+      })),
+    ).flat();
+
   it('cinco fallos bloquean una CUENTA', () => {
-    expect(evaluarIntentos({ fallos: CINCO, ahora: AHORA, eje: 'cuenta' }).permitido).toBe(false);
+    expect(evaluarIntentos({ fallos: CINCO, ahora: AHORA }).permitido).toBe(false);
   });
 
-  it('los mismos cinco NO bloquean una IP: detras hay una cocina entera', () => {
-    // Con el umbral de cuenta, cinco errores repartidos entre cinco empleados
-    // del mismo local dejarian al LOCAL COMPLETO fuera, y la escalada lo
-    // mantendria una hora. Cualquiera podria dispararlo desde la acera.
-    expect(evaluarIntentos({ fallos: CINCO, ahora: AHORA, eje: 'ip' }).permitido).toBe(true);
+  /**
+   * 🔴 Lo que hacia antes el eje de IP contando FALLOS: una sola cuenta —mil
+   * intentos de un cocinero con la contrasena vieja— dejaba fuera a todo el que
+   * saliera por esa IP. Su cuenta ya esta bloqueada por su propio eje.
+   */
+  it('🔴 mil fallos de UNA cuenta no limitan la IP', () => {
+    expect(evaluarRociadoPorIp({ fallos: desdeUnaIp(1, 1000), ahora: AHORA }).permitido).toBe(true);
   });
 
-  it('veinticinco si bloquean la IP: eso ya es rociado de contrasenas', () => {
-    const veinticinco = fallos(...Array.from({ length: 25 }, () => 0));
+  it('cinco empleados equivocados tampoco: detras de una IP hay una cocina entera', () => {
+    expect(evaluarRociadoPorIp({ fallos: desdeUnaIp(5), ahora: AHORA }).permitido).toBe(true);
+  });
 
-    expect(evaluarIntentos({ fallos: veinticinco, ahora: AHORA, eje: 'ip' }).permitido).toBe(false);
+  /**
+   * 🔴 D-16.199. El umbral se calibra para lo COMPARTIDO: doce cuentas
+   * distintas fallando en una hora las junta cualquier lunes por la manana
+   * detras de un CGNAT o del wifi de un centro comercial. Si eso limitara, el
+   * eje volveria a ser lo que INC-027 quito: una denegacion de servicio para
+   * terceros.
+   */
+  it('🔴 doce cuentas distintas con un fallo cada una NO limitan la IP', () => {
+    const limite = evaluarRociadoPorIp({ fallos: desdeUnaIp(12), ahora: AHORA });
+
+    expect(limite.permitido).toBe(true);
+    expect(limite.cuentasDistintas).toBe(12);
+  });
+
+  it('🔴 cincuenta si limitan: eso ya es rociado de contrasenas', () => {
+    const limite = evaluarRociadoPorIp({ fallos: desdeUnaIp(50), ahora: AHORA });
+
+    expect(limite.permitido).toBe(false);
+    expect(limite.cuentasDistintas).toBe(50);
+  });
+
+  /**
+   * 🔴 Cuentas, NUNCA intentos (D-16.199): diez correos insistiendo cuarenta
+   * veces cada uno son cuatrocientos fallos y siguen siendo diez cuentas. Si
+   * alguien vuelve a contar intentos, esta se pone en rojo.
+   */
+  it('🔴 cuatrocientos fallos de diez cuentas siguen siendo diez cuentas', () => {
+    const limite = evaluarRociadoPorIp({ fallos: desdeUnaIp(10, 40), ahora: AHORA });
+
+    expect(limite.cuentasDistintas).toBe(10);
+    expect(limite.permitido).toBe(true);
+  });
+
+  it('🔴 y NO escala: cien cuentas esperan lo mismo que cincuenta', () => {
+    const cincuenta = evaluarRociadoPorIp({ fallos: desdeUnaIp(50), ahora: AHORA });
+    const cien = evaluarRociadoPorIp({ fallos: desdeUnaIp(100), ahora: AHORA });
+
+    expect(cien.hasta?.getTime()).toBe(cincuenta.hasta?.getTime());
+  });
+
+  it('el enfriamiento son quince minutos desde el ultimo fallo, y luego se pasa', () => {
+    const recien = evaluarRociadoPorIp({ fallos: desdeUnaIp(50, 1, 14), ahora: AHORA });
+    const pasado = evaluarRociadoPorIp({ fallos: desdeUnaIp(50, 1, 16), ahora: AHORA });
+
+    expect(recien.permitido).toBe(false);
+    expect(pasado.permitido).toBe(true);
+  });
+
+  it('fuera de la ventana de una hora, las cuentas ya no cuentan', () => {
+    expect(evaluarRociadoPorIp({ fallos: desdeUnaIp(50, 1, 61), ahora: AHORA }).permitido).toBe(true);
   });
 });

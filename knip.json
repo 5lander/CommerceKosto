@@ -13,9 +13,25 @@
         ".dependency-cruiser.cjs"
       ]
     },
+    "apps/web": {
+      "entry": [
+        "src/app/**/{page,layout,loading,error,not-found,route,template}.tsx",
+        "src/**/*.spec.ts",
+        "next.config.ts"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
+    },
     "apps/api": {
       "entry": [
         "src/main.ts",
+        "src/cli.ts",
+        "src/bench.ts",
+        "src/backoffice.ts",
+        "src/despachador.ts",
+        "src/navegador/backoffice.ts",
+        "src/hashear.ts",
         "src/**/*.module.ts",
         "src/**/*.spec.ts",
         "test/**/*.ts",

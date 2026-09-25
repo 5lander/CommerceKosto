@@ -41,7 +41,7 @@
  */
 const MIGRACIONES = 'apps/*/prisma/migrations/**/*.sql';
 
-const CODIGO = ['apps/*/src/**/*.ts', 'apps/*/test/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
+const CODIGO = ['apps/*/src/**/*.{ts,tsx}', 'apps/*/test/**/*.ts', 'tools/**/*.mjs', 'scripts/**/*.mjs'];
 
 /**
  * El propio escaner y sus fixtures contienen a proposito los textos que
@@ -125,7 +125,7 @@ export const coreRules = [
     porQue:
       'En Windows el shell no PASA los argumentos: los concatena sin comillas, y uno con espacios (una consulta SQL, una ruta) llega troceado. La via correcta es `correr` / `correrCli` de scripts/lib/proceso.mjs. Ver docs/incidencias/INC-006.',
     patron: /shell:\s*(?:true|process\.platform\s*===\s*['"]win32['"])/g,
-    incluye: ['tools/**/*.mjs', 'scripts/**/*.mjs', 'apps/*/src/**/*.ts'],
+    incluye: ['tools/**/*.mjs', 'scripts/**/*.mjs', 'apps/*/src/**/*.{ts,tsx}'],
     // proceso.mjs es quien encapsula la decision: contiene `shell: false`.
     excluye: [...META, 'scripts/lib/proceso.mjs'],
     desde: 'P0',
@@ -242,5 +242,39 @@ export const coreRules = [
     excluye: [...META, 'apps/*/src/shared/domain/decimal/**'],
     desde: 'P0',
     referencia: 'ADR-003 · CLAUDE.md §2',
+  },
+  {
+    id: 'no-comparar-decimales-con-localecompare',
+    descripcion: '`localeCompare` con `numeric: true` para comparar decimales',
+    porQue:
+      'NO COMPARA DECIMALES: compara tramos de digitos. "0.1673" se parte en 0, ".", 1673 y "0.28" en ' +
+      '0, ".", 28; empatan los dos primeros y entonces compara 1673 contra 28, asi que dice que 0,1673 ' +
+      'es MAYOR que 0,32. Estuvo en la pantalla de costeo desde la Fase C pintando un food cost del ' +
+      '16,7 % con el color de la perdida y —lo peligroso— uno del 40 % de verde. Parecia correcto: ' +
+      'llevaba `numeric: true` y un comentario diciendo que evitaba el punto flotante. Lo evitaba, y lo ' +
+      'que hacia en su lugar estaba mal. Desde P16-B el frontend no compara decimales: el semaforo lo manda ' +
+      'la API (`semaforoFoodCost`, D-16.105), y en el backend estan los tipos `Money`/`Ratio`. ' +
+      '`localeCompare` SIN `numeric` sigue valiendo: ordenar nombres alfabeticamente esta bien.',
+    patron: /localeCompare\s*\([^)]*numeric\s*:\s*true/g,
+    incluye: CODIGO,
+    excluye: META,
+    desde: 'P14b',
+    referencia: 'INC-020 · CLAUDE.md §3',
+  },
+  {
+    id: 'regex-de-numero-solo-en-el-vocabulario',
+    descripcion: 'Una expresion regular dentro de un `*.dto.ts`',
+    porQue:
+      'CUARTA RECURRENCIA DE INC-012. Cada DTO definia su propio `decimal` con su propia regex y su propio ' +
+      'mensaje, y guardas-de-dominio.md daba por filtradas restricciones que el esquema no filtraba: ' +
+      '`precio: "0"`, `pvp: "0"`, `rendimientoPorciones: "0"` y `costoTotal: "-5"` pasaban el esquema y ' +
+      'salian como 500 contra un CHECK. Un esquema llamado `decimal` no dice si admite cero ni signo. Los ' +
+      'numeros del borde se toman de `shared/infrastructure/http/decimales-del-borde.ts` —decimalConSigno, ' +
+      'decimalNoNegativo, decimalPositivo, fraccion, enteroNoNegativo—, eligiendo por el CHECK de la columna.',
+    patron: /\.regex\s*\(/g,
+    incluye: ['apps/*/src/**/*.dto.ts'],
+    excluye: META,
+    desde: 'P16-B',
+    referencia: 'docs/incidencias/INC-012 · docs/sistema/guardas-de-dominio.md',
   },
 ];

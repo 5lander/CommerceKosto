@@ -22,12 +22,14 @@
  */
 
 import { correr } from './proceso.mjs';
+import { argumentosDeDocker, SERVICIO_DOCKER } from './docker.mjs';
 import { RAIZ, partesDeConexion } from './entorno.mjs';
-
-const SERVICIO_DOCKER = 'db';
 
 /** @type {'nativo' | 'docker' | 'ninguno' | null} */
 let viaDetectada = null;
+
+/** El major del cliente nativo que vio la deteccion, para poder explicarlo si falla. */
+let majorNativoVisto = /** @type {number | null} */ (null);
 
 /** @param {string} comando @param {readonly string[]} args */
 function hay(comando, args) {
@@ -35,12 +37,44 @@ function hay(comando, args) {
   return resultado.error === undefined && resultado.status === 0;
 }
 
+/**
+ * El major de PostgreSQL que sirve este proyecto — ADR-001, y el digest fijado
+ * en `docker-compose.yml`.
+ *
+ * NO BASTA CON QUE HAYA UN CLIENTE: TIENE QUE SER LO BASTANTE NUEVO. `pg_dump`
+ * se niega a volcar una base servida por una version MAYOR que la suya —
+ * «aborting because of server version mismatch»— y el mensaje culpa al servidor,
+ * que esta bien, en vez de al cliente, que es el viejo.
+ *
+ * El runner de GitHub trae `psql` 16 preinstalado, asi que la deteccion elegia
+ * «nativo» y `migrate:verify` moria. Tambien le pasaria a quien tenga un cliente
+ * antiguo en su maquina. Ver docs/incidencias/INC-033.
+ *
+ * Un cliente MAS NUEVO que el servidor si vale: la incompatibilidad es en un
+ * solo sentido.
+ */
+const MAJOR_DEL_SERVIDOR = 18;
+
+/** El major que declara `psql --version`, o `null` si no hay cliente o no se deja leer. */
+function majorNativo() {
+  const resultado = correr('psql', ['--version'], { encoding: 'utf8' });
+  if (resultado.error !== undefined || resultado.status !== 0) return null;
+
+  const coincidencia = /(\d+)/u.exec(String(resultado.stdout ?? ''));
+  return coincidencia?.[1] === undefined ? null : Number.parseInt(coincidencia[1], 10);
+}
+
 /** @returns {'nativo' | 'docker' | 'ninguno'} */
 export function via() {
   if (viaDetectada !== null) return viaDetectada;
-  if (hay('psql', ['--version'])) viaDetectada = 'nativo';
+
+  const major = majorNativo();
+  majorNativoVisto = major;
+
+  if (major !== null && major >= MAJOR_DEL_SERVIDOR) viaDetectada = 'nativo';
   else if (hay('docker', ['compose', 'version'])) viaDetectada = 'docker';
   else viaDetectada = 'ninguno';
+
   return viaDetectada;
 }
 
@@ -52,28 +86,30 @@ function noHayPsql() {
       'Los scripts de migracion necesitan psql para aplicar SQL de forma atomica.',
       'Se busco de dos maneras y ninguna funciono:',
       '',
-      '  1. `psql` en el PATH               -> no esta',
+      majorNativoVisto === null
+        ? '  1. `psql` en el PATH               -> no esta'
+        : `  1. \`psql\` en el PATH               -> es la ${majorNativoVisto}, y hace falta la ${MAJOR_DEL_SERVIDOR} o mas nueva`,
       '  2. `docker compose exec -T db psql` -> Docker no responde',
       '',
       'Levanta la base:  npm run db:up',
-      'Ver docs/incidencias/INC-002.',
+      'Ver docs/incidencias/INC-002 e INC-033.',
     ].join('\n'),
   );
 }
 
 /**
- * @param {{conexion: string, argumentos: readonly string[], entrada?: string, silencioso?: boolean}} peticion
+ * @param {{conexion: string, argumentos: readonly string[], entrada?: string, silencioso?: boolean, entorno?: Readonly<Record<string, string>>}} peticion
  * @returns {{estado: number, salida: string, error: string}}
  */
-function ejecutar({ conexion, argumentos, entrada, silencioso = false }) {
+function ejecutar({ conexion, argumentos, entrada, silencioso = false, entorno = {} }) {
   const partes = partesDeConexion(conexion);
-  const { comando, args } = invocacion(partes, argumentos);
+  const { comando, args } = invocacion(partes, argumentos, entorno);
 
   const resultado = correr(comando, args, {
     cwd: RAIZ,
     encoding: 'utf8',
     input: entrada,
-    env: via() === 'nativo' ? { ...process.env, PGPASSWORD: partes.contrasena } : process.env,
+    env: via() === 'nativo' ? { ...process.env, PGPASSWORD: partes.contrasena, ...entorno } : process.env,
     stdio: entrada === undefined ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
   });
 
@@ -95,7 +131,7 @@ function ejecutar({ conexion, argumentos, entrada, silencioso = false }) {
  * @param {readonly string[]} argumentos
  * @returns {{comando: string, args: string[]}}
  */
-function invocacion(partes, argumentos) {
+function invocacion(partes, argumentos, entorno = {}) {
   const modo = via();
   if (modo === 'ninguno') throw noHayPsql();
 
@@ -107,23 +143,25 @@ function invocacion(partes, argumentos) {
 
   return {
     comando: 'docker',
-    args: [
-      'compose', 'exec', '-T',
-      '-e', `PGPASSWORD=${partes.contrasena}`,
-      SERVICIO_DOCKER, 'psql', ...comunes,
-    ],
+    args: argumentosDeDocker({
+      herramienta: 'psql',
+      contrasena: partes.contrasena,
+      entorno,
+      resto: comunes,
+    }),
   };
 }
 
 /**
  * Aplica un archivo SQL completo en UNA transaccion.
- * @param {{conexion: string, sql: string, descripcion: string}} peticion
+ * @param {{conexion: string, sql: string, descripcion: string, entorno?: Readonly<Record<string, string>>}} peticion
  */
-export function aplicarSql({ conexion, sql, descripcion }) {
+export function aplicarSql({ conexion, sql, descripcion, entorno = {} }) {
   const { estado } = ejecutar({
     conexion,
     argumentos: ['--single-transaction', '-f', '-'],
     entrada: sql,
+    entorno,
   });
 
   if (estado !== 0) {
@@ -133,14 +171,35 @@ export function aplicarSql({ conexion, sql, descripcion }) {
 
 /**
  * Consulta que devuelve texto plano, sin cabeceras ni alineacion.
- * @param {{conexion: string, sql: string}} peticion
+ *
+ * `variables` es la forma SEGURA de meter un valor en el SQL, y es la misma que
+ * `docker/postgres/initdb/sql/roles.sql` usa desde P0: se pasan con `-v` y se
+ * referencian como `:'nombre'`, y **psql las entrecomilla y las escapa**. No es
+ * escapar a mano: es delegarlo en quien sabe hacerlo.
+ *
+ * POR QUE ESTO Y NO INTERPOLAR EN LA CADENA. Interpolar es inyeccion SQL, y la
+ * regla `no-sql-interpolado` de `audit:forbidden` lo caza. Un identificador
+ * —nombre de tabla o de base— no se puede pasar asi, y la respuesta del
+ * proyecto a eso es no tenerlos dinamicos, no abrir una exencion.
+ *
+ * OJO: las variables solo se sustituyen cuando el SQL entra por **stdin**, no
+ * con `-c`. Es INC-009, y por eso esta funcion usa `-f -`.
+ *
+ * @param {{conexion: string, sql: string, variables?: Readonly<Record<string, string>>, entorno?: Readonly<Record<string, string>>}} peticion
  * @returns {string}
  */
-export function consultar({ conexion, sql }) {
+export function consultar({ conexion, sql, variables = {}, entorno = {} }) {
+  const declaraciones = Object.entries(variables).flatMap(([clave, valor]) => [
+    '-v',
+    `${clave}=${valor}`,
+  ]);
+
   const { estado, salida, error } = ejecutar({
     conexion,
-    argumentos: ['-t', '-A', '-c', sql],
+    argumentos: [...declaraciones, '-t', '-A', '-f', '-'],
+    entrada: sql,
     silencioso: true,
+    entorno,
   });
 
   if (estado !== 0) throw new Error(`Consulta fallida: ${error.trim()}`);

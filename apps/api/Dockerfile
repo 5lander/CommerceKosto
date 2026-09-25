@@ -34,7 +34,23 @@ COPY apps/api/prisma apps/api/prisma
 RUN npm ci
 
 COPY tsconfig.base.json ./
-COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/
+# `tsconfig.ui.json` tambien: desde P13 el build emite ademas `dist/ui/`, el
+# guion del back office. Sin el, `npm run build` falla dentro de la imagen.
+COPY apps/api/tsconfig.json apps/api/tsconfig.build.json apps/api/tsconfig.ui.json apps/api/
+
+# EL PARSER, QUE VIVE FUERA DE `src/` Y HAY QUE COPIARLO APARTE.
+#
+# `apps/api/parser/` son tres archivos `.mjs`/`.d.mts` que P10 dejo fuera del
+# arbol de TypeScript a proposito (ADR-013): Node exige extension explicita para
+# ejecutar TS como ESM, y este paquete es CommonJS con imports sin extension, asi
+# que el hijo que se forkea tiene que ser `.mjs` de verdad.
+#
+# **SIN ESTA LINEA LA IMAGEN NO COMPILA**, porque `imports/infrastructure/
+# limites.ts` importa el tipo `LimitesDelZip` de `parser/lector.mjs`. Y falto
+# desde P10: la imagen llevaba dos dias sin poder construirse y nadie lo vio
+# porque nadie la construyo. Ver INC-018.
+COPY apps/api/parser apps/api/parser
+
 COPY apps/api/src apps/api/src
 
 RUN npm run build --workspace @costeo/api
@@ -57,6 +73,11 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/package.json apps/api/
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/api/generated apps/api/generated
+
+# El parser tambien EN EJECUCION, no solo para compilar: `leer-en-hijo.ts` lo
+# forkea buscando `parser/hijo.mjs` desde la carpeta que tiene el `package.json`.
+# Sin el, importar un archivo falla en caliente y no al arrancar.
+COPY --from=build /app/apps/api/parser apps/api/parser
 
 # Usuario sin privilegios, que la imagen oficial ya trae creado. Un proceso que
 # corre como root dentro del contenedor convierte cualquier ejecucion remota de

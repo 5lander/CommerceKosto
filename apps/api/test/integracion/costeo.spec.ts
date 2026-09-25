@@ -6,6 +6,8 @@
  *   §4.3    `BODEGA` no ve un costeo, comprobado sobre la RESPUESTA CRUDA
  *   E8      costear con fecha del mes pasado usa el precio de entonces
  *   §5      200 productos con 1.500 líneas por debajo de 400 ms
+ *   P16-B   el semáforo lo decide la API, el desglose por línea viaja, y el
+ *           PVP se simula sin escribir nada
  *
  * **LO QUE ESTA SUITE APORTA SOBRE LAS UNITARIAS.** El motor ya está probado
  * contra los casos conocidos con la base apagada. Lo que no puede probarse ahí
@@ -27,10 +29,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
 const SIN_CONTENIDO = 204;
+const PETICION_INVALIDA = 400;
 const PROHIBIDO = 403;
 
 const CONTRASENA = 'tres cebollas moradas';
@@ -66,6 +70,13 @@ interface ProductoCosteado {
     readonly empaqueNeto: ImporteDto;
     readonly costoTotalUnidad: ImporteDto;
     readonly impactoMerma: string | null;
+    readonly lineas: readonly {
+      readonly itemId: string;
+      readonly nombre: string;
+      readonly base: string;
+      readonly costo: ImporteDto;
+      readonly participacion: string;
+    }[] | null;
   };
   readonly venta:
     | {
@@ -78,6 +89,9 @@ interface ProductoCosteado {
       }
     | { readonly vendible: false; readonly motivo: string };
   readonly itemsSinCosto: readonly string[];
+  readonly sinReceta: boolean;
+  readonly semaforoFoodCost: string;
+  readonly pvpSimulado: string | null;
 }
 
 /** Redondea a la precisión que muestra `V_COSTEO` y compara exacto. */
@@ -107,7 +121,7 @@ describe('costeo', () => {
       .send({ email, contrasena: CONTRASENA });
 
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   /**
@@ -126,7 +140,7 @@ describe('costeo', () => {
   }): Promise<ItemConArticulo> {
     const item = await request(servidor())
       .post('/catalogo/items')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         nombre: `Insumo ${randomUUID().slice(0, 8)}`,
         tipo: 'COMPRADO',
@@ -141,7 +155,7 @@ describe('costeo', () => {
 
     const articulo = await request(servidor())
       .post('/catalogo/articulos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         itemId,
         nombre: `Presentacion ${randomUUID().slice(0, 8)}`,
@@ -150,6 +164,7 @@ describe('costeo', () => {
         presentacion: '1',
         unidadDePresentacion: datos.unidad ?? 'unid',
         factorExplicito: null,
+        ivaTarifa: datos.iva,
       });
     expect(articulo.status).toBe(CREADO);
 
@@ -168,30 +183,37 @@ describe('costeo', () => {
   async function confirmarPrecio(cuerpo: Cuerpo): Promise<void> {
     const sugerido = await request(servidor())
       .post('/precios')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ origen: 'MANUAL', nota: null, ...cuerpo });
     expect(sugerido.status).toBe(CREADO);
 
     const decision = await request(servidor())
       .post(`/precios/${(sugerido.body as { id: string }).id}/decision`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
+  }
+
+  /** La versión del producto que un formulario leería (D-16.100). */
+  async function versionDe(productId: string): Promise<number> {
+    const ficha = await request(servidor()).get(`/productos/${productId}`).set('Cookie', cookie);
+    expect(ficha.status).toBe(OK);
+    return (ficha.body as { version: number }).version;
   }
 
   async function crearProducto(empaqueItemId: string | null): Promise<string> {
     const producto = await request(servidor())
       .post('/productos')
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({ nombre: `Plato ${randomUUID().slice(0, 8)}`, tipo: 'SIMPLE', categoria: null });
     expect(producto.status).toBe(CREADO);
     const id = (producto.body as { id: string }).id;
 
     const empaque = await request(servidor())
       .put(`/productos/${id}/empaque`)
-      .set('Cookie', cookie)
-      .send({ empaqueItemId });
-    expect(empaque.status).toBe(SIN_CONTENIDO);
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ empaqueItemId, version: await versionDe(id) });
+    expect(empaque.status).toBe(OK);
 
     return id;
   }
@@ -204,23 +226,24 @@ describe('costeo', () => {
   }): Promise<void> {
     const respuesta = await request(servidor())
       .put(`/productos/${datos.productId}/ubicaciones`)
-      .set('Cookie', cookie)
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
       .send({
         locationId: datos.locationId,
         activo: true,
         pvp: datos.pvp,
         rendimientoPorciones: datos.porciones,
+        version: await versionDe(datos.productId),
       });
-    expect(respuesta.status).toBe(SIN_CONTENIDO);
+    expect(respuesta.status).toBe(OK);
   }
 
   /** Un producto a medio configurar: sin PVP, y por tanto inactivo. */
   async function desactivarSinPrecio(productId: string): Promise<void> {
     const respuesta = await request(servidor())
       .put(`/productos/${productId}/ubicaciones`)
-      .set('Cookie', cookie)
-      .send({ locationId: centro, activo: false, pvp: null, rendimientoPorciones: '1' });
-    expect(respuesta.status).toBe(SIN_CONTENIDO);
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ locationId: centro, activo: false, pvp: null, rendimientoPorciones: '1', version: await versionDe(productId) });
+    expect(respuesta.status).toBe(OK);
   }
 
   async function guardarReceta(
@@ -228,22 +251,25 @@ describe('costeo', () => {
     locationId: string,
     lineas: readonly Cuerpo[],
   ): Promise<void> {
+    const clave = destino['clase'] === 'producto' ? { productId: destino['productId'] } : { itemId: destino['itemId'] };
+    const actual = await request(servidor()).get('/recetas').query({ ...clave, locationId }).set('Cookie', cookie);
+    const basadaEn = (actual.body as { ultimaVersionId: string | null }).ultimaVersionId;
     const respuesta = await request(servidor())
       .put('/recetas')
-      .set('Cookie', cookie)
-      .send({ destino, locationId, validFrom: ENERO, nota: null, lineas });
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+      .send({ basadaEn, destino, locationId, validFrom: ENERO, nota: null, lineas });
     expect(respuesta.status).toBe(CREADO);
   }
 
   function costear(locationId: string, quien = cookie, fecha = MARZO) {
-    return request(servidor()).get('/costeo').query({ locationId, fecha }).set('Cookie', quien);
+    return request(servidor()).get('/costeo').query({ locationId, fecha }).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
   }
 
   async function costearUno(productId: string, fecha = MARZO): Promise<ProductoCosteado> {
     const respuesta = await request(servidor())
       .get(`/costeo/${productId}`)
       .query({ locationId: centro, fecha })
-      .set('Cookie', cookie);
+      .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
 
     expect(respuesta.status).toBe(OK);
     return respuesta.body as ProductoCosteado;
@@ -377,6 +403,78 @@ describe('costeo', () => {
       expect(costeado.costos.empaqueNeto.mostrar).toBe('0.04');
       expect(costeado.costos.empaqueNeto.exacto).toContain('0.043478260');
     });
+
+    it('el semáforo lo decide la API con los umbrales de la company: 36 % contra un máximo de 32 % es ROJO (D-16.105)', async () => {
+      const costeado = await costearUno(producto);
+      expect(costeado.semaforoFoodCost).toBe('ROJO');
+    });
+
+    it('el desglose por línea viaja, alineado con la receta y con el nombre del ítem (SPEC §13)', async () => {
+      const costeado = await costearUno(producto);
+
+      expect(costeado.costos.lineas).toHaveLength(1);
+      const linea = costeado.costos.lineas?.[0];
+      expect(linea?.nombre).not.toBe('');
+      expect(linea?.base).toBe('EP');
+      expect(alaPrecisionDelExcel(linea?.costo.exacto ?? '', '0.51')).toBe('0.51');
+      // La única línea es el lote entero.
+      expect(linea?.participacion).toBe('1');
+    });
+  });
+
+  describe('el simulador de PVP (P16-B, D-16.107)', () => {
+    let producto: string;
+
+    beforeAll(async () => {
+      const tamal = await itemConPrecio({ rendimiento: '1', precio: '0.51', iva: '0.00' });
+      producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '1.80', porciones: '1' });
+      await guardarReceta({ clase: 'producto', productId: producto }, centro, [
+        { itemId: tamal.itemId, cantidad: '1', base: 'EP', estado: 'ACTIVA' },
+      ]);
+    });
+
+    function simular(pvp: string) {
+      return request(servidor()).get(`/costeo/${producto}`).query({ locationId: centro, fecha: MARZO, pvp }).set('Cookie', cookie);
+    }
+
+    it('los tres colores salen de la API según el PVP simulado, con el costo intacto', async () => {
+      // Costo total por unidad 0.5202. Con IVA de venta 0.15:
+      //   3.00 → venta neta 2.6087 → food cost 19,9 %  → VERDE
+      //   2.10 → venta neta 1.8261 → food cost 28,5 %  → AMBAR (entre 0.28 y 0.32)
+      //   1.00 → venta neta 0.8696 → food cost 59,8 %  → ROJO
+      const verde = await simular('3.00');
+      const ambar = await simular('2.10');
+      const rojo = await simular('1.00');
+
+      expect([verde.status, ambar.status, rojo.status]).toEqual([OK, OK, OK]);
+      expect((verde.body as ProductoCosteado).semaforoFoodCost).toBe('VERDE');
+      expect((ambar.body as ProductoCosteado).semaforoFoodCost).toBe('AMBAR');
+      expect((rojo.body as ProductoCosteado).semaforoFoodCost).toBe('ROJO');
+      expect((verde.body as { pvpSimulado: string }).pvpSimulado).toBe('3.00');
+      expect((verde.body as ProductoCosteado).costos.costoTotalUnidad.exacto).toBe(
+        (rojo.body as ProductoCosteado).costos.costoTotalUnidad.exacto,
+      );
+    });
+
+    it('simular no escribe: el PVP de la ubicación sigue siendo el suyo', async () => {
+      await simular('9.99');
+
+      const { rows } = await duena.query<{ pvp: string }>(
+        'SELECT pvp::text AS pvp FROM product_location WHERE product_id = $1 AND location_id = $2',
+        [producto, centro],
+      );
+      expect(rows[0]?.pvp).toMatch(/^1\.80/u);
+      const sinSimular = await costearUno(producto);
+      expect(sinSimular.pvpSimulado).toBeNull();
+    });
+
+    it('un PVP simulado de cero es 400: no es un escenario, es una división por cero', async () => {
+      const respuesta = await simular('0');
+
+      expect(respuesta.status).toBe(PETICION_INVALIDA);
+      expect(respuesta.body).toMatchObject({ code: 'ENTRADA_INVALIDA' });
+    });
   });
 
   describe('CLAUDE.md §4.3 — BODEGA no ve un costeo', () => {
@@ -384,6 +482,10 @@ describe('costeo', () => {
       const respuesta = await costear(centro, cookieBodega);
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      // EL CODIGO, NO SOLO EL ESTADO: desde P16-A2 hay dos 403 distintos y el
+      // de CSRF corre ANTES que el de permisos; sin esta linea, una prueba de
+      // confidencialidad podria estar midiendo una cabecera que falta.
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
 
       // Sobre el cuerpo crudo, no sobre un objeto interpretado: lo que importa
       // es lo que viaja por el cable.
@@ -406,9 +508,10 @@ describe('costeo', () => {
       const respuesta = await request(servidor())
         .get(`/costeo/${primero?.productId ?? ''}`)
         .query({ locationId: centro })
-        .set('Cookie', cookieBodega);
+        .set('Cookie', cookieBodega).set('X-CSRF-Token', csrfDe(cookieBodega));
 
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
       expect(JSON.stringify(respuesta.body)).not.toContain('foodCost');
     });
   });
@@ -422,6 +525,7 @@ describe('costeo', () => {
     it('y recibe 403 sobre otra', async () => {
       const respuesta = await costear(norte, cookieGerente);
       expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
   });
 
@@ -456,10 +560,75 @@ describe('costeo', () => {
   });
 
   describe('lo que el motor NO se calla', () => {
+    it('un plato SIN receta en esta sucursal sale marcado, y su semáforo no es verde (duda #12)', async () => {
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+
+      const costeado = await costearUno(producto);
+
+      // El lote cuesta cero, que es aritméticamente cierto. Sin la marca, la
+      // pantalla enseñaba «0.00» y un food cost del 0 % en verde.
+      expect(costeado.costos.costoNetoLote.mostrar).toBe('0.00');
+      expect(costeado.sinReceta).toBe(true);
+      expect(costeado.semaforoFoodCost).toBe('SIN_DATO');
+    });
+
+    it('una receta con todas sus líneas excluidas tampoco es receta', async () => {
+      const item = await itemConPrecio({ rendimiento: '1', precio: '3.00', iva: '0.00' });
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+      await guardarReceta({ clase: 'producto', productId: producto }, centro, [
+        { itemId: item.itemId, cantidad: '1', base: 'EP', estado: 'INACTIVA' },
+      ]);
+
+      expect((await costearUno(producto)).sinReceta).toBe(true);
+    });
+
+    it('con una línea activa hay receta, y el semáforo vuelve a juzgar', async () => {
+      const item = await itemConPrecio({ rendimiento: '1', precio: '3.00', iva: '0.00' });
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+      await guardarReceta({ clase: 'producto', productId: producto }, centro, [
+        { itemId: item.itemId, cantidad: '1', base: 'EP', estado: 'ACTIVA' },
+      ]);
+
+      const costeado = await costearUno(producto);
+      expect(costeado.sinReceta).toBe(false);
+      expect(costeado.semaforoFoodCost).not.toBe('SIN_DATO');
+    });
+
+    it('el simulador de PVP no le pone color a un plato sin receta', async () => {
+      const producto = await crearProducto(null);
+      await activar({ productId: producto, locationId: centro, pvp: '6.50', porciones: '1' });
+
+      const simulado = await request(servidor())
+        .get(`/costeo/${producto}`)
+        .query({ locationId: centro, fecha: MARZO, pvp: '9.00' })
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
+
+      expect(simulado.status).toBe(OK);
+      expect((simulado.body as ProductoCosteado).sinReceta).toBe(true);
+      expect((simulado.body as ProductoCosteado).semaforoFoodCost).toBe('SIN_DATO');
+    });
+
+    it('un combo sin componentes sale marcado igual', async () => {
+      const combo = await request(servidor())
+        .post('/productos')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({ nombre: `Combo ${randomUUID().slice(0, 8)}`, tipo: 'COMBO', categoria: null });
+      expect(combo.status).toBe(CREADO);
+      const id = (combo.body as { id: string }).id;
+      await activar({ productId: id, locationId: centro, pvp: '9.00', porciones: '1' });
+
+      const costeado = await costearUno(id);
+      expect(costeado.sinReceta).toBe(true);
+      expect(costeado.semaforoFoodCost).toBe('SIN_DATO');
+    });
+
     it('un insumo sin precio confirmado sale listado, no escondido', async () => {
       const item = await request(servidor())
         .post('/catalogo/items')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           nombre: `Sin precio ${randomUUID().slice(0, 8)}`,
           tipo: 'COMPRADO',
@@ -519,7 +688,7 @@ describe('costeo', () => {
 
       const salsa = await request(servidor())
         .post('/catalogo/items')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           nombre: `Salsa ${randomUUID().slice(0, 8)}`,
           tipo: 'PRODUCIDO',

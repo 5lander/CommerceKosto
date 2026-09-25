@@ -23,11 +23,18 @@
  * falla, la petición se rechaza igual y no queda nada sin comprobar. Ningún
  * control de acceso vive aquí: viven en `@Requiere` y en
  * `exigirUbicacionEnAlcance`.
+ *
+ * **`costoTotal` DE UNA COMPRA ES EL TOTAL DE LA FACTURA, CON IVA** (D-16.9).
+ * El neto lo calcula el dominio con la tarifa del cuerpo, del artículo o del
+ * grupo; `ivaTarifa` es opcional y solo manda sobre las otras dos. Y en la
+ * salida, `desglose` dice si esa fila lleva los cuatro importes o es una
+ * COMPRA anterior a P16-A1 («sin desglose», D-16.18).
  */
 
 import { z } from 'zod';
 
-const LARGO_MAXIMO_DE_DECIMAL = 40;
+import { decimalConSigno, decimalNoNegativo, fraccion } from '../../../../shared/infrastructure/http/decimales-del-borde';
+
 const LARGO_MAXIMO_DE_NOTA = 500;
 const MAXIMO_POR_PAGINA = 200;
 const POR_PAGINA_POR_DEFECTO = 50;
@@ -36,19 +43,9 @@ const MAXIMO_DE_VENTAS = 500;
 /** Los insumos de un lote: una receta larga, con margen. */
 const MAXIMO_DE_INSUMOS = 100;
 
-/** Decimal exacto en cadena, sin exponentes. */
-const decimal = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^-?\d+(\.\d+)?$/u, 'debe ser un decimal en notación normal, por ejemplo "2.30"');
-
-/** Magnitud: sin signo. El sentido lo pone el tipo de movimiento. */
-const magnitud = z
-  .string()
-  .max(LARGO_MAXIMO_DE_DECIMAL)
-  .regex(/^\d+(\.\d+)?$/u, 'debe ser una cantidad positiva, por ejemplo "2.5"');
 
 const nota = z.string().trim().max(LARGO_MAXIMO_DE_NOTA).nullable();
+
 
 /**
  * Un movimiento suelto.
@@ -62,11 +59,13 @@ export const CUERPO_DE_MOVIMIENTO = z
     locationId: z.uuid(),
     itemId: z.uuid(),
     tipo: z.enum(['COMPRA', 'MERMA', 'AJUSTE']),
-    cantidad: decimal,
+    cantidad: decimalConSigno,
     /** Obligatorio en `COMPRA`: es lo que se pagó, y de ahí sale SPEC §16. */
-    costoTotal: decimal.nullable(),
+    costoTotal: decimalNoNegativo.nullable(),
     /** Solo en `COMPRA`: en qué presentación se compró (SPEC §7). */
     purchaseArticleId: z.uuid().nullable(),
+    /** Solo en `COMPRA`: la tarifa de la factura. Omitida, manda artículo > grupo. */
+    ivaTarifa: fraccion.nullable().default(null),
     occurredAt: z.iso.datetime(),
     note: nota,
   })
@@ -78,6 +77,10 @@ export const CUERPO_DE_MOVIMIENTO = z
   .refine((cuerpo) => cuerpo.purchaseArticleId === null || cuerpo.tipo === 'COMPRA', {
     message: 'El artículo de compra solo tiene sentido en un movimiento de tipo COMPRA.',
     path: ['purchaseArticleId'],
+  })
+  .refine((cuerpo) => cuerpo.ivaTarifa === null || cuerpo.tipo === 'COMPRA', {
+    message: 'La tarifa de IVA solo tiene sentido en un movimiento de tipo COMPRA.',
+    path: ['ivaTarifa'],
   });
 
 export const CUERPO_DE_CORRECCION = z.object({ note: nota }).strict();
@@ -87,7 +90,7 @@ export const CUERPO_DE_TRANSFERENCIA = z
     origen: z.uuid(),
     destino: z.uuid(),
     itemId: z.uuid(),
-    cantidad: magnitud,
+    cantidad: decimalNoNegativo,
     occurredAt: z.iso.datetime(),
     note: nota,
   })
@@ -97,9 +100,9 @@ export const CUERPO_DE_PRODUCCION = z
   .object({
     locationId: z.uuid(),
     itemId: z.uuid(),
-    cantidad: magnitud,
+    cantidad: decimalNoNegativo,
     insumos: z
-      .array(z.object({ itemId: z.uuid(), cantidad: magnitud }).strict())
+      .array(z.object({ itemId: z.uuid(), cantidad: decimalNoNegativo }).strict())
       .min(1)
       .max(MAXIMO_DE_INSUMOS),
     occurredAt: z.iso.datetime(),
@@ -111,7 +114,7 @@ export const CUERPO_DE_CONSUMO = z
   .object({
     locationId: z.uuid(),
     ventas: z
-      .array(z.object({ productId: z.uuid(), unidades: magnitud }).strict())
+      .array(z.object({ productId: z.uuid(), unidades: decimalNoNegativo }).strict())
       .min(1)
       .max(MAXIMO_DE_VENTAS),
     occurredAt: z.iso.datetime(),
@@ -119,17 +122,23 @@ export const CUERPO_DE_CONSUMO = z
   })
   .strict();
 
-export const CONSULTA_DE_SALDOS = z.object({ locationId: z.uuid() });
+export const CONSULTA_DE_SALDOS = z.object({ locationId: z.uuid() }).strict();
 
-export const CONSULTA_DEL_LIBRO = z.object({
-  locationId: z.uuid(),
-  itemId: z.uuid().optional(),
-  desde: z.iso.datetime().optional(),
-  hasta: z.iso.datetime().optional(),
-  limite: z.coerce.number().int().min(1).max(MAXIMO_POR_PAGINA).default(POR_PAGINA_POR_DEFECTO),
-  /** Opaco: es el `id` del último movimiento de la página anterior. */
-  cursor: z.uuid().optional(),
-});
+export const CONSULTA_DEL_LIBRO = z
+  .object({
+    locationId: z.uuid(),
+    itemId: z.uuid().optional(),
+    /** P16-C: los siete tipos del catálogo `inventory_movement_type`. */
+    tipo: z
+      .enum(['COMPRA', 'TRANSFERENCIA_SALIDA', 'TRANSFERENCIA_ENTRADA', 'PRODUCCION', 'MERMA', 'AJUSTE', 'CONSUMO_POR_VENTA'])
+      .optional(),
+    desde: z.iso.datetime().optional(),
+    hasta: z.iso.datetime().optional(),
+    limite: z.coerce.number().int().min(1).max(MAXIMO_POR_PAGINA).default(POR_PAGINA_POR_DEFECTO),
+    /** Opaco: es el `id` del último movimiento de la página anterior. */
+    cursor: z.uuid().optional(),
+  })
+  .strict();
 
 export type CuerpoDeMovimiento = z.infer<typeof CUERPO_DE_MOVIMIENTO>;
 export type CuerpoDeCorreccion = z.infer<typeof CUERPO_DE_CORRECCION>;
@@ -147,12 +156,27 @@ export interface SaldoDto {
   readonly cantidad: string;
 }
 
-export interface MovimientoDto {
+/**
+ * Los cuatro importes de una COMPRA (D-16.10), solo cuando existen. Una fila
+ * «sin desglose» no lleva los campos, no los lleva en `null`: así el consumidor
+ * no puede confundir «no se sabe» con «cero».
+ */
+export type DesgloseDto =
+  | { readonly desglose: 'SIN_DESGLOSE' }
+  | {
+      readonly desglose: 'CONOCIDO';
+      readonly totalBruto: string;
+      readonly ivaTarifaAplicada: string;
+      readonly ivaRecuperableAplicado: boolean;
+    };
+
+export type MovimientoDto = DesgloseDto & {
   readonly id: string;
   readonly locationId: string;
   readonly itemId: string;
   readonly tipo: string;
   readonly cantidad: string;
+  /** En una COMPRA con desglose, el NETO. Sin desglose, lo que se tecleó. */
   readonly costoTotal: string | null;
   readonly occurredAt: string;
   readonly recordedAt: string;
@@ -161,7 +185,7 @@ export interface MovimientoDto {
   readonly corrigeA: string | null;
   readonly corregidoPor: string | null;
   readonly note: string | null;
-}
+};
 
 export interface PaginaDelLibroDto {
   readonly movimientos: readonly MovimientoDto[];

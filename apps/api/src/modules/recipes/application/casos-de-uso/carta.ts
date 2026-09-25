@@ -25,7 +25,7 @@ import type {
   ProductId,
 } from '../../../../shared/domain/identity/identificadores';
 import type { SesionActiva } from '../../../iam/application/casos-de-uso/validar-sesion';
-import { ProductoNoEncontradoError } from '../../domain/errores';
+import { EmpaqueNoEncontradoError } from '../../domain/errores';
 import type {
   ComponenteDeCombo,
   ConfiguracionEnUbicacion,
@@ -34,7 +34,7 @@ import type {
   RecetaVigenteLeida,
 } from '../ports/repositorio-de-recetas.port';
 import { exigirUbicacionEnAlcance } from '../../../iam/application/casos-de-uso/validar-sesion';
-import type { DependenciasDeRecetas } from './recetas';
+import { registrarCambioDeProducto, versionEscrita, type DependenciasDeRecetas } from './recetas';
 
 export interface CartaDeUbicacion {
   readonly productos: readonly ProductoLeido[];
@@ -127,37 +127,37 @@ function agruparPorCombo(
 export class AsignarEmpaque {
   public constructor(private readonly deps: DependenciasDeRecetas) {}
 
-  /** @throws {ProductoNoEncontradoError} */
+  /**
+   * @returns la versión NUEVA del producto.
+   * @throws {EmpaqueNoEncontradoError} · {@link ProductoNoEncontradoError} · {@link ConflictoDeVersionError}
+   */
   public async ejecutar(
     sesion: SesionActiva,
-    entrada: { readonly productId: ProductId; readonly empaqueItemId: ItemId | null },
-  ): Promise<void> {
+    entrada: { readonly productId: ProductId; readonly empaqueItemId: ItemId | null; readonly version: number },
+  ): Promise<number> {
     if (entrada.empaqueItemId !== null) {
       const item = await this.deps.leerItem.ejecutar(sesion, entrada.empaqueItemId);
       if (item === null) {
-        throw new ProductoNoEncontradoError();
+        throw new EmpaqueNoEncontradoError();
       }
     }
 
-    const asignado = await this.deps.repositorio.asignarEmpaque({
-      companyId: sesion.companyId,
+    const version = versionEscrita(
+      await this.deps.repositorio.asignarEmpaque({
+        companyId: sesion.companyId,
+        productId: entrada.productId,
+        empaqueItemId: entrada.empaqueItemId,
+        versionEsperada: entrada.version,
+      }),
+      'producto',
+    );
+
+    await registrarCambioDeProducto(this.deps, sesion, {
       productId: entrada.productId,
-      empaqueItemId: entrada.empaqueItemId,
+      empaque: entrada.empaqueItemId ?? 'ninguno',
+      version,
     });
 
-    if (!asignado) {
-      throw new ProductoNoEncontradoError();
-    }
-
-    await this.deps.auditoria.record({
-      eventType: 'product.updated',
-      outcome: 'success',
-      actorType: 'USER',
-      actorId: sesion.userId,
-      companyId: sesion.companyId,
-      ip: null,
-      userAgent: null,
-      detail: { productId: entrada.productId, empaque: entrada.empaqueItemId ?? 'ninguno' },
-    });
+    return version;
   }
 }

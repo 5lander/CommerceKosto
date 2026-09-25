@@ -27,6 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApplication } from '../../src/bootstrap';
 import { Argon2Hasher } from '../../src/modules/iam/infrastructure/argon2-hasher';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -95,6 +96,7 @@ describe('consolidado de company', () => {
   let duena: Client;
   let admin: string;
   let gerente: string;
+  let duenaDelNegocio: string;
   let centro: string;
   let norte: string;
   let vacio: string;
@@ -108,11 +110,11 @@ describe('consolidado de company', () => {
       .post('/auth/login')
       .send({ email, contrasena: CLAVE });
     expect(respuesta.status).toBe(OK);
-    return (respuesta.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    return cookieConCsrf(respuesta);
   }
 
   async function crear(ruta: string, cuerpo: Cuerpo): Promise<string> {
-    const respuesta = await request(servidor()).post(ruta).set('Cookie', admin).send(cuerpo);
+    const respuesta = await request(servidor()).post(ruta).set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin)).send(cuerpo);
     expect(respuesta.status).toBe(CREADO);
     return (respuesta.body as { id: string }).id;
   }
@@ -137,6 +139,7 @@ describe('consolidado de company', () => {
       presentacion: '1',
       unidadDePresentacion: 'kg',
       factorExplicito: null,
+      ivaTarifa: '0',
     });
 
     const precioId = await crear('/precios', {
@@ -150,7 +153,7 @@ describe('consolidado de company', () => {
     });
     const decision = await request(servidor())
       .post(`/precios/${precioId}/decision`)
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({ decision: 'CONFIRMED' });
     expect(decision.status).toBe(SIN_CONTENIDO);
 
@@ -164,21 +167,29 @@ describe('consolidado de company', () => {
     readonly donde: string;
     readonly pvp: string;
   }): Promise<void> {
+    // La versión se LEE: el mismo producto se activa en dos ubicaciones, y la
+    // segunda escritura va sobre la versión que dejó la primera (D-16.100).
+    const ficha = await request(servidor()).get(`/productos/${datos.productId}`).set('Cookie', admin);
+    const version = (ficha.body as { version: number }).version;
+
     const ubicacion = await request(servidor())
       .put(`/productos/${datos.productId}/ubicaciones`)
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
         locationId: datos.donde,
         activo: true,
         pvp: datos.pvp,
         rendimientoPorciones: '1',
+        version,
       });
-    expect(ubicacion.status).toBe(SIN_CONTENIDO);
+    expect(ubicacion.status).toBe(OK);
 
     const receta = await request(servidor())
       .put('/recetas')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
+        // La receta es por ubicación: en cada una es la primera (D-16.101).
+        basadaEn: null,
         destino: { clase: 'producto', productId: datos.productId },
         locationId: datos.donde,
         validFrom: VIGENCIA,
@@ -189,11 +200,18 @@ describe('consolidado de company', () => {
   }
 
   async function cargarVentas(donde: string, ventas: readonly Cuerpo[]): Promise<void> {
+    // La carga va sobre la versión leída (D-16.121).
+    const leida = await request(servidor())
+      .get('/analitica/ventas')
+      .query({ locationId: donde, anio: ANIO, mes: MARZO })
+      .set('Cookie', admin);
+    const version = (leida.body as { version: number }).version;
+
     const respuesta = await request(servidor())
       .post('/analitica/ventas')
-      .set('Cookie', admin)
-      .send({ locationId: donde, anio: ANIO, mes: MARZO, ventas });
-    expect(respuesta.status).toBe(SIN_CONTENIDO);
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
+      .send({ locationId: donde, anio: ANIO, mes: MARZO, version, ventas });
+    expect(respuesta.status).toBe(OK);
   }
 
   async function comprar(datos: {
@@ -205,7 +223,7 @@ describe('consolidado de company', () => {
   }): Promise<void> {
     const respuesta = await request(servidor())
       .post('/inventario/movimientos')
-      .set('Cookie', admin)
+      .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin))
       .send({
         locationId: datos.donde,
         itemId: datos.itemId,
@@ -223,7 +241,7 @@ describe('consolidado de company', () => {
     return request(servidor())
       .get(`/consolidado${ruta}`)
       .query({ anio: ANIO, mes: MARZO })
-      .set('Cookie', quien);
+      .set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien));
   }
 
   /**
@@ -240,8 +258,8 @@ describe('consolidado de company', () => {
       request(servidor())
         .get('/analitica/punto-de-equilibrio')
         .query(consulta)
-        .set('Cookie', admin),
-      request(servidor()).get('/analitica/food-cost-real').query(consulta).set('Cookie', admin),
+        .set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin)),
+      request(servidor()).get('/analitica/food-cost-real').query(consulta).set('Cookie', admin).set('X-CSRF-Token', csrfDe(admin)),
     ]);
     expect(equilibrio.status).toBe(OK);
     expect(foodCost.status).toBe(OK);
@@ -290,6 +308,8 @@ describe('consolidado de company', () => {
     const correos = {
       admin: `admin.${sufijo}@snacklab.ec`,
       gerente: `gerente.${sufijo}@snacklab.ec`,
+      // Solo el OWNER reabre un mes (D6): lo necesita la prueba de P16-C.
+      owner: `owner.${sufijo}@snacklab.ec`,
     };
     for (const correo of Object.values(correos)) {
       await duena.query(
@@ -309,8 +329,15 @@ describe('consolidado de company', () => {
       [company, centro, correos.gerente],
     );
 
+    await duena.query(
+      `INSERT INTO user_role (company_id, user_id, role_code, has_location)
+       SELECT $1, id, 'OWNER', false FROM app_user WHERE email = $2`,
+      [company, correos.owner],
+    );
+
     admin = await entrar(correos.admin);
     gerente = await entrar(correos.gerente);
+    duenaDelNegocio = await entrar(correos.owner);
 
     // EL MISMO producto en las dos ubicaciones, con PVP distinto a propósito:
     // es lo que la comparativa existe para enseñar.
@@ -394,22 +421,33 @@ describe('consolidado de company', () => {
 
   describe('LA ESCALADA HORIZONTAL: un GERENTE_LOCAL no ve la cadena', () => {
     it('el consolidado le devuelve 403', async () => {
-      expect((await consolidado(gerente)).status).toBe(PROHIBIDO);
+      const respuesta = await consolidado(gerente);
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      // EL CODIGO, NO SOLO EL ESTADO: desde P16-A2 hay dos 403 distintos, y sin
+      // esta linea un fallo de CSRF pasaria por una prueba de permisos.
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('la comparativa de productos también', async () => {
-      expect((await consolidado(gerente, '/productos')).status).toBe(PROHIBIDO);
+      const respuesta = await consolidado(gerente, '/productos');
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('y la de compras, que es la que enseña lo que paga cada local', async () => {
-      expect((await consolidado(gerente, '/compras')).status).toBe(PROHIBIDO);
+      const respuesta = await consolidado(gerente, '/compras');
+
+      expect(respuesta.status).toBe(PROHIBIDO);
+      expect(respuesta.body).toMatchObject({ code: 'PERMISO_DENEGADO' });
     });
 
     it('pero SÍ sigue viendo la vista de SU ubicación', async () => {
       const respuesta = await request(servidor())
         .get('/analitica/food-cost-real')
         .query({ locationId: centro, anio: ANIO, mes: MARZO })
-        .set('Cookie', gerente);
+        .set('Cookie', gerente).set('X-CSRF-Token', csrfDe(gerente));
 
       expect(respuesta.status).toBe(OK);
     });
@@ -475,6 +513,44 @@ describe('consolidado de company', () => {
       for (const ubicacion of total.ubicaciones) {
         expect(ajenas.has(ubicacion.nombre)).toBe(false);
       }
+    });
+  });
+
+  /**
+   * VA LA ÚLTIMA A PROPÓSITO: confirmar un conteo en el Centro cambia su consumo
+   * real y su inventario final, que las pruebas de arriba comparan con lo sembrado.
+   */
+  describe('🔴 el estado de cada ubicación sale del período, no del conteo (P16-C, D-16.124)', () => {
+    function mutar(ruta: string, quien: string, cuerpo: Cuerpo = {}) {
+      return request(servidor()).post(ruta).set('Cookie', quien).set('X-CSRF-Token', csrfDe(quien)).send(cuerpo);
+    }
+
+    function estadoDe(total: ConsolidadoDto, locationId: string): string | undefined {
+      return total.ubicaciones.find((u) => u.locationId === locationId)?.estadoDelPeriodo;
+    }
+
+    it('cerrado con su conteo es CERRADO; reabierto CONSERVA el conteo y vuelve a ser ABIERTO', async () => {
+      const countId = await crear('/conteos', { locationId: centro, anio: ANIO, mes: MARZO, note: null });
+      expect((await mutar(`/conteos/${countId}/confirmacion`, admin)).status).toBe(SIN_CONTENIDO);
+      expect((await mutar(`/conteos/${countId}/cierre-de-periodo`, admin)).status).toBe(SIN_CONTENIDO);
+
+      const cerrado = (await consolidado()).body as ConsolidadoDto;
+      expect(estadoDe(cerrado, centro)).toBe('CERRADO');
+      expect(estadoDe(cerrado, norte)).toBe('ABIERTO');
+      expect([cerrado.cerradas, cerrado.abiertas]).toEqual([1, 1]);
+
+      const periodos = await request(servidor()).get('/periodos').query({ locationId: centro }).set('Cookie', admin);
+      const marzo = (periodos.body as { id: string; anio: number; mes: number }[]).find((p) => p.anio === ANIO && p.mes === MARZO);
+      const reabierto = await mutar(`/periodos/${marzo?.id ?? ''}/reapertura`, duenaDelNegocio, { motivo: 'Faltó una factura de marzo' });
+      expect(reabierto.status).toBe(SIN_CONTENIDO);
+
+      // El conteo sigue confirmado: es exactamente el caso que la regla vieja leía al revés.
+      const { rows } = await duena.query<{ status: string }>('SELECT status FROM physical_count WHERE id = $1', [countId]);
+      expect(rows[0]?.status).toBe('CONFIRMADO');
+
+      const abierto = (await consolidado()).body as ConsolidadoDto;
+      expect(estadoDe(abierto, centro)).toBe('ABIERTO');
+      expect([abierto.cerradas, abierto.abiertas]).toEqual([0, 2]);
     });
   });
 });

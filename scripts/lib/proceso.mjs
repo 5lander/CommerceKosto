@@ -26,7 +26,7 @@
  * plataforma.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -106,5 +106,60 @@ export function correr(comando, args, opciones = {}) {
  */
 export function correrCli(paquete, args, opciones = {}) {
   const { ejecutable, ...resto } = opciones;
-  return correr(process.execPath, [binarioDe(paquete, ejecutable ?? paquete), ...args], resto);
+  // `node` significa el propio Node, no un paquete que resolver. Su hermana
+  // asincrona ya lo trataba asi; que aqui no lo hiciera era una asimetria entre
+  // dos funciones que se leen como equivalentes, y de esas salen los fallos que
+  // cuestan media tarde.
+  const argumentos =
+    paquete === 'node' ? [...args] : [binarioDe(paquete, ejecutable ?? paquete), ...args];
+
+  return correr(process.execPath, argumentos, resto);
+}
+
+/**
+ * Como `correrCli`, pero SIN esperar: devuelve el proceso hijo.
+ *
+ * Hace falta para los comandos que no terminan —un compilador en vigilancia, un
+ * servidor— donde `spawnSync` bloquearia para siempre. Pasa por `node` con la
+ * ruta del binario por la misma razon que la version sincrona: en Windows, un
+ * `.cmd` no se lanza sin shell desde la mitigacion de CVE-2024-27980
+ * (docs/incidencias/INC-006).
+ *
+ * @param {string} paquete  `node` para el propio Node; si no, el paquete npm.
+ * @param {readonly string[]} args
+ * @param {import('node:child_process').SpawnOptions & {ejecutable?: string}} [opciones]
+ */
+export function correrCliAsincrono(paquete, args, opciones = {}) {
+  const { ejecutable, ...resto } = opciones;
+  const argumentos =
+    paquete === 'node' ? args : [binarioDe(paquete, ejecutable ?? paquete), ...args];
+
+  return spawn(process.execPath, argumentos, { ...resto, shell: false });
+}
+
+/**
+ * Un argumento de la linea de ordenes, en sus DOS formas: `--nombre=valor` y
+ * `--nombre valor`. `undefined` si no esta.
+ *
+ * Los scripts operados los leen asi —no hay `commander` ni nada que instalar—,
+ * y tres de ellos tenian su propia copia.
+ *
+ * LAS DOS FORMAS, Y NO UNA, PORQUE LAS DOS ESTABAN EN USO. Al juntar las copias
+ * en P16-G se conservo solo la del `=`, y eso rompio en silencio la sintaxis que
+ * `migrate:new` documenta en su propio mensaje de uso (`--name <slug>`): el
+ * script decia «falta --name» con el `--name` delante. Una utilidad compartida
+ * que estrecha el contrato de quien la usa no es una simplificacion: es un
+ * cambio de comportamiento escondido en un refactor.
+ *
+ * @param {string} nombre @returns {string | undefined}
+ */
+export function argumento(nombre) {
+  const conIgual = process.argv.find((a) => a.startsWith(`--${nombre}=`));
+  if (conIgual !== undefined) return conIgual.slice(`--${nombre}=`.length);
+
+  const indice = process.argv.indexOf(`--${nombre}`);
+  if (indice === -1) return undefined;
+
+  const siguiente = process.argv[indice + 1];
+  return siguiente === undefined || siguiente.startsWith('--') ? undefined : siguiente;
 }

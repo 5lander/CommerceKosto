@@ -196,6 +196,20 @@ El detalle completo está en `docs/OPTIMIZACION.md` §1 y es obligatorio. Resume
 ### Errores
 - Errores tipados de dominio · **nunca** capturar y silenciar · el mensaje al usuario y el detalle del log son cosas distintas
 
+### Contenido que pasa por dos intérpretes
+
+**El contenido de archivos y de mensajes se escribe con la herramienta de escritura, o desde un archivo (`-F`, heredoc a un archivo). NUNCA incrustado en un comando de shell.**
+
+La causa es siempre la misma: el texto atraviesa **dos intérpretes** —Python y JS, bash y `node -e`, PowerShell y git— y el primero se come lo que el segundo necesitaba. No produce un error: produce **algo plausible y distinto**, que es la peor clase de fallo.
+
+| Qué pasó | Qué se comió el primer intérprete |
+|---|---|
+| **INC-007, casos 7, 8 y 14** | `\b` en una cadena normal de Python es el carácter de **retroceso** (0x08), no un límite de palabra. La regex compila, no lanza y **no casa nunca**: el check pasa en verde sin examinar nada |
+| **P16-I** | Los backticks de un texto en Markdown dentro de `node -e "…"` los ejecutó **bash** como sustitución de comandos, y el archivo quedó con los huecos donde estaban los nombres |
+| **P16-H** | `-m @'…'@` es un *here-string* de PowerShell; en bash son dos `@` pegados al mensaje, y el commit salió con la arroba en el asunto |
+
+Corolario práctico: `git commit -F archivo`, `Write`/`Edit` para todo archivo, y si hace falta generar texto desde un script, que el script **escriba el archivo**, no que el shell lo transporte. Lo caza `sin-caracteres-de-control` de `audit:forbidden` cuando el daño es un carácter de control, pero la mitad de los casos no lo son — esta regla existe para no llegar hasta ahí
+
 ### Comentarios
 - El código explica el *qué*; el comentario explica el *por qué* · **sin código comentado** en el repositorio
 
@@ -341,6 +355,29 @@ Cada una es verificable; la sección E de `docs/AUDITORIA.md` se deriva de aquí
 **R13 — IVA recuperable es configuración de la company**, no constante. Afecta el costo de ítems y empaques por igual. *(desde P3)*
 
 **R14 — El PVP incluye IVA; el food cost se calcula sobre venta neta.** `venta_neta = pvp / (1 + iva_venta)`. *(desde P5)*
+
+**R15 — La varianza del mes cuadra con el inventario, y se parte en uso y precio.** Por ítem y ubicación, sobre el mismo mes.
+
+**La identidad es en CANTIDADES**, y ahí no admite tolerancia:
+
+```
+varianza_uso_kg  =  −mermas_y_ajustes_kg (§18)  −  diferencia_de_conteo_kg (§18)
+```
+
+Con el `consumo_real` de D-16.202 —el que resta lo que salió por transferencia o a producción— el término de transferencias y producción **se cancela algebraicamente** al despejar el stock teórico, y lo que queda es exactamente lo que el libro no explica. Si no cuadra, una de las dos vistas está mal y da igual cuál: las dos salen del mismo libro.
+
+**El dinero se descompone, y por eso la identidad no se enuncia en dólares:**
+
+```
+varianza_uso     = varianza_uso_kg × costo_de_uso
+varianza_precio  = Σ (total_cost real − cantidad × costo_de_uso), con el signo con el que
+                   ese movimiento entra en el consumo real
+varianza_total   = consumo_real − consumo_teórico  =  varianza_uso + varianza_precio
+```
+
+**Son dos problemas distintos y no se suman a ciegas:** gastar más kilos de los que la receta manda es de cocina; pagarlos más caros que el precio de referencia es de compras. Un mes puede tener la varianza de uso en cero y la de precio disparada, y confundirlas manda a arreglar lo que no está roto.
+
+La varianza se enseña en **cuatro líneas**: `merma registrada · ajustes (con signo) · sin explicar · precio de compra frente al de referencia`. *(desde P16-J)*
 
 ---
 

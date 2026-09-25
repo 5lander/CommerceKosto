@@ -27,7 +27,7 @@ export interface EventoDeUsuario {
   readonly companyId: CompanyId;
   readonly eventType: string;
   /** Solo IDs y escalares. Jamás datos personales en claro (SEGURIDAD.md §10). */
-  readonly detail: Readonly<Record<string, string>>;
+  readonly detail: Readonly<Record<string, string | number | boolean>>;
 }
 
 export async function registrarEventoDeUsuario(evento: EventoDeUsuario): Promise<void> {

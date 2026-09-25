@@ -60,17 +60,41 @@ export interface SesionActiva {
   readonly companyId: CompanyId;
   readonly permisos: readonly string[];
   readonly alcance: AlcanceDeUsuario;
+  /** Las de la company, para comprobar pertenencia. Ver el puerto. */
+  readonly ubicacionesDeCompany: readonly LocationId[];
+  /**
+   * El token anti-CSRF de esta sesion, en claro (ADR-021).
+   *
+   * ES `string` Y NO `string | null` porque la sesion sin token ya se rechazo
+   * mas arriba: quien lee esto no tiene que acordarse de un caso que no puede
+   * llegar. Lo usan `CsrfGuard` para comparar y `GET /auth/sesion` para
+   * devolverselo al cliente que recargo la pagina.
+   */
+  readonly csrfToken: string;
 }
 
 /**
- * Comprueba que la ubicacion esta en el alcance de quien pregunta.
+ * Comprueba que la ubicacion es de esta company Y esta en el alcance.
  *
- * `alcance` es una union: o «la company entera» o «esta lista de ubicaciones».
- * Un `OWNER` pasa siempre; un `GERENTE_LOCAL` solo por las suyas.
+ * SON DOS COMPROBACIONES Y EL ORDEN IMPORTA. La primera —¿es siquiera mia?— se
+ * le hace a TODO el mundo, incluido el `OWNER`; la segunda —¿puedo con ella?—
+ * solo a quien tiene alcance de ubicaciones.
+ *
+ * POR QUE LA PRIMERA EXISTE (P15). Antes esta funcion salia temprano si el
+ * alcance era de company, asi que un `locationId` de OTRA company pasaba entera:
+ * `GET /costeo?locationId=<ajena>` respondia **200**. No habia fuga —RLS filtra
+ * y lo devuelto eran los productos del propio usuario— pero incumplia
+ * CLAUDE.md 4.4 y, peor para un producto cuyo valor es el numero, ensenaba una
+ * carta entera a coste cero. Un numero plausible y falso es peor que un error.
+ *
+ * Lo encontro el pentest de P15, no una revision de codigo.
  *
  * @throws {UbicacionFueraDeAlcanceError}
  */
 export function exigirUbicacionEnAlcance(sesion: SesionActiva, locationId: LocationId): void {
+  if (!sesion.ubicacionesDeCompany.includes(locationId)) {
+    throw new UbicacionFueraDeAlcanceError();
+  }
   if (sesion.alcance.clase === 'company') {
     return;
   }
@@ -105,6 +129,15 @@ export class ValidarSesion {
       throw new SesionInvalidaError('revocada');
     }
 
+    // Sesion anterior a P16-A2: no tiene token anti-CSRF y por tanto no puede
+    // probar el origen de una mutacion. Se corta aqui, con 401, para que el
+    // usuario vuelva a entrar y reciba una sesion completa — en vez de navegar
+    // con normalidad y descubrir el problema al pulsar «Guardar» (ADR-021).
+    const csrfToken = contexto.csrfToken;
+    if (csrfToken === null) {
+      throw new SesionInvalidaError('sin_csrf');
+    }
+
     await this.refrescarActividad({
       companyId: contexto.companyId,
       sessionId: contexto.sessionId,
@@ -118,6 +151,8 @@ export class ValidarSesion {
       companyId: contexto.companyId,
       permisos: contexto.permisos,
       alcance: contexto.alcance,
+      ubicacionesDeCompany: contexto.ubicacionesDeCompany,
+      csrfToken,
     };
   }
 

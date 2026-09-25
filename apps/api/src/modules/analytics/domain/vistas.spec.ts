@@ -99,6 +99,46 @@ describe('menu engineering (SPEC §15)', () => {
     expect(menu.productos[0]?.cuadrante).toBe('CABALLO');
   });
 
+  /**
+   * El cliente compara con su Excel —que usa `AVERAGE`— y ve otro número. Con
+   * los dos operandos delante puede rehacer la división y ver por qué, sin
+   * llamar a nadie. Ver ADR-015.
+   */
+  it('devuelve los dos operandos del MC de referencia, y la división cuadra', () => {
+    const menu = clasificarMenu({
+      reglaPopularidad: REGLA,
+      productos: [
+        producto({ productId: P1, unidades: 99, mc: '1.00' }),
+        producto({ productId: P2, unidades: 1, mc: '101.00' }),
+      ],
+    });
+
+    expect(menu.mcTotal?.toExactString()).toBe('200');
+    expect(menu.unidadesConMargen.toExactString()).toBe('100');
+    expect(menu.metodoMcPromedio).toBe('PONDERADO_POR_UNIDADES');
+  });
+
+  /**
+   * **`unidadesConMargen` NO es `unidadesTotales`**, y esta es la prueba que lo
+   * fija. Un producto sin PVP no entra ni en el numerador ni en el denominador:
+   * dividir el total entre las unidades totales daría 100/12 en vez de 100/10, y
+   * el cliente vería que «la cuenta no cuadra» teniendo razón.
+   */
+  it('un producto sin PVP no entra en ninguno de los dos lados de la división', () => {
+    const menu = clasificarMenu({
+      reglaPopularidad: REGLA,
+      productos: [
+        producto({ productId: P1, unidades: 10, mc: '10.00' }),
+        producto({ productId: P2, unidades: 2, mc: null }),
+      ],
+    });
+
+    expect(menu.unidadesTotales.toExactString()).toBe('12');
+    expect(menu.unidadesConMargen.toExactString()).toBe('10');
+    expect(menu.mcTotal?.toExactString()).toBe('100');
+    expect(menu.mcPromedio?.toExactString()).toBe('10');
+  });
+
   it('un producto activo sin unidades es SIN_DATOS, no un PERRO', () => {
     const menu = clasificarMenu({
       reglaPopularidad: REGLA,
@@ -256,6 +296,75 @@ describe('food cost real y la conciliación R7 (SPEC §16)', () => {
     expect(real.brechaEnPuntos).toBeNull();
     expect(real.varianzaPct).toBeNull();
   });
+
+  /**
+   * **CC-011 — el mes con el vocabulario completo del libro** (D-16.201).
+   *
+   * Los números están en `docs/pruebas/casos-conocidos.md`, calculados a mano
+   * antes que este código, y salen del MISMO mes que CC-010 y CC-012: ocho
+   * movimientos de marzo con compra, corrección, transferencia, producción,
+   * merma, ajuste y consumo por venta.
+   *
+   * Lo que lo hace útil es que **la varianza se desglosa en el vocabulario del
+   * libro**, sin residuo: 20 de transferencia + 8 de producción + 2,50 de
+   * merma − 0,50 de ajuste + 2 de faltante del conteo = 32.
+   *
+   * **ESTA PRUEBA FIJA LO QUE EL SISTEMA DA HOY, NO LO QUE DEBE DAR.** CC-011
+   * ya está reescrito con la fórmula de **D-16.202** —que resta lo que salió
+   * por transferencia o a producción— y su varianza esperada es **4,00**, no
+   * 32,00. Mientras tanto, estos 32,00 son el comportamiento actual, anclado a
+   * propósito: es lo que hará visible el cambio cuando **P16-J** entre, justo
+   * antes de la pantalla 25. Los 28,00 de diferencia son exactamente la
+   * transferencia y la producción.
+   */
+  it('CC-011 — consumo real y varianza de un mes con todo el vocabulario (hasta P16-J)', () => {
+    const real = foodCostReal({
+      // 40 kg contados en febrero, a 1,00 el kilo
+      inventarioInicial: usd('40.00'),
+      // CC-010: 100 + 50 − 50, con la corrección restando su importe
+      comprasDelMes: usd('100.00'),
+      // 86 kg contados en marzo
+      inventarioFinalFisico: usd('86.00'),
+      // 22 kg de receta × unidades vendidas
+      consumoTeorico: usd('22.00'),
+      ventaNetaMes: usd('200.00'),
+      empaqueTeoricoMes: usd('0'),
+      provisionMermaMes: usd('0'),
+      mcMesTotal: usd('178.00'),
+    });
+
+    expect(real.consumoReal.toExactString()).toBe('54');
+    expect(real.consumoTeorico.toExactString()).toBe('22');
+    expect(real.varianzaUsd.toExactString()).toBe('32');
+    // Y R7 sigue cerrando en este mes: 22 + 0 + 0 = 200 − 178.
+    expect(real.diferenciaConciliacion.isZero()).toBe(true);
+  });
+
+  /**
+   * LA MITAD DEL CASO QUE NO ES ARITMÉTICA, y por eso se afirma aquí: de esos
+   * 32 dólares de varianza, **28 son transferencia y producción** — stock que
+   * salió de este local sin consumirse en él. SPEC §16 los cuenta como consumo
+   * porque en el Excel no existen. Es duda abierta #16, y esta prueba fija el
+   * comportamiento actual para que un cambio de modelo se vea aquí.
+   */
+  it('CC-011 — 28 de los 32 de varianza son transferencia y producción, no merma', () => {
+    const sinTransferirNiProducir = foodCostReal({
+      inventarioInicial: usd('40.00'),
+      comprasDelMes: usd('100.00'),
+      // 86 + 20 + 8: lo que habría quedado en el local sin esos dos movimientos
+      inventarioFinalFisico: usd('114.00'),
+      consumoTeorico: usd('22.00'),
+      ventaNetaMes: usd('200.00'),
+      empaqueTeoricoMes: usd('0'),
+      provisionMermaMes: usd('0'),
+      mcMesTotal: usd('178.00'),
+    });
+
+    // 26 − 22 = 4, que es la merma (2,50), el ajuste (−0,50) y el faltante (2).
+    expect(sinTransferirNiProducir.consumoReal.toExactString()).toBe('26');
+    expect(sinTransferirNiProducir.varianzaUsd.toExactString()).toBe('4');
+  });
+
 });
 
 describe('punto de equilibrio (SPEC §17)', () => {
@@ -343,6 +452,8 @@ describe('punto de equilibrio (SPEC §17)', () => {
 
     expect(resultado.unidadesEquilibrioMes).toBeNull();
   });
+
+
 });
 
 describe('inventario valorizado (SPEC §18)', () => {
@@ -457,6 +568,71 @@ describe('inventario valorizado (SPEC §18)', () => {
     expect(semaforoDe('FALTAN_COMPRAS')).toBe('REPONER');
     expect(semaforoDe('OK')).toBe('OK');
     expect(semaforoDe('SIN_CONSUMO')).toBe('OK');
+  });
+  /**
+   * **CC-012 — el inventario valorizado del mismo mes** (D-16.201).
+   *
+   * Las cantidades son las que CC-010 pliega del libro, y el conteo y el costo
+   * de uso, los del caso. Está en `docs/pruebas/casos-conocidos.md` con su
+   * aritmética escrita antes que este código.
+   */
+  const marzo = valorizarInventario({
+    items: [
+      item({
+        stockInicial: kg('40'),
+        compras: kg('100'),
+        mermasYAjustes: kg('-2'),
+        otrosMovimientos: kg('-28'),
+        consumoTeorico: kg('22'),
+        conteoFisico: kg('86'),
+        costoDeUso: usd('1.00'),
+      }),
+    ],
+    parametros,
+  });
+
+  it('CC-012 — el stock teórico del mes y su valor', () => {
+    // 40 + 100 − 2 − 28 − 22 = 88
+    expect(marzo.items[0]?.stockTeorico.toExactString()).toBe('88');
+    expect(marzo.items[0]?.valorTeorico.toExactString()).toBe('88');
+    expect(marzo.valorTotal.toExactString()).toBe('88');
+  });
+
+  it('CC-012 — la diferencia es lo que el libro NO explica, y solo eso', () => {
+    // Ni la merma ni el ajuste: los dos ya están dentro del stock teórico.
+    expect(marzo.items[0]?.diferencia?.toExactString()).toBe('-2');
+    expect(marzo.items[0]?.valorDeDiferencia?.toExactString()).toBe('-2');
+  });
+
+  it('CC-012 — la cobertura y el semáforo del mismo mes', () => {
+    // 22 kg / 22 días = 1 kg al día; siete días de cobertura, siete kilos.
+    expect(marzo.items[0]?.puntoDeReorden.toExactString()).toBe('7');
+    expect(marzo.items[0]?.diasCobertura?.toExactString()).toBe('88');
+    expect(marzo.items[0]?.estado).toBe('OK');
+  });
+
+  /**
+   * La aserción que mata a la implementación que olvida `otros`: el error no
+   * sería pequeño, sería **quince veces el hallazgo real**.
+   */
+  it('CC-012 — sin los otros movimientos, la diferencia saldría quince veces mayor', () => {
+    const { items } = valorizarInventario({
+      items: [
+        item({
+          stockInicial: kg('40'),
+          compras: kg('100'),
+          mermasYAjustes: kg('-2'),
+          otrosMovimientos: kg('0'),
+          consumoTeorico: kg('22'),
+          conteoFisico: kg('86'),
+          costoDeUso: usd('1.00'),
+        }),
+      ],
+      parametros,
+    });
+
+    expect(items[0]?.stockTeorico.toExactString()).toBe('116');
+    expect(items[0]?.diferencia?.toExactString()).toBe('-30');
   });
 });
 

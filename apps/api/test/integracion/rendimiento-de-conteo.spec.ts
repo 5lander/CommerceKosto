@@ -30,6 +30,7 @@ import { CalendarioDePeriodos } from '../../src/modules/periods/domain/periodo';
 import { ZONA_HORARIA_DE_PERIODOS } from '../../src/shared/infrastructure/config/periods';
 import { loadConfiguration } from '../../src/shared/infrastructure/config/environment';
 import { MOTIVO_TRANSPORTE, SE_EXIGE_EL_PRESUPUESTO } from '../soporte/transporte';
+import { cookieConCsrf, csrfDe } from '../soporte/csrf';
 
 const OK = 200;
 const CREADO = 201;
@@ -223,7 +224,7 @@ describe('rendimiento del conteo fisico', () => {
       .post('/auth/login')
       .send({ email: correo, contrasena: CLAVE });
     expect(login.status).toBe(OK);
-    cookie = (login.headers['set-cookie']?.[0] ?? '').split(';')[0] ?? '';
+    cookie = cookieConCsrf(login);
 
     await sembrar(usuario);
     countId = await sembrarConteo(usuario);
@@ -242,7 +243,7 @@ describe('rendimiento del conteo fisico', () => {
       const arranque = performance.now();
       const respuesta = await request(servidor())
         .get(`/conteos/${countId}`)
-        .set('Cookie', cookie);
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie));
       muestras.push(performance.now() - arranque);
       expect(respuesta.status).toBe(OK);
       expect((respuesta.body as { filas: unknown[] }).filas).toHaveLength(ITEMS);
@@ -277,7 +278,7 @@ describe('rendimiento del conteo fisico', () => {
       const arranque = performance.now();
       const respuesta = await request(servidor())
         .post('/inventario/movimientos')
-        .set('Cookie', cookie)
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
         .send({
           locationId: medida,
           itemId: rows[0]?.id ?? '',
@@ -285,6 +286,7 @@ describe('rendimiento del conteo fisico', () => {
           cantidad: '1',
           costoTotal: '1.00',
           purchaseArticleId: null,
+          ivaTarifa: '0',
           occurredAt: '2026-06-15T12:00:00.000Z',
           note: null,
         });

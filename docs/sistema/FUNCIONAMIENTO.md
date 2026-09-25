@@ -105,6 +105,11 @@ graph TD
 
 **Ninguno de los dos duplica una regla.** `CostosDeItems` llama a la misma `costoDelItem` de SPEC §12 que usa la consulta de un solo ítem, y cuál precio está vigente lo sigue decidiendo el dominio (R5), no un `DISTINCT ON`. El día que hubiera dos implementaciones, el costo de un plato dependería de por dónde se preguntó.
 
+**Un cero sin receta no es un costo** *(P16-D)*. Un producto sin ninguna línea activa en la ubicación
+—o un combo sin componentes— suma cero, y la respuesta lo marca con `sinReceta` y semáforo `SIN_DATO`.
+La marca sale del dominio (`sinRecetaActiva`) y no entra en ninguna fórmula: los números del motor no
+cambian, cambia que se dice.
+
 **Costear uno pasa por costear todos.** Pedir un solo producto carga la carta entera y se queda con uno. Es deliberado: dos rutas distintas para el mismo número son dos oportunidades de que den respuestas distintas, y en este sistema eso no se ve en pantalla.
 
 
@@ -414,6 +419,71 @@ Lo que sí le corresponde —SPEC §4 lo dice con estas palabras— es un semáf
 de uso y con su propio tipo.
 
 
+## La importación de catálogo (desde P10)
+
+**No es un autoservicio: es una migración operada.** No hay pantalla de subida ni confirmación en dos
+pasos. Un operador ejecuta `npm run importar` con el archivo delante, mira el informe y decide.
+
+```mermaid
+flowchart TD
+    A["npm run importar<br/>archivo.csv --tipo=ITEMS"] --> B{"NODE_ENV<br/>= production?"}
+    B -->|"si, sin --operacion-supervisada"| X["Se niega"]
+    B -->|no| C["IniciarSesion + ValidarSesion<br/>(el MISMO camino que el login)"]
+    C --> D{"tiene<br/>import.write?"}
+    D -->|no| X
+    D --> E["Tope de TAMANO<br/>SEGURIDAD.md 5.1"]
+    E --> F["fork: parser aislado<br/>sin env, 192 MB, 15 s"]
+    F --> G["Tope de FILAS"]
+    G --> H["analizar() con el descriptor<br/>NUNCA lanza: devuelve problemas"]
+    H --> I["import_job: ANALIZADA<br/>el analisis en jsonb"]
+    I --> J{"--confirmar?"}
+    J -->|no| K["Imprime el informe<br/>y no escribe NADA"]
+    J -->|si| L{"hay filas<br/>con problema?"}
+    L -->|si| K
+    L -->|no| M["Caso de uso de LOTE<br/>del modulo dueno"]
+    M --> N["UNA transaccion:<br/>todo o nada"]
+    N --> O["import_job: CONFIRMADA"]
+```
+
+### Quién escribe qué
+
+**`imports` no escribe ni una fila de negocio.** Traduce celdas y delega en el módulo dueño, que
+valida con sus propias reglas — un ítem importado tiene que ser indistinguible de uno creado a mano.
+Lo hace cumplir la regla `tablas-de-catalogo-solo-en-catalog` de `audit:forbidden`, que nombra a
+`imports` explícitamente.
+
+| Tipo | Módulo dueño | Caso de uso |
+|---|---|---|
+| `ITEMS` | `catalog` | `CrearItemsEnLote` — crea también los grupos que falten |
+| `ARTICULOS` | `catalog` | `CrearArticulosEnLote` — el factor lo calcula el dominio |
+| `PRECIOS` | `pricing` | `SugerirPreciosEnLote` — nacen sugeridos (R5) |
+| `PRODUCTOS` | `recipes` | `CrearProductosEnLote` — producto + PVP + empaque |
+| `RECETAS` | `recipes` | `GuardarRecetasEnLote` — **recetas y componentes de combo** |
+| `MOVIMIENTOS` | `inventory` | `RegistrarMovimientosEnLote` |
+
+### Lo que hace que «todo o nada» sea cierto, y hasta dónde llega
+
+Cada caso de uso de lote abre **un solo `TenantTransaction.run()`** y escribe dentro. Antes de eso, el
+dominio valida el lote **entero** y devuelve todos los problemas con su posición — no el primero,
+porque quien migra un catálogo arregla el archivo de una pasada.
+
+**El límite, dicho en voz alta:** la atomicidad es **por pasada**, no entre módulos.
+`ClienteDeTransaccion` no expone `$transaction`, así que una transacción no puede contener a otra.
+Importar ítems y luego precios son dos transacciones. Lo compensa el orden —validar todo antes de
+escribir nada—, y lo que queda expuesto es un fallo de infraestructura entre pasadas.
+
+### Cómo se distingue una receta de un combo
+
+**Por el tipo del producto destino, no por una columna.** SPEC §8: un `SIMPLE` consume ítems, un
+`COMBO` consume productos simples ya costeados. Una línea cuyo destino es un combo se escribe en
+`combo_component`; si fuera a `recipe_line`, se le volvería a aplicar el rendimiento y la provisión de
+merma, que es lo que R12 prohíbe (ADR-008 §14).
+
+Un combo no puede contener otro combo: es lo que «componentes que son productos simples» significa, y
+es lo que hace innecesario validar ciclos ahí.
+
+---
+
 ## El proceso de la API por dentro (desde P0)
 
 Lo que atraviesa una petición, en orden. Las cuatro protecciones globales se registran en `AppModule`/`bootstrap.ts`, de modo que **las pruebas levantan exactamente la misma aplicación que se despliega**: una defensa cableada solo en `main.ts` no existe en los tests, y entonces el test de que existe no prueba nada.
@@ -425,7 +495,7 @@ graph TD
     HDR --> PINO["pino-http: genReqId → correlation_id<br/>entra en AsyncLocalStorage<br/>sale en x-correlation-id"]
     PINO --> ROUTE{¿la ruta existe?}
     ROUTE -->|no| FILT
-    ROUTE -->|sí| GUARD[ThrottlerGuard]
+    ROUTE -->|sí| GUARD["LimitadorGlobalGuard<br/>(ThrottlerGuard con ipDelCliente, P16-A1)"]
     GUARD -->|excede| FILT
     GUARD --> INT[TimeoutInterceptor]
     INT --> CTRL[controlador]
@@ -444,21 +514,27 @@ graph TB
         MON["money/ · Money · Ratio · Count · Quantity"]
         UNI[unidad/ · UnidadDeUso]
     end
-    subgraph app["shared/application — solo interfaces"]
+    subgraph app["shared/application — interfaces y dos casos de uso transversales"]
         PA[AuditLogPort]
         PM[MailerPort]
         PS[FileStoragePort]
+        PR[RegistroDeLimites]
+        LIM["limite-de-tasa/ · LimitadorDeTasa (P16-A1)"]
+        COR["correo/ · plantillas y CorreoAEncolar (P16-A1)"]
     end
     subgraph infra["shared/infrastructure"]
         CFG[config/ · esquema Zod]
         OBS[observability/ · correlación y logger]
-        PER[persistence/ · PrismaConnection]
-        HTTP[http/ · cabeceras, error, timeout]
+        PER["persistence/ · PrismaConnection · outbox · registro de límites"]
+        HTTP["http/ · cabeceras, error, timeout · ipDelCliente · LimitadorGlobalGuard"]
         HLT[health/ · /health y /ready]
         FK[fakes/ · correo y almacenamiento]
+        MAIL["correo/ · consola · resend · mailer.provider (P16-A1)"]
     end
-    PER -.implementa.-> PA
+    PER -.implementa.-> PA & PR
     FK -.implementan.-> PM & PS
+    MAIL -.implementa.-> PM
+    LIM --> PR
     MON --> DEC
     MON --> UNI
 ```
@@ -473,3 +549,371 @@ graph TB
 | `/ready` | *readiness* — ¿puede atender tráfico? | Sí |
 
 La distinción tiene coste concreto: si `/health` mirara la base, un corte de PostgreSQL haría que el orquestador **matara y reiniciara todas las réplicas**, que es lo peor que puede pasar durante un corte de base de datos. Con `/ready`, la réplica sale del balanceador y vuelve sola.
+
+---
+
+## La capa visual de la aplicación cliente (desde P14)
+
+`apps/web` viste la identidad de `docs/Manual de Marca/platise-brand-book.pdf`.
+El detalle de las decisiones está en **ADR-019**; aquí va cómo está montado y
+qué se puede tocar sin romper nada.
+
+```mermaid
+graph LR
+    subgraph Reemplazable["Capa visual · se reescribe entera"]
+        TK[tokens.css<br/>paleta, retícula, tipografía]
+        TP[tipografia.css<br/>generado]
+        GL[global.css<br/>vocabulario de clases]
+        UI["componentes/ui/<br/>Marca · Tabla · Estados"]
+    end
+
+    subgraph Estable["No se toca al cambiar el aspecto"]
+        PG["app/*/page.tsx<br/>solo className"]
+        LB["lib/api.ts · lib/sesion.tsx"]
+        TX["textos/es.ts"]
+    end
+
+    TK --> GL
+    TP --> GL
+    GL --> UI
+    GL -.->|clases| PG
+    UI --> PG
+    TX --> PG
+    PG --> LB
+```
+
+### Dónde vive cada cosa
+
+| Capa | Archivo | Se reemplaza |
+|---|---|---|
+| Tokens | `src/styles/tokens.css` | ✅ entero |
+| Tipografía | `src/styles/tipografia.css` (**generado**) + `public/fuentes/` | ✅ entero |
+| Apariencia | `src/styles/global.css` | ✅ entero |
+| Componentes de UI | `src/componentes/ui/` | ✅ entero |
+| Marca | `public/marca/{isotipo,logotipo}.svg` | ✅ entero |
+| Pantallas | `src/app/*/page.tsx` | ⚠️ solo sus `className` |
+| Hooks y servicios | `src/lib/` | ❌ no se toca |
+
+**La prueba de que la separación es real:** `global.css` se puede reescribir
+entero sin abrir una sola página. No queda ni un `style={{…}}` ni un `var(--…)`
+dentro de un componente — antes de P14 había 107 bloques repartidos.
+
+### Las tres reglas que no se pueden romper al cambiar el aspecto
+
+1. **El panel operativo va en claro, sin vidrio y sin sombra.** No es
+   preferencia: el manual (p. 30) lo decide por el reflejo de una cocina, y
+   prohíbe el vidrio detrás de una tabla densa porque baja el contraste del
+   texto pequeño. Por eso no hay `prefers-color-scheme`.
+2. **Persimmon vivo (`#C4552F`) no es color de texto.** Reprueba con 3,93:1 y el
+   manual lo declara «la regla, no el error». Se usa como señal —la cinta al
+   costado de una fila— y su variante profunda (`#A8391A`, 5,64:1) para texto.
+3. **El tramo menor de la «regla rota» es siempre Persimmon.** Si el naranja
+   queda a la izquierda, se invirtió el significado: el tramo mayor son los
+   costos y el menor es el margen. El manual lo lista como pieza mal generada.
+
+### Cómo se regenera lo generado
+
+`tipografia.css` y los dos `.svg` de la marca no se escriben a mano. Salen del
+PDF del manual con los guiones que quedaron descritos en
+`docs/pasos/P14/CONSTRUCCION.md`. **Si el manual cambia de versión, se vuelven a
+extraer de ahí**, y la comprobación de que la extracción es correcta es
+recalcular los seis ratios de contraste que el manual publica: si un hex se leyó
+mal, alguno no cuadra.
+
+### Qué NO cubre ninguna prueba automatizada
+
+El aspecto. Lo que hay es medición con navegador —Chrome sin cabeza, capturas y
+`scrollWidth` contra `clientWidth`—, y es lo que encontró los dos fallos reales
+de P14: la barra partida en dos filas y un desbordamiento que resultó no existir.
+
+---
+
+## El correo transaccional y el restablecimiento de contraseña (desde P16-A1)
+
+**La API no envía correo. Encola.** Toda escritura que anuncia algo por correo —invitar, reenviar,
+pedir un restablecimiento, el aviso de bloqueo del login— deja su fila en `email_outbox` **dentro
+de la misma transacción** que crea lo anunciado. Quien entrega es un **tercer proceso**, el
+despachador (`apps/api/src/despachador.ts`, servicio `correo` en compose), con su propio rol
+`costeo_despachador`, que ve exactamente dos tablas y ninguna otra (ADR-025).
+
+```mermaid
+sequenceDiagram
+    participant A as ADMIN (navegador)
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL
+    participant D as Despachador (costeo_despachador)
+    participant R as Resend
+    participant B as Buzon del invitado
+
+    A->>API: POST /usuarios (email)
+    API->>DB: golpear(usuario.invitar, ip) y golpear(usuario.invitar, correo:sha256) - una transaccion por clave
+    API->>DB: BEGIN - set_config(company) - INSERT app_user INVITED - INSERT email_outbox PENDIENTE - COMMIT
+    API-->>A: 202, siempre (no dice si el correo ya existia)
+
+    loop cada CORREO_INTERVALO_MS (5 s)
+        D->>DB: SELECT ... FOR UPDATE SKIP LOCKED LIMIT lote, y reserva de 5 min en la misma transaccion
+        D->>DB: renovarReserva(fila) con la firma de la pasada (0 filas: se cede)
+        D->>R: POST /emails (from, to, subject, text), timeout 10 s
+        alt 2xx
+            R-->>D: aceptado
+            D->>DB: UPDATE ENVIADO, sent_at, datos = plantilla + destinatario
+        else error o timeout
+            R-->>D: 4xx, 5xx o nada
+            D->>DB: UPDATE intentos + 1, error, siguiente_intento_en (1, 2, 4, 8 min); FALLIDO al quinto con datos saneado
+        end
+        D->>DB: DELETE FROM rate_limit_hit WHERE at < ahora - 24 h
+        D->>D: latido en CORREO_LATIDO (el healthcheck del contenedor)
+    end
+
+    R->>B: correo con APP_URL/activacion?token=... y su caducidad
+```
+
+Lo que el diagrama no enseña y conviene saber:
+
+- **`datos` lleva el enlace con el token en claro mientras el correo está en vuelo, y solo el
+  despachador puede leerlo.** `costeo_app` y `costeo_backoffice` tienen `SELECT` por columnas,
+  todas menos esa. Al cerrar el correo, `datos` pasa a ser `{plantilla, destinatario}`.
+- **`SKIP LOCKED` no basta solo.** El bloqueo de fila muere al confirmar y el envío ocurre fuera:
+  por eso la pasada **reserva** las filas cinco minutos (`siguiente_intento_en`) y renueva la
+  reserva fila a fila. Dos despachadores a la vez —el contenedor viejo y el nuevo en un
+  redespliegue— no mandan el mismo correo dos veces. La única ventana que queda son los
+  milisegundos entre el `2xx` y el `UPDATE`, y está dicha en ADR-025.
+- **Un fallo de envío no para la pasada; un fallo al marcar sí.** El primero se anota y el
+  siguiente correo se intenta. El segundo sube sin tocar la fila: un correo que el proveedor
+  aceptó no debe quedar `PENDIENTE` con un error de base en la columna que leen la aplicación y el
+  back office.
+- **`SIGTERM` termina la pasada en curso y después cierra el pool.** Sin `enableShutdownHooks()`
+  de Nest, que haría lo contrario; una regla de `audit:forbidden` lo vigila.
+- **El back office ve la salud, no el contenido**: `GET /correo/salud` devuelve
+  `{pendientesAntiguos, fallidos, ultimoEnvio}` y nada más.
+
+### El restablecimiento de contraseña ocurre sin sesión, y por eso pasa por dos funciones definer
+
+Quien olvidó su contraseña no puede entrar, así que no hay tenant que fijar. Las dos escrituras van
+por `password_reset_request` y `password_reset_consume` —las únicas dos funciones `SECURITY
+DEFINER` que escriben—, y todo lo demás lo hace la aplicación por su camino normal, bajo el
+`company_id` que la segunda devuelve.
+
+```mermaid
+sequenceDiagram
+    participant U as Persona sin sesion
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL (definer como costeo_migrator)
+    participant D as Despachador
+
+    U->>API: POST /auth/password/olvido (email)
+    API->>DB: golpear(password.olvido, ip:...) y golpear(password.olvido, correo:sha256)
+    API->>API: token de 256 bits, SHA-256, expires_at = ahora + HORAS_DE_RESTABLECIMIENTO
+    API->>DB: SELECT password_reset_request(email, hash, expires_at, datos)
+    Note over DB: con usuario ACTIVE: INSERT password_reset_token + INSERT email_outbox (company_id del usuario)<br/>sin usuario: nada, y devuelve igual
+    API->>DB: audit_log auth.password.reset_requested (ANONYMOUS, con IP, sin company, sin el correo)
+    API-->>U: 202 con cuerpo vacio, exista o no el correo
+    D-->>U: correo con APP_URL/restablecer?token=... (caduca en 1 h)
+
+    U->>API: POST /auth/password/restablecimiento (token, contrasena)
+    API->>DB: golpear(password.restablecimiento, ip:...)
+    API->>DB: SELECT user_id, company_id FROM password_reset_consume(hash, ahora)
+    Note over DB: UPDATE used_at si no estaba usado ni caducado y el usuario sigue ACTIVE; si no, ninguna fila
+    API->>DB: run(company_id): leer el correo, politica de contrasenas, Argon2id, revocar TODAS las sesiones, audit auth.password.reset_completed
+    API-->>U: 204 (o 400 ENTRADA_INVALIDA con el mismo mensaje para token vacio, inexistente, usado o caducado)
+```
+
+Tres cosas que son la decisión entera:
+
+- **La respuesta de `/olvido` es la misma exista o no el correo**, y el trabajo en Node también.
+  Lo que difiere es lo que la base hace por dentro (dos `INSERT` con usuario, ninguno sin él): un
+  residuo de milisegundos que se reconoce, se acota con el límite de tasa —diez muestras por hora
+  no dan para medirlo— y se mide con una prueba de medianas.
+- **El token se gasta antes de mirar la contraseña.** Una contraseña débil obliga a pedir otro
+  enlace; la alternativa dejaba vivo un token contra el que ya se falló.
+- **Restablecer revoca todas las sesiones** (SEGURIDAD.md §2.2), incluida la que alguien pudiera
+  tener abierta con la contraseña vieja.
+
+### Lo que cuenta por IP cuenta por la IP del cliente, no por la del proxy
+
+Desde P14b hay un proxy delante (Caddy), y hasta P16-A1 la API tomaba `socket.remoteAddress`:
+la IP de Caddy, para todos. `ipDelCliente` (`shared/infrastructure/http/`) es el único camino y
+cree el último salto de `X-Forwarded-For` solo si el socket está en `PROXY_DE_CONFIANZA`. Lo usan
+el login, el back office, el limitador global de 300/min y el límite de tasa de las cuatro rutas
+(ADR-026, INC-022).
+
+---
+
+## El armazón de la aplicación cliente (desde P16 · Armazón)
+
+Todo lo autenticado de `apps/web` cuelga de un grupo de rutas; lo público queda fuera. Las decisiones
+están en **ADR-020** (el armazón) y **ADR-022** (cómo leen y escriben las pantallas).
+
+```mermaid
+graph TD
+    R[app/layout.tsx<br/>ProveedorDeSucursal] --> PUB[/entrar · /sucursal<br/>fuera del grupo/]
+    R --> G["app/(app)/layout.tsx"]
+    G --> PP[ProveedorDePermisos<br/>GET /auth/sesion una vez<br/>permisos + token CSRF]
+    PP --> S[Suspense<br/>useSearchParams]
+    S --> A[Armazon<br/>Cabecera · BarraLateral · lámina]
+    A --> L["(app)/ventas/layout.tsx<br/>seccion('sales.read')"]
+    L -->|sin permiso o cargando| NO[Estado en sitio]
+    L -->|tiene| P[page.tsx<br/>Marco → Vista → contenido]
+    P --> UL[useLectura / useCarga]
+    P --> UE[useEnvio]
+    UL --> API[(lib/api.ts → API)]
+    UE --> API
+```
+
+- **Los permisos no se deducen del rol** y empiezan cerrados: mientras `GET /auth/sesion` no ha
+  contestado, `tiene()` dice que no y ninguna sección lanza su lectura.
+- **El mes es `?anio&mes`**, por defecto el de `America/Guayaquil`. La cabecera solo enseña el
+  selector en las secciones que lo tienen (`conMes` en `navegacion.ts`) y la barra lateral lo lleva en
+  sus enlaces.
+- **Una lectura enseña solo su propio resultado**: si la sucursal o el mes cambian, vuelve a
+  «cargando» en el mismo render, y la respuesta vieja se descarta al llegar.
+- **Si la sesión se cae**, cualquier respuesta `SESION_INVALIDA` manda a `/entrar` desde un solo sitio
+  (`useEntrarAlCaducar`), registrado por el armazón y por `/sucursal`.
+- **Inicio es de todos, y enseña lo que la sesión lee** *(pantalla 2)*: con `analytics.read`, los
+  indicadores del resumen del mes con el semáforo de la API; sin él —`BODEGA`—, qué reponer, sin
+  cantidades. La sección pide `replenishment.read`, que tienen todos los roles, y `/` lleva ahí.
+- **Lo que `lib/` calcula para enseñar tiene pruebas** (`node --test`, ADR-027): `decimales` y `fechas`.
+- **Las páginas públicas** son `/entrar`, `/sucursal`, `/olvide` y `/restablecer` *(pantalla 1b)*: pedir el
+  enlace dice siempre lo mismo, y restablecer comprueba largo y repetición **antes** de gastar el token.
+- **Sin sesión, las mutaciones salen sin `X-CSRF-Token`** y decide la API: el login, la activación, el
+  olvido y el restablecimiento funcionan; una ruta protegida contesta `SESION_INVALIDA`. Hasta el
+  armazón, el cliente pedía el token también sin sesión y **el login no llegaba a salir** (INC-023).
+
+---
+
+## La sesión y el token anti-CSRF (desde P16-A2)
+
+Hasta P16-A2 la única defensa contra CSRF era el atributo `SameSite=Strict` de la cookie de sesión.
+Lo aplica el **navegador**, no la API; mira el **sitio** y no el **origen**; y la API no tiene forma
+de saber si se aplicó. Desde P16-A2 hay además un **token por sesión** que comprueba el servidor
+(U4, **ADR-021**), y los tres guards globales corren en un orden que no es estético: **sesión → CSRF
+→ permisos**. Sin sesión no hay token con el que comparar, y comprobar permisos de una petición que
+ni siquiera originó el usuario sería autorizar un ataque antes de rechazarlo.
+
+```mermaid
+sequenceDiagram
+    participant P as Pagina (apps/web)
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL
+
+    Note over P,DB: 1. Entrar - nacen los DOS tokens de la misma sesion
+    P->>API: POST /auth/login {email, contrasena}   (solo application/json)
+    API->>API: GeneradorDeTokens x2 - sesion y csrf, 32 bytes cada uno, NO derivados
+    API->>DB: INSERT session (token_hash = SHA256(sesion), csrf_token EN CLARO)
+    API-->>P: 200 {expiraEn, csrf} + Set-Cookie: sesion=... (HttpOnly, SameSite=Strict)
+    Note over P: guardarCsrf() - en memoria, nunca en localStorage ni en una cookie
+
+    Note over P,DB: 2. Mutar - la cabecera es lo que un sitio cruzado no puede poner
+    P->>API: POST /conteos  Cookie: sesion=...  X-CSRF-Token: el token
+    API->>DB: session_lookup(SHA256(cookie)) - devuelve permisos, alcance y csrf_token
+    Note over API: SesionGuard deja la sesion en el WeakMap de la peticion
+    alt csrf_token es NULL (sesion anterior a la migracion)
+        API-->>P: 401 SESION_INVALIDA - media sesion no es una sesion
+    else falta la cabecera o no coincide
+        API->>API: CsrfGuard - timingSafeEqual(SHA256(esperado), SHA256(recibido))
+        API-->>P: 403 CSRF_INVALIDO (el motivo ausente/no_coincide se queda en el log)
+    else coincide
+        API->>API: PermisosGuard - la capacidad que el endpoint declara
+        API->>DB: TenantTransaction.run(companyId) - la escritura
+        API-->>P: 201
+    end
+
+    Note over P,DB: 3. Recargar - el token se recupera, no se rota
+    P->>API: GET /auth/sesion   Cookie: sesion=...   (lectura: sin cabecera)
+    API-->>P: 200 {userId, permisos, alcance, csrf} - el MISMO token, sin companyId
+
+    Note over P,DB: 4. Dos pestanas, sin atacante - el reintento unico
+    P->>API: POST /ventas con un token que dejo de valer
+    API-->>P: 403 CSRF_INVALIDO
+    P->>API: GET /auth/sesion - tira el de memoria y pide el vigente
+    P->>API: POST /ventas otra vez (UNA sola vez; si vuelve a fallar, el error sube)
+```
+
+Lo que el diagrama no enseña y decide el diseño:
+
+- **El token se guarda en claro, y el de sesión no.** No es una credencial de acceso: quien tenga la
+  columna no puede entrar, porque la credencial es la cookie, de la que la base guarda solo el
+  SHA-256. Y quien ya tenga la cookie **no necesita** el token: está actuando *como* la víctima, no
+  *contra* ella. Guardarlo hasheado, además, haría imposible el paso 3.
+- **La comparación se hace sobre los SHA-256 de los dos lados.** `timingSafeEqual` lanza con
+  longitudes distintas, así que comparar los tokens crudos obligaría a mirar la longitud primero —y
+  esa comprobación instantánea es un oráculo del tamaño del token bueno—. Hasheando, siempre son 32
+  bytes. El hash aquí no guarda nada: iguala longitudes.
+- **Cero consultas nuevas.** El token viaja en `session_lookup`, que ya corría en cada petición, y
+  sale de la misma fila. `GET /auth/sesion` no consulta nada: devuelve lo que el guard dejó en el
+  `WeakMap`.
+- **Las cuatro rutas públicas quedan fuera del guard, y el login por una razón distinta a las otras
+  tres.** En activación, olvido y restablecimiento no hay sesión que suplantar. En el login sí había
+  algo: una petición cruzada no *usa* una credencial, la **crea** —*login CSRF* / fijación—, y
+  `SameSite` gobierna el envío de la cookie, no su almacenamiento. Lo que lo cierra es que la API
+  **analiza solo `application/json`** (`bootstrap.ts`: `bodyParser: false` + `useBodyParser('json')`),
+  que es justo lo que un `<form>` cruzado no puede emitir. `POST /auth/logout` **no** queda fuera.
+- **El back office lleva el suyo**, en su proceso, su tabla y su guard; lo único que comparten los
+  dos es la comparación en tiempo constante, que vive una sola vez en `shared/infrastructure/http/csrf.ts`.
+- **`Origin`/`Referer` no se comprueba** (D-16.69): duplicaría la lista blanca de CORS, que en
+  desarrollo y en las pruebas está vacía, y la comprobación necesitaría un «si está vacía, pasa» que
+  falla abierto. La señal para reabrirlo está en ADR-021.
+
+---
+
+## La concurrencia optimista (desde P16-B)
+
+Las pantallas editan con **reemplazos totales**, y dos personas con la misma ficha abierta se pisaban
+sin enterarse: ganaba la última en guardar. Desde P16-B cada escritura de reemplazo lleva **lo que se
+leyó**, y si otro escribió entre medias recibe **409 `CONFLICTO_DE_VERSION`** (D-16.11, **ADR-023**).
+Hay dos testigos, porque hay dos formas de escribir: sobre una fila (producto, ítem) o creando una
+fila nueva (receta).
+
+```mermaid
+sequenceDiagram
+    participant A as Dueña
+    participant B as Gerente
+    participant API as API (costeo_app)
+    participant DB as PostgreSQL
+
+    Note over A,DB: 1. Fila que se actualiza - la version va en el WHERE
+    A->>API: GET /productos/p            -> version 4
+    B->>API: GET /productos/p            -> version 4
+    A->>API: PUT /productos/p/ubicaciones {pvp 2.50, version 4}
+    API->>DB: UPDATE product SET version = version + 1 WHERE id = p AND version = 4   (1 fila)
+    API->>DB: upsert product_location (misma transaccion)
+    API-->>A: 200 {version 5}
+    B->>API: PUT /productos/p/ubicaciones {pvp 2.90, version 4}
+    API->>DB: UPDATE ... WHERE version = 4   (0 filas)
+    API->>DB: SELECT count(*) FROM product WHERE id = p   (existe: no es 404)
+    API-->>B: 409 CONFLICTO_DE_VERSION {code, message}   (sin la version actual)
+
+    Note over A,DB: 2. Fila que se crea - el testigo es la ultima version creada
+    A->>API: GET /recetas?productId=p&locationId=l   -> ultimaVersionId R1
+    A->>API: PUT /recetas {basadaEn R1, lineas}
+    API->>DB: pg_advisory_xact_lock(hashtext('receta'), hashtext('producto:p@l'))
+    API->>DB: ultima creada de (p, l) = R1 ?   (si: sigue)
+    API->>DB: INSERT recipe R2 + lineas
+    API-->>A: 201 {id R2}   (el basadaEn del siguiente guardado)
+```
+
+Lo que el diagrama no enseña y decide el diseño:
+
+- **Por qué la condición va dentro del `UPDATE` y no en un `if` antes.** Leer «4», comparar en
+  JavaScript y escribir deja una ventana en la que dos peticiones leen «4» y escriben las dos. Dentro
+  del `UPDATE`, la segunda espera el bloqueo de la fila y, en `READ COMMITTED`, **vuelve a evaluar su
+  `WHERE`** contra la fila ya escrita: cero filas. La 🔴 que lo prueba no usa `Promise.all` —en local no
+  se solapan— sino una fila bloqueada desde otra conexión; con un `if` previo da cinco 200 en vez de uno.
+- **Por qué la receta necesita un candado y el producto no.** La carrera de la receta no escribe sobre
+  una fila existente: **inserta** otra, así que no hay fila que bloquear. El candado consultivo
+  serializa a los dos guardados sin depender de qué filas existan, y muere con la transacción.
+- **La versión del producto es del agregado.** Sube con el empaque, con los componentes y con la
+  configuración de **cualquier** ubicación: fijar el PVP del local A deja obsoleto el formulario del
+  local B. Es la deuda aceptada de D-16.20, con su señal en ADR-023. La receta no la tiene: su testigo
+  es por destino **y ubicación**.
+- **Lo que sobrescribe por definición no lleva testigo, pero pasa por el candado.** Propagar y revertir
+  (R11 ya obligó a previsualizar) y las cargas en lote (no hay formulario que haya leído nada) escriben
+  sin comprobar; como crean versiones nuevas o suben la del combo, un formulario abierto se entera con
+  un 409 en vez de pisarlas.
+- **El 409 no trae el número.** Con él dentro, lo fácil sería reenviar con él —pisar al otro con un paso
+  más—. Lo que el cliente necesita es releer el estado entero.
+- **La carga del mes también (desde P16-C).** Las unidades vendidas y los costos fijos se guardan por
+  reemplazo, y comparten el testigo `period.version` (D-16.121): la condición va en el `WHERE` del
+  `UPDATE period` y en la misma transacción que borra y reescribe las filas. La suben solo esas dos
+  cargas —ni un movimiento, ni el cierre, ni la reapertura—, y un mes sin fila se lee con `1`, la versión
+  que tendrá al crearse.

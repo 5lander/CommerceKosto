@@ -10,7 +10,7 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { AUDIT_LOG_PORT, type AuditLogPort } from '../../../shared/application/ports/audit-log.port';
 import { RELOJ, type Reloj } from '../../../shared/application/ports/reloj.port';
-import { LeerItem } from '../../catalog/application/casos-de-uso/items';
+import { LeerItem, ListarItems } from '../../catalog/application/casos-de-uso/items';
 import {
   REPOSITORIO_DE_RECETAS,
   type RepositorioDeRecetas,
@@ -23,6 +23,10 @@ export class DependenciasDeRecetasNest {
 
   @Inject(LeerItem)
   public readonly leerItem!: LeerItem;
+
+  /** Lo necesita la carga EN LOTE, que resuelve items por nombre de una vez. */
+  @Inject(ListarItems)
+  public readonly listarItems!: ListarItems;
 
   @Inject(AUDIT_LOG_PORT)
   public readonly auditoria!: AuditLogPort;
