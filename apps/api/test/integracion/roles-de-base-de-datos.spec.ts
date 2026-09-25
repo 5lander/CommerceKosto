@@ -119,6 +119,31 @@ describe('Barrera 1 — el rol de la aplicación', () => {
     });
   });
 
+  /**
+   * INC-033. Entre `roles.sql`, que CREA los cuatro roles, y la migración de
+   * P11, que concede los privilegios de TABLA del back office, nadie le daba
+   * entrada a la base: con el `REVOKE ALL ... FROM PUBLIC` de `grants.sql`, un
+   * clúster recién inicializado dejaba a `costeo_backoffice` y a
+   * `costeo_despachador` sin poder conectarse, y todo el panel respondía 500.
+   *
+   * En desarrollo no se veía porque `npm run rol:backoffice` y
+   * `npm run rol:despachador` —que se ejecutan a mano sobre un clúster que YA
+   * existe— sí conceden CONNECT. El camino automático no.
+   */
+  it('los CUATRO roles pueden conectarse a la base de la aplicación', async () => {
+    const { rows } = await duena.query<{ rolname: string; puede: boolean }>(`
+      SELECT rolname, has_database_privilege(rolname, current_database(), 'CONNECT') AS puede
+      FROM pg_roles WHERE rolname LIKE 'costeo\\_%' ORDER BY rolname`);
+
+    expect(rows.map((fila) => fila.rolname)).toEqual([
+      'costeo_app',
+      'costeo_backoffice',
+      'costeo_despachador',
+      'costeo_migrator',
+    ]);
+    expect(rows.filter((fila) => !fila.puede)).toEqual([]);
+  });
+
   it('los DEFAULT PRIVILEGES conceden SELECT e INSERT, nunca UPDATE ni DELETE', async () => {
     // Es la decisión de docker/postgres/initdb/sql/grants.sql: si alguien olvida
     // un GRANT UPDATE, la funcionalidad falla en seguida y se ve. Con el orden

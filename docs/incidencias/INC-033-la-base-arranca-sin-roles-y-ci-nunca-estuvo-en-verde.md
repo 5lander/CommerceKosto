@@ -194,6 +194,42 @@ tarde es el patrón, y merece decirse en voz alta más que cualquiera de los tre
 veces: se borró `apps/api/dist/` en local y las dos pruebas cayeron con el mismo `500` que en CI;
 tras `npm run build`, las 22 del back office en verde.
 
+## El cuarto, y el único que también rompe un despliegue nuevo
+
+Con el workspace compilado, la suite del back office avanzó dos pruebas más y cayó en la tercera:
+**las cinco que hacen login** daban `500` en `POST /sesion`.
+
+La causa, comprobada sobre un clúster recién inicializado:
+
+```
+rolname             has_database_privilege(…, 'CONNECT')
+costeo_app          t
+costeo_backoffice   f      ← no puede ni entrar
+costeo_despachador  f      ← tampoco
+costeo_migrator     t
+```
+
+`grants.sql` empieza con `REVOKE ALL ON DATABASE … FROM PUBLIC` y después concede `CONNECT`
+**solo a `costeo_migrator` y `costeo_app`**. `roles.sql` **crea** los otros dos y la migración de
+P11 les da sus privilegios de **tabla**, pero entre una cosa y otra **nadie les daba entrada a la
+base**.
+
+**Por qué no se veía en desarrollo:** `npm run rol:backoffice` y `npm run rol:despachador` —que se
+ejecutan **a mano** sobre un clúster que ya existe— sí conceden `CONNECT`. El camino manual estaba
+completo; el automático, no.
+
+> **Este es distinto de los tres anteriores y conviene separarlo: no es solo un problema de CI.**
+> Cualquier clúster levantado **solo** con `docker compose up` —un despliegue nuevo, un entorno de
+> un compañero— tendría el back office y el despachador de correo caídos con `500`. Los entornos
+> existentes funcionan porque en su día se ejecutaron los scripts a mano, así que el fallo estaba
+> esperando al **siguiente** despliegue limpio.
+
+**Arreglo:** `grants.sql` concede `CONNECT` también a los dos, y **no sobre la base sombra** —es de
+`prisma migrate diff` y solo la toca el migrator (mínimo privilegio, CLAUDE.md §4).
+
+**Reproducido y verificado en limpio**, las dos direcciones: antes del arreglo los dos en `f`;
+después, los cuatro en `t` sobre `costeo` y los dos en `f` sobre `costeo_shadow`.
+
 ## Prevención
 
 **Convertida en check, en este mismo paquete.** Regla nueva de `audit:forbidden`:
@@ -208,6 +244,16 @@ cuando el alcance cambia.
 La regla se verificó **viéndola fallar**: se volvió a añadir la línea original al script y el check
 la señaló con su ruta y su número de línea. Un check nuevo que solo se ha visto en verde no está
 verificado — es la lección entera de INC-007.
+
+**Convertido en prueba**, en `roles-de-base-de-datos.spec.ts` — la suite de la Barrera 1, que es
+donde pertenece:
+
+| Prueba | Qué exige |
+|---|---|
+| `los CUATRO roles pueden conectarse a la base de la aplicación` | Los cuatro existen y ninguno tiene `CONNECT` en falso |
+
+Y **se verificó viéndola fallar**: se revocó `CONNECT` a `costeo_backoffice` en la base de
+desarrollo, la prueba se puso en rojo, y se restauró.
 
 ### La prevención del patrón, que es más valiosa que las tres del detalle
 

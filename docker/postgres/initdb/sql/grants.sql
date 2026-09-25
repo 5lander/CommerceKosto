@@ -15,6 +15,25 @@ BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO costeo_migrator, costeo_app', current_database());
   -- TEMPORARY no se concede: la aplicacion no crea tablas temporales, y una
   -- tabla temporal es una via para materializar datos fuera del alcance de RLS.
+
+  -- EL BACK OFFICE Y EL DESPACHADOR TAMBIEN NECESITAN CONNECT, y faltaba.
+  --
+  -- `roles.sql` los CREA y la migracion de P11 les concede sus privilegios de
+  -- tabla, pero entre las dos cosas nadie les daba entrada a la base: con el
+  -- REVOKE de arriba, un cluster recien inicializado los dejaba sin poder
+  -- conectarse. En la maquina de desarrollo no se notaba porque
+  -- `npm run rol:backoffice` y `npm run rol:despachador` -que se ejecutan a
+  -- mano sobre un cluster YA existente- si conceden CONNECT; el camino
+  -- automatico no. Ver docs/incidencias/INC-033.
+  --
+  -- NO sobre la base sombra: es de `prisma migrate diff` y solo la toca el
+  -- migrator. Minimo privilegio (CLAUDE.md 4).
+  IF current_database() NOT LIKE '%shadow%' THEN
+    EXECUTE format(
+      'GRANT CONNECT ON DATABASE %I TO costeo_backoffice, costeo_despachador',
+      current_database()
+    );
+  END IF;
 END $$;
 
 -- 2) El esquema public deja de ser tierra de nadie -----------------------------

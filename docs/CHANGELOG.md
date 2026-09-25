@@ -70,9 +70,21 @@ auditar.
 | 1 | El cluster arrancaba sin roles | El volumen, creado hace meses |
 | 2 | Un check señalaba `dist/main.js` | Un `dist/` de un build anterior |
 | 3 | La suite del back office daba 500 | El mismo `dist/` |
+| 4 | `costeo_backoffice` y `costeo_despachador` **no podían conectarse** a la base | Que alguien ejecutó `npm run rol:backoffice` a mano, hace meses |
 
 **El entorno de desarrollo acumula estado que el pipeline nunca tiene.** Verlo una vez es mala
-suerte; tres en la misma tarde es el patrón, y vale más que cualquiera de los tres arreglos.
+suerte; cuatro en la misma tarde es el patrón, y vale más que cualquiera de los cuatro arreglos.
+
+> **El cuarto no es solo de CI, y por eso es el más grave.** `grants.sql` concedía `CONNECT` solo al
+> migrator y a la aplicación; `roles.sql` creaba los otros dos y la migración de P11 les daba sus
+> privilegios de tabla, pero **nadie les daba entrada a la base**. Cualquier clúster levantado solo
+> con `docker compose up` —un despliegue nuevo, la máquina de otra persona— tendría el back office y
+> el despachador de correo caídos con `500`. Los entornos existentes funcionan porque en su día se
+> corrieron los scripts a mano: el fallo estaba esperando al **siguiente** despliegue limpio.
+>
+> Arreglado en `grants.sql`, **sin dar acceso a la base sombra** (mínimo privilegio), y convertido en
+> prueba de la Barrera 1: `los CUATRO roles pueden conectarse a la base de la aplicación`, verificada
+> viéndola fallar.
 
 [INC-033](incidencias/INC-033-la-base-arranca-sin-roles-y-ci-nunca-estuvo-en-verde.md).
 
