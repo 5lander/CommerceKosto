@@ -157,6 +157,43 @@ arreglarla se parecen mucho en el diff; solo se distinguen en esa prueba.
 > Este arreglo viajó dentro del commit de **P16-V** por un descuido de secuencia. Pertenece a esta
 > ficha, no a INC-032, y queda anotado aquí para que el registro no engañe.
 
+## El tercer defecto, y ya no es casualidad: es un patrón
+
+Con la auditoría avanzando, cayó la suite del back office — **7 pruebas**, empezando por un `500`
+donde se esperaba un `200`:
+
+```
+FAIL  backoffice-interfaz.spec.ts > los tres recursos son públicos…
+AssertionError: expected 500 to be 200
+
+FAIL  backoffice-interfaz.spec.ts > el guion servido es el COMPILADO, no un archivo vacío
+AssertionError: expected '{"code":"INTERNAL_ERROR",…' to contain 'X-Motivo'
+```
+
+`BackofficeController` sirve `dist/ui/backoffice.js`, que produce `npm run build --workspace
+@costeo/api`. El propio código **falla en alto a propósito** cuando no está compilado, y su
+comentario lo razona: «una pantalla en blanco porque nadie compiló la interfaz es peor que un
+proceso que no arranca». La guarda funciona. Lo que fallaba era que **en local nunca se dispara**,
+porque el artefacto lleva ahí desde el último build.
+
+**Tres defectos, una sola enfermedad:**
+
+| # | Qué pasaba | Qué lo tapaba en local |
+|---|---|---|
+| 1 | El cluster arrancaba sin roles | El volumen `costeo-pgdata`, creado hace meses |
+| 2 | `script-de-package-json-apunta-a-nada` señalaba `dist/main.js` | Un `dist/` de un build anterior |
+| 3 | La suite del back office daba 500 | El mismo `dist/`, con la interfaz compilada dentro |
+
+**El entorno de desarrollo acumula estado que el pipeline nunca tiene**, y cada cosa que ese estado
+cubre es un defecto que solo se ve en limpio. Verlo una vez es mala suerte; verlo tres en la misma
+tarde es el patrón, y merece decirse en voz alta más que cualquiera de los tres arreglos.
+
+**Arreglo:** CI compila el workspace antes de auditar, con el motivo escrito en el propio paso.
+
+**Reproducido primero, arreglado después** — que es lo que no se había hecho ninguna de las tres
+veces: se borró `apps/api/dist/` en local y las dos pruebas cayeron con el mismo `500` que en CI;
+tras `npm run build`, las 22 del back office en verde.
+
 ## Prevención
 
 **Convertida en check, en este mismo paquete.** Regla nueva de `audit:forbidden`:
@@ -171,6 +208,16 @@ cuando el alcance cambia.
 La regla se verificó **viéndola fallar**: se volvió a añadir la línea original al script y el check
 la señaló con su ruta y su número de línea. Un check nuevo que solo se ha visto en verde no está
 verificado — es la lección entera de INC-007.
+
+### La prevención del patrón, que es más valiosa que las tres del detalle
+
+Ningún check puede vaciar el entorno local antes de cada corrida; eso es precisamente lo que hace CI
+y por lo que existe. Lo que sí se puede escribir, y se escribe:
+
+**Cuando una prueba o un check dependa de un artefacto que no está versionado** —un volumen, un
+`dist/`, una base sembrada— **la comprobación en local no dice nada.** Hay que reproducir en limpio:
+borrar el artefacto y verla fallar. Es lo que destapó los tres, y lo que no se había hecho ninguna
+de las tres veces.
 
 ### Lo que el check NO cubre, dicho en voz alta
 

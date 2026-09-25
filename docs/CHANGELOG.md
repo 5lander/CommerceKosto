@@ -59,6 +59,21 @@ pasaba en local solo porque quedaba un `dist/` de un build viejo, y fallaba en C
 commit**. Ahora salta las salidas de compilación — y se comprobó que **sigue cazando** un script que
 apunta a un archivo inexistente fuera de `dist/`, que es la mitad que se olvida.
 
+**Y un tercero, que convierte los dos anteriores en un patrón:** la suite del back office daba `500`
+porque sirve `dist/ui/backoffice.js` y CI nunca compilaba antes de auditar. El código **falla en
+alto a propósito** cuando la interfaz no está compilada; lo que fallaba es que en local esa guarda
+nunca se dispara, porque el artefacto lleva ahí desde el último build. CI compila ahora antes de
+auditar.
+
+| # | Qué pasaba | Qué lo tapaba en local |
+|---|---|---|
+| 1 | El cluster arrancaba sin roles | El volumen, creado hace meses |
+| 2 | Un check señalaba `dist/main.js` | Un `dist/` de un build anterior |
+| 3 | La suite del back office daba 500 | El mismo `dist/` |
+
+**El entorno de desarrollo acumula estado que el pipeline nunca tiene.** Verlo una vez es mala
+suerte; tres en la misma tarde es el patrón, y vale más que cualquiera de los tres arreglos.
+
 [INC-033](incidencias/INC-033-la-base-arranca-sin-roles-y-ci-nunca-estuvo-en-verde.md).
 
 > **Lo que ningún check arregla:** CI solo protege si alguien mira su resultado. La prevención es

@@ -130,6 +130,20 @@ jobs:
       - name: Aplicar migraciones
         run: npm run migrate:deploy
 
+      # SE COMPILA ANTES DE AUDITAR, y no es un capricho de orden.
+      #
+      # La suite del back office sirve `dist/ui/backoffice.js` y falla en alto si
+      # no está compilado — a propósito: una pantalla en blanco porque nadie
+      # compiló la interfaz es peor que un proceso que no arranca.
+      #
+      # En la máquina de desarrollo ese archivo lleva ahí desde el último build,
+      # así que la suite pasa sin que nadie note la dependencia. Aquí el árbol
+      # está limpio SIEMPRE, y por eso el fallo solo se ve en este pipeline. Es
+      # la misma forma de INC-033: el residuo del entorno local tapa un defecto
+      # que solo aparece en limpio.
+      - name: Compilar el workspace
+        run: npm run build --workspace @costeo/api
+
       # Los once checks. Falla el job al primero que falle.
       - name: Auditoría completa
         run: npm run audit
