@@ -131,6 +131,32 @@ docker compose -f docker-compose.yml -f <override> -p costeo-prueba-initdb up -d
   la misma familia —un detalle del archivo que el intérprete ve y git no— pero otro eje: allí el
   contenido, aquí el permiso
 
+## El segundo defecto, que solo apareció cuando CI pudo avanzar
+
+Con la base arrancando, el job llegó por fin a `npm run audit` y murió ahí:
+
+```
+audit:forbidden  FALLO — 1 infraccion(es)
+  [script-de-package-json-apunta-a-nada]
+     apps/api/package.json  "start": node dist/main.js  ->  no existe dist/main.js
+```
+
+**Y es la misma enfermedad que la causa principal: una comprobación que responde según el residuo
+del entorno.** `apps/api/tsconfig.json` es `noEmit`, así que ningún paso de `npm run audit` genera
+`dist/`. En la máquina de desarrollo el check pasaba porque había un `dist/main.js` de un
+`npm run build` anterior; en CI, sobre el **mismo commit**, no había nada. Verde aquí, rojo allí.
+
+`"start": "node dist/main.js"` es **correcto** —es lo que ejecuta el Dockerfile tras `npm run
+build`—, así que el falso positivo estaba en la regla. Ahora salta los objetivos que viven en una
+salida de compilación (`dist/`, `.next/`, `build/`), con el motivo escrito al lado.
+
+**Y se comprobó que la regla sigue cazando lo suyo**, que es la mitad que se olvida: se añadió un
+script apuntando a un archivo inexistente **fuera** de `dist/` y lo señaló. Desactivar una regla y
+arreglarla se parecen mucho en el diff; solo se distinguen en esa prueba.
+
+> Este arreglo viajó dentro del commit de **P16-V** por un descuido de secuencia. Pertenece a esta
+> ficha, no a INC-032, y queda anotado aquí para que el registro no engañe.
+
 ## Prevención
 
 **Convertida en check, en este mismo paquete.** Regla nueva de `audit:forbidden`:

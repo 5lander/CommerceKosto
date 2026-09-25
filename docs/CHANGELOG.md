@@ -52,6 +52,13 @@ Arreglado por los dos lados —`${BASH_SOURCE[0]}` y el bit de ejecución devuel
 desarrollo. Convertido en check: `initdb-no-resuelve-su-ruta-con-dollar-cero`, que pasa
 `audit:forbidden` de 48 a 49 reglas y **se verificó viéndolo fallar**.
 
+**Y con la base arrancando apareció un segundo defecto de la misma familia**, que hasta entonces
+nadie podía ver porque el job moría antes: `script-de-package-json-apunta-a-nada` señalaba
+`"start": "node dist/main.js"` como roto. `apps/api/tsconfig.json` es `noEmit`, así que la regla
+pasaba en local solo porque quedaba un `dist/` de un build viejo, y fallaba en CI sobre el **mismo
+commit**. Ahora salta las salidas de compilación — y se comprobó que **sigue cazando** un script que
+apunta a un archivo inexistente fuera de `dist/`, que es la mitad que se olvida.
+
 [INC-033](incidencias/INC-033-la-base-arranca-sin-roles-y-ci-nunca-estuvo-en-verde.md).
 
 > **Lo que ningún check arregla:** CI solo protege si alguien mira su resultado. La prevención es
