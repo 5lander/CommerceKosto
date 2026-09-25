@@ -45,6 +45,9 @@ const DOLAR = String.fromCharCode(36);
 /** Archivos que un interprete POSIX va a ejecutar: no toleran CRLF. */
 const ARCHIVOS_POSIX = ['.githooks/*', '**/*.sh', 'docker/**/*.sql'];
 
+/** Los scripts que el entrypoint de PostgreSQL corre al inicializar el cluster. */
+const ARCHIVOS_INITDB = ['docker/**/initdb/*.sh', 'docker/**/initdb/**/*.sh'];
+
 
 /** Un `.ts` de `apps/<algo>/src/`. */
 const FUENTE_DE_APP = /^apps\/[^/]+\/src\/.+\.tsx?$/;
@@ -378,6 +381,37 @@ export const repoRules = [
         .filter((ruta) => matchesAny(ruta, ARCHIVOS_POSIX))
         .filter((ruta) => leer(ruta).includes(CR))
         .map((ruta) => ({ ruta, linea: 0, extracto: 'contiene CR (CRLF)' }));
+    },
+  },
+  {
+    id: 'initdb-no-resuelve-su-ruta-con-dollar-cero',
+    descripcion: 'Un script de `/docker-entrypoint-initdb.d` que usa `$0` fuera de un comentario',
+    porQue:
+      'El entrypoint de PostgreSQL EJECUTA los .sh que tienen bit de ejecucion y SOURCEA los que no. Al sourcear, $0 sigue siendo el del entrypoint, asi que `dirname "$0"` apunta a /usr/local/bin, los .sql no se encuentran y el cluster arranca SIN ROLES. Solo se ve con el volumen vacio: en local nunca lo esta y en CI siempre. Usar ${BASH_SOURCE[0]}. Ver docs/incidencias/INC-033.',
+    referencia: 'docs/incidencias/INC-033',
+    desde: 'P16-U',
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      const usaDollarCero = new RegExp(`\\${DOLAR}0(?![0-9])`);
+      /** @type {Hallazgo[]} */
+      const infracciones = [];
+
+      for (const ruta of archivos.filter((candidata) => matchesAny(candidata, ARCHIVOS_INITDB))) {
+        leer(ruta)
+          .split(SALTO)
+          .forEach((texto, indice) => {
+            // El comentario que EXPLICA la trampa tiene que poder nombrarla.
+            if (texto.trimStart().startsWith('#')) return;
+            if (usaDollarCero.test(texto)) {
+              infracciones.push({ ruta, linea: indice + 1, extracto: texto.trim() });
+            }
+          });
+      }
+
+      return infracciones;
     },
   },
   {

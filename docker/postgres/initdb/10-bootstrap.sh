@@ -19,7 +19,14 @@ set -euo pipefail
 : "${COSTEO_BACKOFFICE_PASSWORD:?falta COSTEO_BACKOFFICE_PASSWORD}"
 : "${COSTEO_DESPACHADOR_PASSWORD:?falta COSTEO_DESPACHADOR_PASSWORD}"
 
-directorio="$(dirname "$0")/sql"
+# OJO CON $0: NO SIRVE AQUI. El entrypoint de la imagen ejecuta los .sh que
+# tienen bit de ejecucion y SOURCEA los que no. Cuando sourcea, $0 sigue siendo
+# /usr/local/bin/docker-entrypoint.sh, asi que `dirname "$0"` da /usr/local/bin
+# y psql muere con `/usr/local/bin/sql/roles.sql: No such file or directory`.
+# La base arranca sin roles y solo se ve en un volumen VACIO, que es justo lo
+# que local nunca tiene y CI siempre. Ver docs/incidencias/INC-033.
+# ${BASH_SOURCE[0]} es la ruta de ESTE archivo en los dos casos.
+directorio="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sql"
 
 echo "[initdb] creando roles costeo_migrator, costeo_app, costeo_backoffice y costeo_despachador"
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \

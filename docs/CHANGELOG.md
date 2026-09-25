@@ -4,6 +4,35 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-U · La base arranca en limpio, y CI se pone en verde por primera vez · 2026-09-25
+
+Sale de abrir el PR de la entrega y encontrar que el job muere en el primer paso: `container
+costeo-db is unhealthy`. **Y, mirando el historial, que CI nunca había estado en verde**: dos
+corridas en toda la vida del repositorio —P9 el 7 de septiembre y esta— y las dos con el mismo
+fallo, con 51 commits acumulados entre ambas.
+
+**La causa, en dos hechos que solo juntos rompen.** El entrypoint de PostgreSQL **sourcea** los
+`.sh` sin bit de ejecución en vez de ejecutarlos, y al sourcear `$0` sigue siendo el del entrypoint:
+`dirname "$0"` daba `/usr/local/bin` y `psql` moría con `/usr/local/bin/sql/roles.sql: No such file
+or directory`. El cluster arrancaba **sin los cuatro roles** — es decir, sin el rol no-propietario
+sobre el que descansa todo el RLS.
+
+**Por qué era invisible:** `initdb` corre una sola vez, con el volumen **vacío**. En desarrollo el
+volumen lleva meses creado, así que la auditoría completa pasaba en verde sobre un defecto que
+rompe el arranque de la base. No medía el arranque: heredaba uno viejo.
+
+Arreglado por los dos lados —`${BASH_SOURCE[0]}` y el bit de ejecución devuelto en el índice— y
+**verificado con un volumen vacío de verdad**, en un compose aparte para no tocar la base de
+desarrollo. Convertido en check: `initdb-no-resuelve-su-ruta-con-dollar-cero`, que pasa
+`audit:forbidden` de 48 a 49 reglas y **se verificó viéndolo fallar**.
+
+[INC-033](incidencias/INC-033-la-base-arranca-sin-roles-y-ci-nunca-estuvo-en-verde.md).
+
+> **Lo que ningún check arregla:** CI solo protege si alguien mira su resultado. La prevención es
+> **empujar por paquete**, no por pasada.
+
+---
+
 ## Pantallas 20 y 21 · Transferencia y producción · 2026-09-22
 
 `/transferencias/nueva` mueve producto de la sucursal elegida a otra: la API escribe el par de
