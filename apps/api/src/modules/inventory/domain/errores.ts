@@ -115,6 +115,36 @@ export class ItemNoProducibleError extends ErrorDeDominio {
   }
 }
 
+/** Los diez primeros caracteres de un ISO 8601: `AAAA-MM-DD`. */
+const LARGO_DE_LA_FECHA = 10;
+
+/**
+ * Un insumo del lote no tiene precio de referencia vigente a la fecha del lote.
+ *
+ * ES LA MISMA REGLA QUE `SIN_ESTANDAR`, aplicada al otro lado. Antes de INC-032
+ * el insumo sin precio entraba valorado en `Money.CERO` y se seguía: el costo
+ * real del lote salía más barato de lo que fue —o directamente cero— y la
+ * varianza de R10 informaba de un ahorro que no existió. Y como el libro es
+ * append-only (R3), esa fila mal valorada no se edita: se queda.
+ *
+ * Rechazar es fricción **el día que ocurre**, que es cuando el precio se puede
+ * confirmar. El número malo es fricción seis meses después, cuando ya decidió
+ * precios de carta. La decisión es del usuario, 2026-09-25, opción (a).
+ */
+export class InsumoSinPrecioError extends ErrorDeDominio {
+  public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';
+
+  public constructor(nombre: string, ocurridoEn: Date) {
+    const fecha = ocurridoEn.toISOString().slice(0, LARGO_DE_LA_FECHA);
+    super(
+      `«${nombre}» no tiene precio de referencia confirmado al ${fecha}, así que no ` +
+        'se puede saber lo que costó el lote. Confirma su precio a esa fecha y vuelve ' +
+        'a registrar la producción.',
+      { nombre, fecha },
+    );
+  }
+}
+
 /** Producir sin saber con qué se produjo deja el costo real del lote en blanco. */
 export class ProduccionSinInsumosError extends ErrorDeDominio {
   public override readonly codigo: CodigoDeDominio = 'ENTRADA_INVALIDA';

@@ -178,6 +178,29 @@ function archivoInvocado(comando) {
 }
 
 
+/** Las carpetas que produce una compilacion, no el repositorio. */
+const SALIDAS_DE_COMPILACION = ['dist/', '.next/', 'build/'];
+
+/**
+ * Si el objetivo de un script es algo que solo existe DESPUES de compilar.
+ *
+ * `"start": "node dist/main.js"` es correcto —es lo que ejecuta el Dockerfile
+ * tras `npm run build`— pero `dist/` esta ignorado por git y ningun paso de
+ * `npm run audit` lo genera: `apps/api/tsconfig.json` es `noEmit`. Comprobarlo
+ * con `existsSync` hacia que la regla respondiera una cosa u otra segun
+ * hubiera quedado un build viejo en disco: verde en local, roja en CI, sobre
+ * el MISMO commit. Una regla cuyo resultado depende del residuo del entorno no
+ * mide el repositorio, que es la familia de INC-007. Ver INC-033.
+ * @param {string} objetivo
+ * @returns {boolean}
+ */
+function esSalidaDeCompilacion(objetivo) {
+  const normalizado = normalizePath(objetivo);
+  return SALIDAS_DE_COMPILACION.some(
+    (carpeta) => normalizado.startsWith(carpeta) || normalizado.includes(`/${carpeta}`),
+  );
+}
+
 /**
  * Aplana `overrides`: `{a: "1"}` y `{x: {a: "1"}}` dan los dos `[["a", "1"]]`.
  * Solo se miran versiones exactas: un rango no dice que version tiene que
@@ -330,6 +353,7 @@ export const repoRules = [
         for (const [nombre, comando] of Object.entries(manifiesto.scripts ?? {})) {
           const objetivo = archivoInvocado(comando);
           if (objetivo === null) continue;
+          if (esSalidaDeCompilacion(objetivo)) continue;
 
           const absoluto = join(raiz, base, objetivo);
           if (existsSync(absoluto)) continue;

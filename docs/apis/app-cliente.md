@@ -876,7 +876,16 @@ El alcance se exige **en las dos puntas**. Comprobar solo el origen dejaría abi
 
 | Error | Cuándo |
 |---|---|
-| `400` | el ítem es `COMPRADO` (se compra, no se produce) · es una preparación **sin stock propio** (al vender se explota su receta) · **no tiene precio de referencia confirmado** a esa fecha, y sin costo estándar no hay contra qué medir la varianza |
+| `400` | el ítem es `COMPRADO` (se compra, no se produce) · es una preparación **sin stock propio** (al vender se explota su receta) · **no tiene precio de referencia confirmado** a esa fecha, y sin costo estándar no hay contra qué medir la varianza · **alguno de los INSUMOS no tiene precio de referencia confirmado a esa fecha** (INC-032) |
+
+**Sobre el último: es la misma regla, aplicada a los dos lados.** Hasta INC-032 un insumo sin precio entraba valorado en `0,00` y el lote se registraba igual, así que la varianza de R10 informaba de un ahorro que no existió. Como el libro es append-only (R3), esa fila no se podía corregir después. El mensaje nombra **el insumo y la fecha**, porque quien produce necesita saber qué precio confirmar:
+
+```jsonc
+{ "code": "ENTRADA_INVALIDA",
+  "message": "«Camarón» no tiene precio de referencia confirmado al 2026-03-15, …" }
+```
+
+Nada se escribe: ni el movimiento, ni la cabecera del lote.
 
 ### `POST /inventario/consumos` — `inventory.produce`
 

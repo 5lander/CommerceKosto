@@ -4,6 +4,32 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-V · Un insumo sin precio detiene la producción · 2026-09-25
+
+Cierra **INC-032** con la **opción (a)**, decidida por el usuario: la que recomendaba la ficha y la
+que el propio código ya aplicaba del otro lado. Era la razón por la que la pasada se había detenido
+por la regla 1 del modo cierre.
+
+Hasta ahora, un insumo sin precio de referencia vigente **a la fecha del lote** entraba valorado en
+`0,00` y la producción se registraba igual. Sobre el caso real: el lote costaba `16,00` de estándar
+y **`0,00`** de real, así que la varianza de R10 informaba de un **ahorro de dieciséis dólares** que
+nunca existió. La cifra mala no es fea — una varianza negativa es lo que enseña una cocina
+eficiente—, y como el libro es **append-only (R3)**, esa fila no se podía corregir después.
+
+Ahora se detiene con `InsumoSinPrecioError`, que **nombra el insumo y la fecha**, y **no se escribe
+ni una fila**: ni el movimiento, ni la cabecera del lote. En un libro que no se puede editar, no
+escribir es la única corrección posible.
+
+**Se descartó por escrito la opción (b)** —aceptar y marcar «sin valorar»—: son dos estados nuevos
+que atraviesan §16, §18 y el consolidado, y mientras tanto deja pasar el número malo.
+
+Dos pruebas de integración (555 → 557) y **CC-014** con las cifras a mano. Las dos pruebas **se
+vieron fallar** contra el código viejo antes de darlas por buenas. Y `audit:complexity` paró el
+paquete con `ejecutar` en 41 líneas sobre 40: se extrajo `resolverInsumos` en vez de subir el
+umbral.
+
+---
+
 ## P16-U · La base arranca en limpio, y CI se pone en verde por primera vez · 2026-09-25
 
 Sale de abrir el PR de la entrega y encontrar que el job muere en el primer paso: `container

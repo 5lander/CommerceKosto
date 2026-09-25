@@ -68,8 +68,11 @@ uno de los dos lados. Un insumo sin precio es exactamente el mismo problema, y p
 
 ## Estado
 
-**Abierta, y reportada al usuario**, porque la corrección cambia el comportamiento del dominio y
-puede rechazar producciones que hoy se aceptan. Las dos salidas, con su contra:
+✅ **CERRADA el 2026-09-25 con la opción (a), decidida por el usuario.** La producción se detiene con
+`InsumoSinPrecioError`, que nombra el insumo y la fecha. Se construyó en **P16-V**.
+
+Se reportó al usuario en vez de arreglarse en el acto porque la corrección cambia el comportamiento
+del dominio y rechaza producciones que antes se aceptaban. Las dos salidas que se le plantearon:
 
 | | Qué hace | Lo que cuesta |
 |---|---|---|
@@ -81,6 +84,19 @@ de enterarse de que falta un precio es cuando se produce.
 
 ## Prevención
 
-Un caso conocido en `docs/pruebas/casos-conocidos.md` con un insumo sin precio a la fecha del lote, y
-una prueba unitaria sobre `producirLote` que exija que la varianza **no** pueda salir de un real en
-cero. Se escriben con la corrección, en su paquete.
+**Hecha en P16-V**, con una desviación respecto de lo que este apartado planeaba, y conviene decir
+por qué: la prueba **no** va sobre `producirLote`. La guarda no puede vivir ahí — el dominio recibe
+los insumos **ya valorados**, así que a esa altura el cero es indistinguible de un precio de cero.
+La guarda está donde se resuelven los costos, en el caso de uso, y por eso se prueba por la API:
+
+| Prueba | Qué exige |
+|---|---|
+| `un INSUMO sin precio a la fecha del lote DETIENE la producción` | `400`, con el nombre del insumo y la fecha en el mensaje |
+| `y ese lote rechazado NO deja ni una fila en el libro` | `inventory_movement` e `inventory_production` con **cero filas**: R3 impide corregir después |
+
+Y **CC-014** en `docs/pruebas/casos-conocidos.md`, con las cifras del caso real: `16,00` de estándar,
+`11,30` de real y `−4,70` de varianza, frente al `0,00` / `−16,00` que salía antes.
+
+Las dos pruebas **se vieron fallar contra el código viejo** antes de darlas por buenas: se restauró
+el `?? Money.CERO` y las dos pasaron a rojo. Una prueba que solo se ha visto en verde no prueba nada
+(INC-007).

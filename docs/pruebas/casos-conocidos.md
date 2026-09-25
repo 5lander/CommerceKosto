@@ -779,3 +779,43 @@ Lo que sí se hizo, leyendo el archivo: **verificar sus fórmulas una a una.** C
 | MC promedio | **`AVERAGE`, media simple** | ponderado | ⚠️ **el SPEC dice «no la media simple»** |
 
 El último es la única contradicción encontrada entre el SPEC y su fuente, y está anotado como duda para el usuario.
+
+---
+
+## CC-014 — Un insumo sin precio a la fecha del lote (INC-032, D 2026-09-25)
+
+**Qué prueba:** que la producción **se detiene** cuando un insumo no tiene precio de referencia
+vigente a la fecha del lote, en vez de valorarlo en `0,00` y seguir.
+**Origen:** construido, a partir del caso real que lo destapó — producir desde la pantalla 21 con
+fecha 2026-09-16, cuando los cinco insumos comprados tenían su precio vigente **desde después**.
+
+### El número que estaba mal
+
+Lote de `2 kg` de salsa a un estándar de `8,00/kg`, con camarón a `8,695652/kg` del que se usan
+`1,3 kg`:
+
+| Magnitud | Antes (mal) | Esperado |
+|---|---|---|
+| Costo estándar del lote | `16,00` | `16,00` |
+| Costo real del lote | **`0,00`** | `11,30` |
+| Varianza de R10 | **`−16,00`** | `−4,70` |
+| Lectura para el dueño | **«producir salió gratis, ahorré 16 dólares»** | «el lote salió más barato que el estándar» |
+
+**La cifra mala no es fea: es plausible.** Una varianza negativa es exactamente lo que enseña una
+cocina eficiente, así que nada en pantalla delata que faltaba un precio.
+
+### Lo que se exige ahora
+
+| Entrada | Resultado esperado |
+|---|---|
+| Un insumo **sin** precio vigente al `occurred_at` del lote | **`400 ENTRADA_INVALIDA`**, con el **nombre del insumo** y la **fecha** en el mensaje |
+| El libro (`inventory_movement`) | **cero filas** para ese lote |
+| La cabecera (`inventory_production`) | **cero filas** |
+| Un insumo **con** precio vigente | se registra, y la varianza sale de costos reales |
+
+> **Por qué cero filas y no «una fila marcada»:** el libro es append-only (R3). Lo que entra mal
+> valorado no se edita; solo se puede compensar con otro movimiento. La única oportunidad de no
+> tener una cifra falsa en el libro es **no escribirla**.
+
+**Es la misma regla que ya existía del otro lado.** Producir un ítem cuyo *estándar* falta ya se
+rechazaba (`SIN_ESTANDAR`). Lo que INC-032 destapó es que se aplicaba a un solo lado.

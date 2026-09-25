@@ -58,6 +58,8 @@ const CONFLICTO = 409;
 const CONTRASENA = 'tres cebollas moradas';
 const ENERO = '2026-01-15T00:00:00.000Z';
 const MARZO = '2026-03-15T00:00:00.000Z';
+/** Posterior a MARZO: un precio que empieza aquí NO cubre un lote de marzo (INC-032). */
+const MAYO = '2026-05-15T00:00:00.000Z';
 
 const URL_MIGRATOR = process.env['MIGRATION_DATABASE_URL'];
 if (URL_MIGRATOR === undefined) {
@@ -135,8 +137,18 @@ describe('inventario', () => {
     return (respuesta.body as { id: string }).id;
   }
 
-  /** Un ítem comprado con artículo y precio confirmado, listo para costear. */
-  async function itemConPrecio(precio: string, unidad = 'unid'): Promise<string> {
+  /**
+   * Un ítem comprado con artículo y precio confirmado, listo para costear.
+   *
+   * `vigenteDesde` existe por INC-032: un precio que empieza DESPUÉS de la
+   * fecha del lote deja al insumo sin costo a esa fecha, que es el caso real
+   * que destapó el fallo. Por defecto es ENERO, anterior a todo lo demás.
+   */
+  async function itemConPrecio(
+    precio: string,
+    unidad = 'unid',
+    vigenteDesde: string = ENERO,
+  ): Promise<string> {
     const itemId = await crearItem({ tipo: 'COMPRADO', unidad, llevaStock: null });
 
     const articulo = await request(servidor())
@@ -159,7 +171,7 @@ describe('inventario', () => {
       purchaseArticleId: (articulo.body as { id: string }).id,
       precio,
       ivaCompra: '0',
-      validFrom: ENERO,
+      validFrom: vigenteDesde,
     });
     return itemId;
   }
@@ -913,6 +925,75 @@ describe('inventario', () => {
         });
       expect(respuesta.status).toBe(ENTRADA_INVALIDA);
       expect((respuesta.body as { message: string }).message).toContain('interruptor');
+    });
+
+    // INC-032. Antes de esto el insumo sin precio entraba valorado en 0,00 y el
+    // lote se registraba: la varianza de R10 informaba de un ahorro inventado, y
+    // R3 impide corregir la fila despues. La misma regla que ya paraba al item
+    // producido sin estandar, aplicada al otro lado.
+    it('un INSUMO sin precio a la fecha del lote DETIENE la producción', async () => {
+      // El precio del camarón empieza en mayo; el lote es de marzo.
+      const camaron = await itemConPrecio('8.00', 'kg', MAYO);
+      const salsa = await preparacionConPrecio({
+        precio: '8.00',
+        unidad: 'kg',
+        llevaStock: true,
+      });
+
+      const respuesta = await request(servidor())
+        .post('/inventario/producciones')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({
+          locationId: bodegaCentral,
+          itemId: salsa,
+          cantidad: '2',
+          insumos: [{ itemId: camaron, cantidad: '1.3' }],
+          occurredAt: MARZO,
+          note: null,
+        });
+
+      expect(respuesta.status).toBe(ENTRADA_INVALIDA);
+      // Nombra el insumo y la fecha: quien produce tiene que saber QUÉ confirmar.
+      const mensaje = (respuesta.body as { message: string }).message;
+      expect(mensaje).toContain('precio de referencia confirmado');
+      expect(mensaje).toContain('2026-03-15');
+    });
+
+    it('y ese lote rechazado NO deja ni una fila en el libro', async () => {
+      const camaron = await itemConPrecio('8.00', 'kg', MAYO);
+      const salsa = await preparacionConPrecio({
+        precio: '8.00',
+        unidad: 'kg',
+        llevaStock: true,
+      });
+
+      await request(servidor())
+        .post('/inventario/producciones')
+        .set('Cookie', cookie).set('X-CSRF-Token', csrfDe(cookie))
+        .send({
+          locationId: bodegaCentral,
+          itemId: salsa,
+          cantidad: '2',
+          insumos: [{ itemId: camaron, cantidad: '1.3' }],
+          occurredAt: MARZO,
+          note: null,
+        });
+
+      // El libro es append-only (R3): lo que entra mal valorado se queda. Por eso
+      // la comprobación no es solo el 400, es que no se escribió NADA.
+      const { rows } = await duena.query<{ total: string }>(
+        `SELECT count(*)::text AS total FROM inventory_movement
+          WHERE company_id = $1 AND item_id IN ($2, $3)`,
+        [company, salsa, camaron],
+      );
+      expect(rows[0]?.total).toBe('0');
+
+      const { rows: lotes } = await duena.query<{ total: string }>(
+        `SELECT count(*)::text AS total FROM inventory_production
+          WHERE company_id = $1 AND item_id = $2`,
+        [company, salsa],
+      );
+      expect(lotes[0]?.total).toBe('0');
     });
   });
 
