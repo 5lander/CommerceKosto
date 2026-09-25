@@ -14,7 +14,9 @@
 
 **P16-V cerrado** (`docs/pasos/P16-V/`): **INC-032 cerrada con la opción (a)**, decidida por el usuario el 2026-09-25 — un insumo sin precio a la fecha del lote **detiene** la producción con `InsumoSinPrecioError`, y no se escribe ni una fila. **Con esto se levanta la parada de la regla 1 del modo cierre:** ya no hay ningún número del libro que se sepa corrompido.
 
-**Último commit:** `P16-V: un insumo sin precio detiene la produccion`
+**P16-U2…U6 cerrados**: los cinco defectos que CI fue destapando uno por corrida —cada uno tapado por el anterior— más la prueba intermitente que apareció en el primer push a `main` (`INC-034`). **`main` está mergeada y CI en verde**, con `audit:forbidden` en **50 reglas** y los cuatro presupuestos p95 de §5 **ejecutados de verdad en CI por primera vez**, los cuatro por debajo de su umbral, incluido el consolidado de diez ubicaciones.
+
+**Último commit:** `P16-U6: la prueba que fallaba una de cada pocas veces`
 **Fecha de última actualización:** 2026-09-25
 
 ## Pasada P16 → P20 — la aplicación completa · EN CURSO desde 2026-09-09

@@ -273,6 +273,10 @@ describe('vistas analiticas', () => {
       rateLimit: { windowMs: configuracion.rateLimit.windowMs, max: 100_000 },
     });
     await app.init();
+    // Escuchando ANTES de cualquier lote en paralelo: supertest abre el puerto
+    // perezosamente y varios `Test` creados en el mismo tick lo intentan a la
+    // vez, lo que produce un `read ECONNRESET` intermitente. Ver INC-034.
+    await app.listen(0);
 
     const hash = await new Argon2Hasher().hash(CLAVE);
     const { rows } = await duena.query<{ id: string }>(

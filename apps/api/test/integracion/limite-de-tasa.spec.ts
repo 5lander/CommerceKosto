@@ -143,6 +143,21 @@ describe('el limite de tasa de los endpoints sin sesion o con correo', () => {
       proxiesDeConfianza: ['127.0.0.1'],
     });
     await app.init();
+    // SE PONE A ESCUCHAR AQUI, Y NO ES DECORATIVO: ESTA SUITE DISPARA 30
+    // PETICIONES EN EL MISMO TICK.
+    //
+    // `init()` monta la aplicacion pero NO abre el puerto. Supertest lo abre
+    // perezosamente al construir cada peticion: mira `server.address()` y, si
+    // esta vacia, llama a `listen(0)`. Con los 30 objetos creados de golpe, los
+    // 30 ven la direccion vacia -`listen` es asincrono y ninguno ha terminado-
+    // y los 30 intentan abrir el puerto. El resultado es un `read ECONNRESET`
+    // en una peticion al azar, que ademas se lee como un fallo del limite de
+    // tasa cuando es del transporte.
+    //
+    // Solo aparece bajo carga -paso en el PR y fallo en el push del MISMO
+    // arbol-, que es lo que lo hace peligroso: una prueba que falla una de cada
+    // pocas veces entrena a no mirar CI, y eso es justo lo que INC-033 costo.
+    await app.listen(0);
 
     await duena.query('DELETE FROM rate_limit_hit');
     await duena.query('DELETE FROM login_attempt');

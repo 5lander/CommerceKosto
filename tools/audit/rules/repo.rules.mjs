@@ -48,6 +48,9 @@ const ARCHIVOS_POSIX = ['.githooks/*', '**/*.sh', 'docker/**/*.sql'];
 /** Los scripts que el entrypoint de PostgreSQL corre al inicializar el cluster. */
 const ARCHIVOS_INITDB = ['docker/**/initdb/*.sh', 'docker/**/initdb/**/*.sh'];
 
+/** Las suites que levantan una aplicacion HTTP de verdad. */
+const SUITES_DE_INTEGRACION = ['apps/*/test/integracion/**/*.spec.ts'];
+
 
 /** Un `.ts` de `apps/<algo>/src/`. */
 const FUENTE_DE_APP = /^apps\/[^/]+\/src\/.+\.tsx?$/;
@@ -405,6 +408,39 @@ export const repoRules = [
         .filter((ruta) => matchesAny(ruta, ARCHIVOS_POSIX))
         .filter((ruta) => leer(ruta).includes(CR))
         .map((ruta) => ({ ruta, linea: 0, extracto: 'contiene CR (CRLF)' }));
+    },
+  },
+  {
+    id: 'lote-en-paralelo-sin-servidor-escuchando',
+    descripcion: 'Una suite que dispara peticiones en PARALELO sin poner el servidor a escuchar',
+    porQue:
+      '`app.init()` monta la aplicacion pero NO abre el puerto. Supertest lo abre perezosamente al construir cada peticion: mira `server.address()` y, si esta vacia, llama a `listen(0)`. Con varios `Test` creados en el mismo tick, TODOS ven la direccion vacia y TODOS intentan abrir el puerto, y sale un `read ECONNRESET` en una peticion al azar. Solo aparece bajo carga: paso en el PR y fallo en el push del MISMO arbol. Anadir `await app.listen(0)` tras el `init()`. Ver docs/incidencias/INC-034.',
+    referencia: 'docs/incidencias/INC-034',
+    desde: 'P16-U6',
+    /**
+     * @param {{archivos: readonly string[], leer: (ruta: string) => string}} ctx
+     * @returns {Hallazgo[]}
+     */
+    revisar({ archivos, leer }) {
+      /** @type {Hallazgo[]} */
+      const infracciones = [];
+
+      for (const ruta of archivos.filter((candidata) => matchesAny(candidata, SUITES_DE_INTEGRACION))) {
+        const texto = leer(ruta);
+        // Las tres condiciones juntas son la carrera: peticiones HTTP, lanzadas
+        // a la vez, sobre un servidor que nadie puso a escuchar.
+        if (!texto.includes('Promise.all')) continue;
+        if (!texto.includes('request(')) continue;
+        if (texto.includes('.listen(')) continue;
+
+        infracciones.push({
+          ruta,
+          linea: 0,
+          extracto: 'Promise.all sobre supertest sin un listen() previo',
+        });
+      }
+
+      return infracciones;
     },
   },
   {
