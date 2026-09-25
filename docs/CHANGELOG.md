@@ -4,6 +4,35 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-U6 · La prueba que fallaba una de cada pocas veces · 2026-09-25
+
+Primera corrida de CI sobre `main` después del merge: falló `limite-de-tasa.spec.ts` con
+`read ECONNRESET` — **sin aserción fallida**, y en una prueba que había pasado cinco minutos antes
+en el PR, **con el mismo árbol**. Relanzar el mismo job sin tocar nada lo puso en verde.
+
+**La causa no es mala suerte del runner.** `app.init()` monta la aplicación pero **no abre el
+puerto**; quien lo abre es supertest, y lo hace perezosamente al construir cada petición. La prueba
+crea **treinta en el mismo tick**, así que las treinta ven la dirección vacía —`listen` es
+asíncrono— y las treinta intentan abrir el puerto. Sale un socket reseteado al azar. La carga es el
+detonante; la carrera es el motivo.
+
+Arreglado con `await app.listen(0)` tras el `init()`, **y no solo donde falló**: otras **cinco**
+suites tenían la misma exposición (`analitica`, `consolidado`, `productos`, `recetas` y
+`rendimiento-del-consolidado`). Arreglar solo la que falló habría dejado cinco esperando su turno.
+
+Convertido en check: `lote-en-paralelo-sin-servidor-escuchando` — `Promise.all` **y** `request(` **y**
+ningún `listen(` en una suite de integración. `audit:forbidden` pasa de 49 a **50 reglas**, y se
+verificó viéndola fallar.
+
+[INC-034](incidencias/INC-034-una-prueba-que-falla-una-de-cada-pocas-veces.md).
+
+> **Por qué esto no es un incordio menor.** Una prueba intermitente es el peor daño posible a un
+> pipeline, porque enseña a **relanzar en vez de leer**. Y la lección entera de INC-033, pagada hace
+> una hora, es que CI solo protege si alguien mira su resultado. Un verde conseguido relanzando es
+> la misma enfermedad con otro disfraz.
+
+---
+
 ## P16-V · Un insumo sin precio detiene la producción · 2026-09-25
 
 Cierra **INC-032** con la **opción (a)**, decidida por el usuario: la que recomendaba la ficha y la

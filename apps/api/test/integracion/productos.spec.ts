@@ -142,6 +142,10 @@ describe('el agregado producto', () => {
     const configuracion = loadConfiguration(process.env);
     app = await createApplication({ ...configuracion, rateLimit: { windowMs: configuracion.rateLimit.windowMs, max: 100_000 } });
     await app.init();
+    // Escuchando ANTES de cualquier lote en paralelo: supertest abre el puerto
+    // perezosamente y varios `Test` creados en el mismo tick lo intentan a la
+    // vez, lo que produce un `read ECONNRESET` intermitente. Ver INC-034.
+    await app.listen(0);
 
     const hash = await new Argon2Hasher().hash(CONTRASENA);
     const { rows } = await duena.query<{ id: string }>(`INSERT INTO company (name, status) VALUES ($1, 'ACTIVE') RETURNING id`, [`productos ${sufijo}`]);
