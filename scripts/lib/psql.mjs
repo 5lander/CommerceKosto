@@ -28,18 +28,53 @@ import { RAIZ, partesDeConexion } from './entorno.mjs';
 /** @type {'nativo' | 'docker' | 'ninguno' | null} */
 let viaDetectada = null;
 
+/** El major del cliente nativo que vio la deteccion, para poder explicarlo si falla. */
+let majorNativoVisto = /** @type {number | null} */ (null);
+
 /** @param {string} comando @param {readonly string[]} args */
 function hay(comando, args) {
   const resultado = correr(comando, args, { stdio: 'ignore' });
   return resultado.error === undefined && resultado.status === 0;
 }
 
+/**
+ * El major de PostgreSQL que sirve este proyecto — ADR-001, y el digest fijado
+ * en `docker-compose.yml`.
+ *
+ * NO BASTA CON QUE HAYA UN CLIENTE: TIENE QUE SER LO BASTANTE NUEVO. `pg_dump`
+ * se niega a volcar una base servida por una version MAYOR que la suya —
+ * «aborting because of server version mismatch»— y el mensaje culpa al servidor,
+ * que esta bien, en vez de al cliente, que es el viejo.
+ *
+ * El runner de GitHub trae `psql` 16 preinstalado, asi que la deteccion elegia
+ * «nativo» y `migrate:verify` moria. Tambien le pasaria a quien tenga un cliente
+ * antiguo en su maquina. Ver docs/incidencias/INC-033.
+ *
+ * Un cliente MAS NUEVO que el servidor si vale: la incompatibilidad es en un
+ * solo sentido.
+ */
+const MAJOR_DEL_SERVIDOR = 18;
+
+/** El major que declara `psql --version`, o `null` si no hay cliente o no se deja leer. */
+function majorNativo() {
+  const resultado = correr('psql', ['--version'], { encoding: 'utf8' });
+  if (resultado.error !== undefined || resultado.status !== 0) return null;
+
+  const coincidencia = /(\d+)/u.exec(String(resultado.stdout ?? ''));
+  return coincidencia?.[1] === undefined ? null : Number.parseInt(coincidencia[1], 10);
+}
+
 /** @returns {'nativo' | 'docker' | 'ninguno'} */
 export function via() {
   if (viaDetectada !== null) return viaDetectada;
-  if (hay('psql', ['--version'])) viaDetectada = 'nativo';
+
+  const major = majorNativo();
+  majorNativoVisto = major;
+
+  if (major !== null && major >= MAJOR_DEL_SERVIDOR) viaDetectada = 'nativo';
   else if (hay('docker', ['compose', 'version'])) viaDetectada = 'docker';
   else viaDetectada = 'ninguno';
+
   return viaDetectada;
 }
 
@@ -51,11 +86,13 @@ function noHayPsql() {
       'Los scripts de migracion necesitan psql para aplicar SQL de forma atomica.',
       'Se busco de dos maneras y ninguna funciono:',
       '',
-      '  1. `psql` en el PATH               -> no esta',
+      majorNativoVisto === null
+        ? '  1. `psql` en el PATH               -> no esta'
+        : `  1. \`psql\` en el PATH               -> es la ${majorNativoVisto}, y hace falta la ${MAJOR_DEL_SERVIDOR} o mas nueva`,
       '  2. `docker compose exec -T db psql` -> Docker no responde',
       '',
       'Levanta la base:  npm run db:up',
-      'Ver docs/incidencias/INC-002.',
+      'Ver docs/incidencias/INC-002 e INC-033.',
     ].join('\n'),
   );
 }

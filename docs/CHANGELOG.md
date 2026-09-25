@@ -71,9 +71,18 @@ auditar.
 | 2 | Un check señalaba `dist/main.js` | Un `dist/` de un build anterior |
 | 3 | La suite del back office daba 500 | El mismo `dist/` |
 | 4 | `costeo_backoffice` y `costeo_despachador` **no podían conectarse** a la base | Que alguien ejecutó `npm run rol:backoffice` a mano, hace meses |
+| 5 | `pg_dump` abortaba por desajuste de versión en `migrate:verify` | Que aquí **no hay `psql` nativo**, así que siempre se usa el del contenedor |
 
 **El entorno de desarrollo acumula estado que el pipeline nunca tiene.** Verlo una vez es mala
-suerte; cuatro en la misma tarde es el patrón, y vale más que cualquiera de los cuatro arreglos.
+suerte; **cinco en la misma tarde** es el patrón, y vale mucho más que cualquiera de los cinco
+arreglos. Y se descubrieron **uno por corrida, cada uno tapado por el anterior**: dieciocho días sin
+empujar no ocultaron un fallo, ocultaron **cinco, apilados**.
+
+El quinto: el runner trae `psql` **16** preinstalado y el servidor es **18**, así que la detección
+de `psql.mjs` elegía el cliente nativo y `pg_dump` abortaba — culpando al servidor, que estaba bien.
+Ahora la detección **comprueba la versión**, no solo la presencia; un cliente más nuevo sí vale,
+porque la incompatibilidad es en un solo sentido. Le habría pasado igual a cualquiera con un cliente
+de hace un par de años instalado.
 
 > **El cuarto no es solo de CI, y por eso es el más grave.** `grants.sql` concedía `CONNECT` solo al
 > migrator y a la aplicación; `roles.sql` creaba los otros dos y la migración de P11 les daba sus

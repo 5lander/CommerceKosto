@@ -176,17 +176,24 @@ comentario lo razona: «una pantalla en blanco porque nadie compiló la interfaz
 proceso que no arranca». La guarda funciona. Lo que fallaba era que **en local nunca se dispara**,
 porque el artefacto lleva ahí desde el último build.
 
-**Tres defectos, una sola enfermedad:**
+**Cinco defectos, una sola enfermedad** (los dos ultimos se descubrieron despues, al avanzar CI, y se anaden aqui para que la tabla sea la lista completa):
 
 | # | Qué pasaba | Qué lo tapaba en local |
 |---|---|---|
 | 1 | El cluster arrancaba sin roles | El volumen `costeo-pgdata`, creado hace meses |
 | 2 | `script-de-package-json-apunta-a-nada` señalaba `dist/main.js` | Un `dist/` de un build anterior |
 | 3 | La suite del back office daba 500 | El mismo `dist/`, con la interfaz compilada dentro |
+| 4 | El back office **no podia ni conectarse** a la base | Que alguien ejecuto `npm run rol:backoffice` a mano, hace meses |
+| 5 | `pg_dump` abortaba por desajuste de version | Que aqui NO hay `psql` nativo, asi que siempre se usa el del contenedor |
 
 **El entorno de desarrollo acumula estado que el pipeline nunca tiene**, y cada cosa que ese estado
-cubre es un defecto que solo se ve en limpio. Verlo una vez es mala suerte; verlo tres en la misma
-tarde es el patrón, y merece decirse en voz alta más que cualquiera de los tres arreglos.
+cubre es un defecto que solo se ve en limpio. Verlo una vez es mala suerte; verlo **cinco veces en
+la misma tarde** es el patrón, y merece decirse en voz alta mucho más que cualquiera de los cinco
+arreglos.
+
+**Y la forma en que se descubrieron lo dice todo:** uno por corrida, cada uno tapado por el
+anterior. CI no podía encontrar el segundo hasta que el primero estuvo arreglado. Dieciocho días sin
+empujar no ocultaron un fallo: ocultaron **cinco**, apilados.
 
 **Arreglo:** CI compila el workspace antes de auditar, con el motivo escrito en el propio paso.
 
@@ -229,6 +236,35 @@ completo; el automático, no.
 
 **Reproducido y verificado en limpio**, las dos direcciones: antes del arreglo los dos en `f`;
 después, los cuatro en `t` sobre `costeo` y los dos en `f` sobre `costeo_shadow`.
+
+## El quinto: un cliente de PostgreSQL más viejo que su servidor
+
+Con la auditoría entera en verde por primera vez, el job murió un paso después, en
+`migrate:verify`:
+
+```
+Error: pg_dump fallo sobre "costeo_verif_escalera": pg_dump: error: aborting because of
+server version mismatch
+pg_dump: detail: server version: 18.6 (Debian…); pg_dump version: 16.15 (Ubuntu…)
+```
+
+`scripts/lib/psql.mjs` elige entre dos vías: el cliente **nativo** si `psql --version` responde, y
+si no `docker compose exec -T db psql`. **El runner de GitHub trae `psql` 16 preinstalado**, así que
+la detección decía «nativo» y usaba un `pg_dump` **dos versiones por detrás del servidor**.
+`pg_dump` se niega a volcar una base servida por una versión mayor que la suya, y su mensaje **culpa
+al servidor** —que está perfectamente— en vez de al cliente, que es el viejo.
+
+**Por qué en local no pasa:** en esta máquina **no hay `psql` nativo**, así que la detección siempre
+elegía Docker, y el `pg_dump` del contenedor es por definición el del servidor. La vía que falla es
+justo la que aquí nunca se toma.
+
+**No es solo un problema del runner:** le ocurriría igual a cualquiera que tenga un cliente de
+PostgreSQL antiguo instalado en su máquina, que es lo normal si se instaló hace un par de años.
+
+**Arreglo:** la detección **comprueba la versión**, no solo la presencia. Si el cliente nativo es
+anterior al major del servidor, se usa Docker. Un cliente **más nuevo** sí vale: la
+incompatibilidad es en un solo sentido. Y si no hay salida, el mensaje ahora distingue «no hay
+`psql`» de «hay, pero es la 16 y hace falta la 18».
 
 ## Prevención
 
