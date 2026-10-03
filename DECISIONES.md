@@ -36,9 +36,9 @@ Sigue destrancado y sigue siendo trabajo de negocio, no de código: el registro 
 |---|---|---|
 | Node.js | **24.20.0** (Active LTS) | **2028-04-30** |
 | PostgreSQL | **18.6** (GA 2025-09-25) | **2030-11-14** |
-| NestJS | **11.2.3** | Sin política publicada |
+| NestJS | **11.2.7** (era 11.2.3; ADR-031) | Sin política publicada |
 | Prisma | **7.10.0**, versión **exacta** | Sin política publicada |
-| Next.js (P12) | **16.3.3** | **~2027-10-21** |
+| Next.js (P12) | **16.3.8** (era 16.3.3; ADR-031) | **~2027-10-21** |
 
 **Lo que la propuesta de partida tenía mal:**
 

@@ -4,6 +4,26 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## Dependencias y ADR-031 · Next 16.3.8, NestJS 11.2.7, fuera el override de multer · 2026-10-03
+
+Dos commits, previos a P16-K y fuera de él. El primero (`bbc427e`) solo lleva `package.json` y los
+lock, por orden del usuario: **next 16.3.8** por una ejecución remota de código crítica en `next/og`
+(no se usa en `apps/`); **`@nestjs/*` 11.2.7** porque `platform-express` 11.2.3 fijaba `multer` 2.2.0,
+con avisos graves; el **override de `multer` retirado** porque se cumplió su condición (INC-021); y
+`npm audit fix` sin `--force`. El segundo es la documentación: **ADR-031** actualiza ADR-001 en la
+versión de parche, y CLAUDE.md §1 y DECISIONES D2 lo reflejan.
+
+**Lo que destapó por el camino:**
+
+- **`audit:deps` se puso rojo sin que el repositorio cambiara.** Entre el 1 y el 3 oct apareció
+  GHSA-vfj7-8cjw-p6xm en `braces`, sin versión parcheada. Llega solo por herramientas de auditoría
+  (`npm ls braces --omit=dev` da `(empty)` en las tres raíces), así que entra en `ACEPTADAS` con su
+  motivo y revisión el 2026-11-02. **El pre-commit no corre `audit:deps`; CI sí.**
+- **INC-015 llega a 3 recurrencias**: la del 1 oct, que no se había contado, y la del 3 oct, con el
+  6432 muerto y la suite corriendo igual. **Prevención aprobada**, como paquete propio antes de P16-K.
+- Un `Memory allocation error` de Argon2 en un login de prueba, que no se repitió. Queda como
+  observación en `docs/pasos/P16-K/CONSTRUCCION.md`, sin tocar los parámetros.
+
 ## P16-U6 · La prueba que fallaba una de cada pocas veces · 2026-09-25
 
 Primera corrida de CI sobre `main` después del merge: falló `limite-de-tasa.spec.ts` con

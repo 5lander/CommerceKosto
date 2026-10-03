@@ -56,6 +56,22 @@ const ACEPTADAS = [
     motivo: 'Es el CLI. Arrastra los avisos de `mysql2` y `@prisma/config`; no esta en la imagen de produccion.',
     revisar: 'con la evaluacion de Prisma 8 (ADR-002)',
   },
+  {
+    paquete: 'braces',
+    motivo:
+      'GHSA-vfj7-8cjw-p6xm: agotamiento de pila con patrones muy anidados. Afecta a TODAS las versiones ' +
+      '(`*`): no hay version parcheada (verificado el 2026-10-03). El impacto es solo denegacion de ' +
+      'servicio, y los patrones que recibe son globs escritos por nosotros en las herramientas de ' +
+      'auditoria, nunca entrada de un usuario. Solo de desarrollo: `npm ls braces --omit=dev` da ' +
+      '`(empty)` en la raiz, en apps/api y en apps/web (2026-10-03); con dev llega por ' +
+      'knip -> fast-glob -> micromatch -> braces',
+    revisar: '2026-11-02',
+  },
+  ...['micromatch', 'fast-glob', 'globby', 'knip', '@jscpd/finder', 'jscpd', 'secretlint'].map((paquete) => ({
+    paquete,
+    motivo: 'Herramienta de auditoria, solo de desarrollo. Arrastra el aviso de `braces` (ver su entrada).',
+    revisar: '2026-11-02',
+  })),
 ];
 
 const GRAVES = new Set(['high', 'critical']);

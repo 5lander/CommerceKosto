@@ -6,7 +6,7 @@
 | **Paquete** | P8 (verificación posterior) |
 | **Área** | despliegue · base de datos |
 | **Tiempo perdido** | ~35 min |
-| **Recurrencias** | **1** |
+| **Recurrencias** | **3** — la tercera dispara la prevención (CLAUDE.md §8): **aprobada el 2026-10-03**, paquete propio |
 
 > **El síntoma acusa al componente equivocado.** El error nombra a pgbouncer, pero la cadena de conexión dice `localhost:5432`, que es PostgreSQL directo, y `docker port` confirma que pgbouncer está en 6432. Es fácil pasar media hora revisando `prisma.config.ts`, el `.env` y los roles antes de sospechar del reenvío de puertos.
 
@@ -112,7 +112,38 @@ contenedor con la publicación nueva. Datos intactos; PgBouncer sigue en 6432 po
 por la red interna. Si otra máquina necesita lo mismo, son esas seis líneas del `.env` y ese comando
 (D-16.145).
 
+## Recurrencia 2 (commit de dependencias, 2026-10-01) — la primera variante, en el puerto nuevo
+
+**La variante original, ahora en el 5442.** `npm run audit` falló en `audit:sec-headers`, aunque sus
+18 pruebas de cabeceras pasaban: la que caía era `backoffice-interfaz`, con **`bouncer config error`**
+conectando a la cadena directa. Lo que contestaba en el 5442 era **PgBouncer**, que rechaza al rol de
+migraciones, y su log enseñaba el rechazo a la hora de la prueba. Tres conexiones de solo lectura desde
+el host fallaron igual. Los contenedores llevaban 14 horas arriba y estaban `healthy`.
+
+**Que el puerto sea otro no la evitó**: D-16.145 movió la base al 5442 por convivencia con otros
+proyectos, no por esto, y el reenvío se desincroniza igual en cualquier puerto. **Esta variante no la
+caza `npm run doctor`**, como la propia ficha ya decía: PgBouncer también contesta el `SSLRequest`.
+Se arregló con `npm run db:down && npm run db:up`. No se contó en su momento, y se registra aquí.
+
+## Recurrencia 3 (commit de dependencias, 2026-10-03) — el pooler muerto, en silencio
+
+**Otra variante: el 6432 rechazaba la conexión.** El pre-commit falló con 5 pruebas en rojo en
+`pgbouncer.spec.ts`, todas `connect ECONNREFUSED 127.0.0.1:6432` y `::1:6432`. El contenedor
+`costeo-pgbouncer` estaba `healthy` y tenía `127.0.0.1:6432` en su configuración, pero `docker port`
+no devolvía nada y una conexión TCP al 6432 era rechazada. El 5442 sí abría. La pila llevaba 42 horas
+arriba.
+
+**Por qué la suite corrió igual:** la sonda de `tools/audit/tests.mjs` solo mira el puerto de
+`DATABASE_URL`. Con el 6432 muerto, la integración arrancó entera y falló con un error de conexión que
+no nombra la causa. `npm run db:down && npm run db:up` lo arregló, y el commit pasó a la siguiente.
+
 ## Prevención
+
+> **Tercera recurrencia: prevención aprobada por el usuario el 2026-10-03**, como paquete propio,
+> después del commit de documentación de ADR-031 y **antes de P16-K**: la sonda se saca de
+> `tools/doctor.mjs` a un módulo compartido, las tres cadenas se comprueban antes de las pruebas de
+> integración, el mensaje nombra INC-015 y el comando, y se verifica viéndola fallar con el 6432
+> cerrado. Lo de abajo es lo que había hasta ahora.
 
 **Desde la recurrencia 1, `npm run doctor` lo comprueba** —«Puertos de la base (INC-015)»—, que es lo
 que esta ficha dejó dicho que pasaría a la segunda vez. Para cada `host:puerto` distinto de

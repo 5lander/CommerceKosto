@@ -16,8 +16,8 @@
 
 **P16-U2…U6 cerrados**: los cinco defectos que CI fue destapando uno por corrida —cada uno tapado por el anterior— más la prueba intermitente que apareció en el primer push a `main` (`INC-034`). **`main` está mergeada y CI en verde**, con `audit:forbidden` en **50 reglas** y los cuatro presupuestos p95 de §5 **ejecutados de verdad en CI por primera vez**, los cuatro por debajo de su umbral, incluido el consolidado de diez ubicaciones.
 
-**Último commit:** `P16-U6: la prueba que fallaba una de cada pocas veces`
-**Fecha de última actualización:** 2026-09-25
+**Último commit:** `Documentación de versiones: ADR-031` (y antes `bbc427e`, las dependencias)
+**Fecha de última actualización:** 2026-10-03
 
 ## Pasada P16 → P20 — la aplicación completa · EN CURSO desde 2026-09-09
 
@@ -736,7 +736,7 @@ Lo implementado:
 | `audit:duplication` | ✅ | **0 clones** |
 | `audit:migrations` | ✅ | M1–M11 · **18 migraciones** (P16-C: `p16c_version_del_periodo`; P16-B: `p16b_versiones_y_ajustes`; P16-A2: `p16a2_csrf`; P16-A1: dos) |
 | `audit:secrets` | ✅ | Sobre `**/*`, incluidos los `.woff2` |
-| `audit:deps` | ✅ | 4 vulnerabilidades aceptadas y documentadas. **`multer` va forzado a 2.3.0 por `overrides`** (P16 commit 0, INC-021): se retira cuando `@nestjs/platform-express` fije `multer ≥ 2.3.0` |
+| `audit:deps` | ✅ | **12 vulnerabilidades aceptadas y documentadas**: las 4 del CLI de Prisma y, desde el 2026-10-03, la cadena de `braces` (8 paquetes, solo herramientas de auditoría; GHSA-vfj7-8cjw-p6xm sin versión parcheada; `npm ls braces --omit=dev` vacío; **revisión el 2026-11-02**). **El override de `multer` se retiró el 2026-10-03** (ADR-031): `@nestjs/platform-express` 11.2.7 trae `multer` 2.4.0. **El pre-commit no corre este check; CI sí** |
 | `audit:sec-headers` | ✅ | 19 pruebas |
 | `audit:tests` | ✅ | **891 unitarias** (sin base) + **541 de integración: 536 en verde y 5 saltadas con motivo** (INC-016), 33 archivos. P16-C; P16-B: 889 + 515; eran 870 + 460 en P16-A2 y 823 + 395 en P16-A1 |
 

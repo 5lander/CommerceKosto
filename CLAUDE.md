@@ -77,10 +77,10 @@ Reglas del ciclo, no negociables:
 |---|---|---|---|
 | Runtime | **Node.js 24.20.0** (Active LTS) | **2028-04-30** | Node 26 promueve a LTS el **2026-10-28**; salto planificado, no ahora |
 | Lenguaje | TypeScript en modo estricto máximo | — | `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` |
-| API | **NestJS 11.2.3** (`engines: node >= 20`) | Sin política LTS publicada | Su CI prueba Node 20.19 / 22.14 / 24.1. **NestJS 12 será ESM** |
+| API | **NestJS 11.2.7** (`engines: node >= 20`) | Sin política LTS publicada | Su CI prueba Node 20.19 / 22.14 / 24.1. **NestJS 12 será ESM**. Era 11.2.3; parche por `multer` en ADR-031 |
 | Base de datos | **PostgreSQL 18.6** (GA 2025-09-25) | **2030-11-14** | Trae `uuidv7()` nativo. La 19 sigue en beta |
 | ORM | **Prisma 7.10.0**, versión **exacta** | Sin política LTS publicada | ⚠️ El `latest` de npm apunta a un RC · ver D12 y ADR-002 |
-| Frontend | **Next.js 16.3.3** (App Router) | **~2027-10-21** | Sí tiene política de soporte: 2 años desde el major |
+| Frontend | **Next.js 16.3.8** (App Router) | **~2027-10-21** | Sí tiene política de soporte: 2 años desde el major. Era 16.3.3; parche de seguridad en ADR-031 |
 | Contenedores | Docker Compose con **imágenes fijadas por digest, nunca `latest`** | — | |
 | Cola de trabajos | BullMQ + Redis | — | Solo desde el paquete que la necesite |
 
