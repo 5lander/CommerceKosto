@@ -4,6 +4,33 @@ Una entrada por commit de paquete. Formato: `## P{n} — {nombre}` con fecha, qu
 
 ---
 
+## P16-W · Prevención de INC-015: ninguna prueba entra en la base sin preguntar antes · 2026-10-03
+
+INC-015 llegó a **tres recurrencias** con tres síntomas distintos, todos con los contenedores
+`healthy`: el puerto directo que corta sin contestar, el puerto directo contestado por PgBouncer, y el
+6432 muerto mientras la integración corría entera para morir en `ECONNREFUSED`. A la tercera, la
+prevención (CLAUDE.md §8):
+
+- **`scripts/lib/sonda-de-la-base.mjs`**, puro —no carga el `.env`, porque `audit:tests` no debe—:
+  `SSLRequest` a las tres cadenas y, en el puerto directo, un `StartupMessage` **sin contraseña y en
+  conexión nueva**. PostgreSQL contesta `R`; con el puerto directo en el pooler sale el
+  `«bouncer config error»` de la recurrencia 2. **La regla se midió contra la pila antes de escribirla.**
+- **`audit:base`**, check nuevo, en `npm run audit` **antes de `audit:sec-headers`**, que es la primera
+  etapa que entra en la base y donde salió la recurrencia 2.
+- **`audit:tests` falla en `rota` también con `--solo-unitarias`**: con Docker arriba y un puerto mal,
+  un PARCIAL en verde sería INC-007. La pila apagada conserva su PARCIAL.
+- `doctor` usa el mismo módulo.
+
+Los cuatro escenarios se provocaron de verdad y se vieron fallar (6432 parado, pila abajo, directo al
+pooler) y pasar (todo arriba). **CLAUDE.md §3 gana una regla**: ningún commit lleva `Co-Authored-By`,
+nunca.
+
+**Y una incidencia nueva, INC-035.** La primera auditoría del paquete salió en rojo: 24 pruebas con
+`Memory allocation error` de Argon2, en suites que P16-W no toca. No era la concurrencia (la
+integración corre en un proceso y esas suites calculan un hash cada una). Era la memoria comprometida
+del equipo: **2.618 MB libres de 64.893**. Liberada a 13.196 MB, la misma auditoría pasó sin cambiar
+una línea. Sin prevención automática hasta una tercera ocurrencia.
+
 ## Dependencias y ADR-031 · Next 16.3.8, NestJS 11.2.7, fuera el override de multer · 2026-10-03
 
 Dos commits, previos a P16-K y fuera de él. El primero (`bbc427e`) solo lleva `package.json` y los

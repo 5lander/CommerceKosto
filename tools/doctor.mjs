@@ -8,10 +8,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { connect } from 'node:net';
 
-import { partesDeConexion } from '../scripts/lib/entorno.mjs';
+// Por su EFECTO: carga el `.env` en `process.env`, que es de donde este informe
+// lee las cadenas de conexión. No se usa ningún export suyo.
+import '../scripts/lib/entorno.mjs';
 import { correr } from '../scripts/lib/proceso.mjs';
+import { diagnosticarLaBase } from '../scripts/lib/sonda-de-la-base.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -154,81 +156,18 @@ await revisar('Version de Prisma fijada (ADR-001)', () => {
   return { estado: 'ok', detalle: `prisma ${todas.prisma ?? '(no declarado)'}` };
 });
 
-/**
- * El `SSLRequest` del protocolo de PostgreSQL: ocho bytes a los que cualquier
- * servidor que hable el protocolo —PostgreSQL o PgBouncer— contesta con UNA
- * letra, `S` o `N`, antes de pedir credenciales. No autentica ni abre sesión.
- */
-const SSL_REQUEST = Buffer.from([0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f]);
-const RESPUESTAS_DEL_PROTOCOLO = new Set(['S', 'N']);
-const ESPERA_MS = 3000;
-
-/**
- * @param {string} host
- * @param {string} puerto
- * @returns {Promise<'responde' | 'rechazada' | 'cortada' | 'muda'>}
- */
-function sondear(host, puerto) {
-  return new Promise((resolver) => {
-    const socket = connect({ host, port: Number(puerto) });
-    /** @param {'responde' | 'rechazada' | 'cortada' | 'muda'} resultado */
-    const terminar = (resultado) => {
-      socket.destroy();
-      resolver(resultado);
-    };
-    socket.setTimeout(ESPERA_MS, () => terminar('muda'));
-    socket.once('connect', () => socket.write(SSL_REQUEST));
-    socket.once('data', (/** @type {Buffer} */ datos) =>
-      terminar(RESPUESTAS_DEL_PROTOCOLO.has(datos.subarray(0, 1).toString('latin1')) ? 'responde' : 'cortada'),
-    );
-    socket.once('end', () => terminar('cortada'));
-    socket.once('error', (/** @type {NodeJS.ErrnoException} */ error) =>
-      terminar(error.code === 'ECONNREFUSED' ? 'rechazada' : 'cortada'),
-    );
-  });
-}
-
-/** Los `host:puerto` distintos de las cadenas de conexión del `.env`. */
-function destinosDeLaBase() {
-  const destinos = new Map();
-  for (const nombre of ['DATABASE_URL', 'MIGRATION_DATABASE_URL', 'PGBOUNCER_DATABASE_URL']) {
-    const cadena = process.env[nombre];
-    if (cadena === undefined || cadena === '') continue;
-    const { host, puerto } = partesDeConexion(cadena);
-    destinos.set(`${host}:${puerto}`, { host, puerto });
-  }
-  return destinos;
-}
-
 /*
- * INC-015, a la segunda vez. EL CONTENEDOR SANO NO DICE NADA del puerto del host:
- * tras reiniciar Docker Desktop, el reenvío de 5432 quedó aceptando conexiones y
- * cerrándolas sin contestar —`Connection terminated unexpectedly`— con la base
- * `healthy` y `docker port` en orden. Se pregunta al puerto, que es por donde
- * entran las pruebas.
- *
- * LO QUE NO CUBRE: la primera variante de INC-015, el 5432 que llega a PgBouncer.
- * PgBouncer también habla el protocolo y contesta la misma letra; distinguirlos
- * exige autenticarse, y eso ya es una prueba de integración, no un informe.
+ * INC-015. EL CONTENEDOR SANO NO DICE NADA del puerto del host: se pregunta al
+ * puerto, que es por donde entran las pruebas. La sonda vive en
+ * `scripts/lib/sonda-de-la-base.mjs` y es la MISMA que corre `audit:base` antes de
+ * cualquier prueba contra la base: un diagnóstico que dijera una cosa aquí y otra
+ * allí sería peor que ninguno. Un intento: esto es un informe, no una puerta.
  */
 await revisar('Puertos de la base (INC-015)', async () => {
-  const destinos = destinosDeLaBase();
-  if (destinos.size === 0) return { estado: 'aviso', detalle: 'sin cadenas de conexion en .env' };
-
-  const malos = [];
-  for (const [clave, { host, puerto }] of destinos) {
-    const resultado = await sondear(host, puerto);
-    if (resultado !== 'responde') malos.push(`${clave} ${resultado}`);
-  }
-  if (malos.length === 0) return { estado: 'ok', detalle: `${[...destinos.keys()].join(', ')} contestan` };
-
-  return {
-    estado: 'fallo',
-    detalle: malos.join(' · '),
-    arreglo: malos.every((malo) => malo.endsWith('rechazada'))
-      ? 'La pila no esta levantada: docker compose up -d db pgbouncer'
-      : 'Reenvio de Docker desincronizado: docker compose down && docker compose up -d db pgbouncer',
-  };
+  const { estado, detalle, arreglo } = await diagnosticarLaBase((nombre) => process.env[nombre], { intentos: 1 });
+  if (estado === 'ok') return { estado: 'ok', detalle };
+  if (estado === 'sin-cadenas') return { estado: 'aviso', detalle: 'sin cadenas de conexion en .env' };
+  return { estado: 'fallo', detalle, arreglo };
 });
 
 const ICONO = { ok: '  OK  ', aviso: ' AVISO', fallo: ' FALLO' };

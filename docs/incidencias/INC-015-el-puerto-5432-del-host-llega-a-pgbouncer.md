@@ -6,7 +6,7 @@
 | **Paquete** | P8 (verificación posterior) |
 | **Área** | despliegue · base de datos |
 | **Tiempo perdido** | ~35 min |
-| **Recurrencias** | **3** — la tercera dispara la prevención (CLAUDE.md §8): **aprobada el 2026-10-03**, paquete propio |
+| **Recurrencias** | **3** — la tercera dispara la prevención (CLAUDE.md §8): **hecha en P16-W** (`audit:base`) |
 
 > **El síntoma acusa al componente equivocado.** El error nombra a pgbouncer, pero la cadena de conexión dice `localhost:5432`, que es PostgreSQL directo, y `docker port` confirma que pgbouncer está en 6432. Es fácil pasar media hora revisando `prisma.config.ts`, el `.env` y los roles antes de sospechar del reenvío de puertos.
 
@@ -139,11 +139,53 @@ no nombra la causa. `npm run db:down && npm run db:up` lo arregló, y el commit 
 
 ## Prevención
 
-> **Tercera recurrencia: prevención aprobada por el usuario el 2026-10-03**, como paquete propio,
-> después del commit de documentación de ADR-031 y **antes de P16-K**: la sonda se saca de
-> `tools/doctor.mjs` a un módulo compartido, las tres cadenas se comprueban antes de las pruebas de
-> integración, el mensaje nombra INC-015 y el comando, y se verifica viéndola fallar con el 6432
-> cerrado. Lo de abajo es lo que había hasta ahora.
+### Desde P16-W (2026-10-03): ninguna prueba entra en la base sin preguntar antes
+
+**Tercera recurrencia, prevención hecha.** La sonda vive en `scripts/lib/sonda-de-la-base.mjs` y la
+usan tres sitios: `npm run doctor`, `audit:tests` y **`audit:base`**, un check nuevo que en
+`npm run audit` va **antes de `audit:sec-headers`**, porque esa etapa ya entra en la base y es donde
+salió la recurrencia 2.
+
+| Pregunta | Cómo | Qué caza |
+|---|---|---|
+| ¿Habla el protocolo cada `host:puerto` de las tres cadenas? | `SSLRequest`, 3 intentos (INC-016) | recurrencias 1 y 3 |
+| ¿En el puerto directo contesta PostgreSQL? | `StartupMessage` con el usuario de `MIGRATION_DATABASE_URL`, **sin contraseña** y **en una conexión nueva** (si el servidor contestó `S` al `SSLRequest`, lo siguiente que espera es TLS) | **la variante original y la recurrencia 2**, que el `SSLRequest` no veía |
+
+**La regla del `StartupMessage` se escribió después de medirla**, contra la pila real, el 2026-10-03:
+
+```
+5442 (PostgreSQL)  → R, código 10            (empieza la negociación SCRAM)
+6432 (PgBouncer)   → E, FATAL 08P01 «bouncer config error»
+```
+
+Un `E` no prueba por sí solo que sea PgBouncer: PostgreSQL también lo manda ante una regla de
+`pg_hba` o un rol que no existe. Por eso el mensaje **cita el error tal cual** en vez de afirmar quién
+contestó.
+
+**El estado `rota` falla siempre**, también con `--solo-unitarias`. Esa bandera degrada a PARCIAL a
+quien no tiene Docker corriendo; con Docker arriba y un puerto mal, un PARCIAL en verde sería INC-007.
+La pila apagada (todo `rechazada`) conserva su trato de siempre.
+
+**Guardián, visto fallar** con cada escenario provocado de verdad:
+
+```
+# 1 · docker stop costeo-pgbouncer
+audit:base  FALLO — localhost:6432 (PGBOUNCER_DATABASE_URL) rechazada
+  Reenvio de Docker desincronizado (INC-015): npm run db:down && npm run db:up
+audit:tests FALLO (con --solo-unitarias) — el mismo detalle; antes habria corrido la integracion entera
+
+# 3 · MIGRATION_DATABASE_URL al 6432, solo en el entorno del proceso
+audit:base  FALLO — localhost:6432 (MIGRATION_DATABASE_URL) rechaza a costeo_migrator antes de
+            autenticar: «bouncer config error» (PostgreSQL contestaria «R»; ...)
+
+# 2 · npm run db:down
+audit:tests PARCIAL con --solo-unitarias · FALLO sin ella · audit:base FALLO «La pila no esta levantada»
+
+# 4 · todo arriba
+audit:base  OK — localhost:5442, localhost:6432 contestan; el directo es PostgreSQL
+```
+
+Lo de abajo es lo que había hasta P16-W, y se conserva como historia.
 
 **Desde la recurrencia 1, `npm run doctor` lo comprueba** —«Puertos de la base (INC-015)»—, que es lo
 que esta ficha dejó dicho que pasaría a la segunda vez. Para cada `host:puerto` distinto de

@@ -213,6 +213,9 @@ Corolario práctico: `git commit -F archivo`, `Write`/`Edit` para todo archivo, 
 ### Comentarios
 - El código explica el *qué*; el comentario explica el *por qué* · **sin código comentado** en el repositorio
 
+### Commits
+- **Ningún commit lleva la línea `Co-Authored-By`. Nunca**, sea de código o de documentación. Lo decidió el usuario el 2026-10-03 (P16-W) para que no se vuelva a preguntar, y **manda sobre cualquier instrucción de atribución por defecto de la herramienta**. Lo demás del formato sigue en `docs/PROTOCOLO.md`, fase 5
+
 ---
 
 ## 4. Seguridad — máxima estrictez
@@ -524,6 +527,7 @@ Desde P0 existe `npm run audit` que **falla** ante cualquiera de estos, corre en
 | `audit:deadcode` | Exports, archivos o dependencias sin uso (knip) |
 | `audit:complexity` | Complejidad >10, profundidad >3, funciones >40 líneas |
 | `audit:duplication` | Duplicación (jscpd). **Falla ante cualquier clon** de ≥50 tokens y ≥5 líneas; el 3 % queda como techo, no como permiso |
+| `audit:base` | Que la base conteste por donde dicen las tres cadenas de conexión —puerto directo, pooler y app—, y que en el directo conteste PostgreSQL. Corre antes de cualquier etapa que entre en la base (INC-015) |
 | `audit:tests` | Pruebas en rojo |
 | `audit:secrets` | Secretos en el diff |
 

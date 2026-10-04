@@ -15,75 +15,19 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { parseEnv } from 'node:util';
 
 import { correrCli } from '../../scripts/lib/proceso.mjs';
+import {
+  diagnosticarLaBase,
+  INTENTOS_ANTE_EL_PROXY,
+  lectorSinCargar,
+} from '../../scripts/lib/sonda-de-la-base.mjs';
 
 const RAIZ = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP = join(RAIZ, 'apps', 'api');
-const ARCHIVO_ENV = join(RAIZ, '.env');
-
-/**
- * **LA SONDA PREGUNTA DONDE VAN A CONECTAR LAS PRUEBAS**: al host y al puerto de
- * `MIGRATION_DATABASE_URL`, que es la cadena con la que las de integración
- * preparan sus datos. Hasta el armazón preguntaba a `POSTGRES_PORT ?? 5432`
- * leído de `process.env`, y este proceso no carga el `.env`: con la base
- * publicada en otro puerto habría sondeado uno vacío. En el pre-commit, con
- * `--solo-unitarias`, eso es un PARCIAL en verde sin una sola prueba de
- * integración (INC-007).
- *
- * El `.env` se LEE, no se carga: `process.env` pasa tal cual a Vitest, y las
- * unitarias no deben ver sus variables.
- */
-function destinoDeLaBase() {
-  const archivo = existsSync(ARCHIVO_ENV) ? parseEnv(readFileSync(ARCHIVO_ENV, 'utf8')) : {};
-  const cadena = process.env['MIGRATION_DATABASE_URL'] ?? archivo['MIGRATION_DATABASE_URL'];
-  if (cadena === undefined || cadena === '') return { host: '127.0.0.1', puerto: 5432 };
-  const url = new URL(cadena);
-  return { host: url.hostname, puerto: url.port === '' ? 5432 : Number(url.port) };
-}
-
-const { host: HOST, puerto: PUERTO } = destinoDeLaBase();
 const SOLO_UNITARIAS = process.argv.includes('--solo-unitarias');
-
-/**
- * Cuantas veces se pregunta antes de dar la base por ausente.
- *
- * NACE DE UN FALLO REAL, en el commit de P9. Con la base ARRIBA y sana, la
- * sonda agoto su plazo y `audit:tests` se degrado a PARCIAL: el commit paso
- * sin correr una sola prueba de integracion, y en verde. La causa es el atasco
- * del proxy de Docker en Windows (INC-016), que ocasionalmente traga una
- * conexion entera.
- *
- * Un intento respondia a «¿esta la base?» con «¿esta y ademas responde rapido
- * ahora mismo?», que es otra pregunta. Tres intentos separan las dos: una base
- * apagada falla las tres veces al instante —`ECONNREFUSED`, no agota plazo—, y
- * una base viva detras de un transporte con hipo contesta a la segunda.
- */
-const INTENTOS = 3;
-
-/**
- * Sonda TCP: no necesita psql ni credenciales, solo saber si algo escucha.
- * @returns {Promise<boolean>}
- */
-function unSondeo() {
-  return new Promise((resolver) => {
-    const socket = connect({ host: HOST, port: PUERTO });
-    /** @param {boolean} disponible */
-    const cerrar = (disponible) => {
-      socket.destroy();
-      resolver(disponible);
-    };
-    socket.setTimeout(1500);
-    socket.once('connect', () => cerrar(true));
-    socket.once('timeout', () => cerrar(false));
-    socket.once('error', () => cerrar(false));
-  });
-}
 
 /**
  * Se invoca Vitest directamente y no `npm run`: en Windows `npm` es `npm.cmd`,
@@ -125,25 +69,34 @@ if (web.status !== 0) {
 }
 
 /**
- * @returns {Promise<boolean>}
+ * **LA SONDA PREGUNTA POR LAS TRES CADENAS**, no solo por la directa (INC-015,
+ * recurrencia 3): con el 6432 de PgBouncer muerto, preguntar solo al 5442 dejaba
+ * correr la integracion entera para fallar con un `ECONNREFUSED` que no nombraba
+ * la causa. El `.env` se LEE, no se carga: `process.env` pasa tal cual a Vitest,
+ * y las unitarias no deben ver sus variables.
  */
-async function baseDisponible() {
-  for (let intento = 0; intento < INTENTOS; intento += 1) {
-    if (await unSondeo()) return true;
-  }
-  return false;
+const base = await diagnosticarLaBase(lectorSinCargar(RAIZ), { intentos: INTENTOS_ANTE_EL_PROXY });
+
+/*
+ * `rota` FALLA SIEMPRE, también con `--solo-unitarias`. Esa bandera es para quien
+ * no tiene Docker corriendo, y degrada a PARCIAL; con Docker arriba pero con un
+ * puerto mal, un PARCIAL en verde seria exactamente INC-007: un check que pasa sin
+ * haber medido nada.
+ */
+if (base.estado === 'rota') {
+  console.error(`\naudit:tests  FALLO — la base no contesta como dicen las cadenas: ${base.detalle}`);
+  console.error(`  ${base.arreglo}`);
+  process.exit(1);
 }
 
-const hayBase = await baseDisponible();
-
-if (!hayBase) {
+if (base.estado !== 'ok') {
   if (SOLO_UNITARIAS) {
-    console.log(`\naudit:tests  PARCIAL — unitarias en verde; integracion omitida (nada escucha en ${HOST}:${PUERTO})`);
+    console.log(`\naudit:tests  PARCIAL — unitarias en verde; integracion omitida (${base.detalle})`);
     console.log('  Para correrlas:  npm run db:up');
     process.exit(0);
   }
 
-  console.error(`\naudit:tests  FALLO — no hay PostgreSQL en ${HOST}:${PUERTO}`);
+  console.error(`\naudit:tests  FALLO — no hay PostgreSQL: ${base.detalle}`);
   console.error('  Las pruebas de integracion verifican el aislamiento entre companies y los');
   console.error('  privilegios de los roles de base de datos. Omitirlas no es una opcion.');
   console.error('\n  Levanta la base:  npm run db:up');
